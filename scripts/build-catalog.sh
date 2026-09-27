@@ -181,6 +181,17 @@ while IFS=$'\t' read -r name kind version prefixes source target requires option
             ;;
         *";priv="*) echo "$name: priv= must be shizuku" >&2; failed=1; continue ;;
     esac
+    # A retired row must also be hidden=1: old engines already on phones
+    # (which do not know retired= at all) must never offer it, only ever see
+    # it as a part they leave alone.
+    case ";$options;" in
+        *";retired=1;"*)
+            case ";$options;" in
+                *";hidden=1;"*) ;;
+                *) echo "$name: retired=1 needs hidden=1 too" >&2; failed=1; continue ;;
+            esac
+            ;;
+    esac
     case "$category" in
         -|"Note taking"|Tools|AI) ;;
         *) echo "$name: unknown category $category" >&2; failed=1; continue ;;

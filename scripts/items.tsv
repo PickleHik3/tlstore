@@ -19,6 +19,12 @@
 # requires  comma list installed first; a bundle's members live here
 # options   ;-separated key=value: env=K=V (comma repeats), tz=1, mode=755,
 #           build=<packages needed only while installing>, hidden=1,
+#           retired=1 (this item is gone; update removes it from a phone that
+#           already has it, and install refuses it. Always paired with
+#           hidden=1 — an older engine, which knows nothing of retired=1,
+#           must still see only a hidden part it never offers or installs.
+#           The row keeps its real kind/source/target/digest so update can
+#           still tell a shipped file from an edited one),
 #           musl-libs=<hidden binary items copied in beside the musl loader,
 #           for an npm-musl binary that needs more of musl than its libc>,
 #           host=launcher|termux (comma list; absent means both),
@@ -99,3 +105,4 @@ launcher-skill-notify	file	4e3b32ff	*	launcher:resources/agent-skills/termux-lau
 launcher-skill-progress	file	4e3b32ff	*	launcher:resources/agent-skills/termux-launcher/scripts/progress.sh@4e3b32ffeeb451e1f401bd51321b313c56403f23	~/.claude/skills/termux-launcher/scripts/progress.sh	-	hidden=1;mode=755	Lets an agent show a progress ring.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
 launcher-skill-show	file	4e3b32ff	*	launcher:resources/agent-skills/termux-launcher/scripts/show.sh@4e3b32ffeeb451e1f401bd51321b313c56403f23	~/.claude/skills/termux-launcher/scripts/show.sh	-	hidden=1;mode=755	Lets an agent show a picture in its own pane.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
 launcher-skill	bundle	-	*	-	-	launcher-skill-md,launcher-skill-launcherctl,launcher-skill-terminal,launcher-skill-display,launcher-skill-tty,launcher-skill-notify,launcher-skill-progress,launcher-skill-show	hidden=1	What agents need to use Termux Launcher's panes, signals and display.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
+claude-panes-skill	file-once	aea80bf2	*	launcher:resources/agent-skills/termux-launcher-panes/SKILL.md@aea80bf215a6a44951154d9b600abddca56c8c49	~/.claude/skills/termux-launcher-panes/SKILL.md	-	hidden=1;retired=1	Teaches Claude Code the launcher's pane commands.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-

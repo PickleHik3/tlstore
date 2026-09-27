@@ -104,10 +104,15 @@ sha512_b64() {
 R5_NONE="-	-	0	-	-	-	-	-	-	-	-	-	-	-	-	0	-	-	-	-"
 R5_HELLO="Tools	-	0	a greeting from the item list	Shows a greeting	Keeps it plain text	Does nothing else	hello	one note|another note	Test Author	MIT	~1 KB	file://example/hello.jpg	deadbeef	-	1	Portability|Star history	-	-	-"
 
-# write_catalog <file> <serial> <version> <fakebin payload> — the version is the
-# one hello and fakebin carry, so a newer catalog moves a config item on too.
+# write_catalog <file> <serial> <version> <fakebin payload> [retire] — the
+# version is the one hello and fakebin carry, so a newer catalog moves a
+# config item on too. [retire]=1 marks "retiree" and "retiree-pkg" (a file and
+# a pkg item, otherwise ordinary) hidden=1;retired=1 — everything else about
+# their rows (kind, source, target, digest) stays exactly as it was.
 write_catalog() {
-    local out="$1" serial="$2" fbver="$3" fbfile="$4"
+    local out="$1" serial="$2" fbver="$3" fbfile="$4" retire="${5:-0}"
+    local retire_opts="-"
+    [ "$retire" = 1 ] && retire_opts="hidden=1;retired=1"
     {
         printf '# tlstore catalog\tserial=%s\n' "$serial"
         printf '# name\tkind\tversion\tprefixes\tsource\tdigest\ttarget\trequires\toptions\tsummary\tcategory\tupstream\tsetup\tstandfirst\tdoes1\tdoes2\tdoes3\ttry\tnotes\tauthor\tlicence\tsize\tpicture\tpicture-digest\tdemo\tfeatured\treadme-skip\treadme\treadme-digest\tdemo-digest\n'
@@ -134,6 +139,14 @@ write_catalog() {
         printf 'launcheronly\tbinary\t1\t*\tfile://%s/twin.bin\t%s\t~/.local/bin/launcheronly\t-\thost=launcher\tOnly where the launcher runs it.\t%s\n' "$FX" "$(sha "$FX/twin.bin")" "$R5_NONE"
         printf 'termuxonly\tbinary\t1\t*\tfile://%s/other.bin\t%s\t~/.local/bin/termuxonly\t-\thost=termux\tOnly in the plain app.\t%s\n' "$FX" "$(sha "$FX/other.bin")" "$R5_NONE"
         printf 'recentonly\tbinary\t1\t*\tfile://%s/twin.bin\t%s\t~/.local/bin/recentonly\t-\tmin-launcher=0.3.0\tWants a recent app.\t%s\n' "$FX" "$(sha "$FX/twin.bin")" "$R5_NONE"
+        # A file and a pkg item, retired (hidden=1;retired=1) when this
+        # function is asked to, everything else about their rows unchanged —
+        # the retirement tests install one, retire it, and check what update
+        # does with it.
+        printf 'retiree\tfile\t1\t*\tfile://%s/retiree.conf\t%s\t~/.config/retiree/nested/retiree.conf\t-\t%s\tA fixture item, retired when the catalog says so.\t%s\n' \
+            "$FX" "$(sha "$FX/retiree.conf")" "$retire_opts" "$R5_NONE"
+        printf 'retiree-pkg\tpkg\t-\t*\tdemo-retiree\t-\t-\t-\t%s\tA fixture package, retired when the catalog says so.\t%s\n' \
+            "$retire_opts" "$R5_NONE"
         # A real, fetchable picture and demo, so `tlstore picture` has
         # something genuine to verify and cache. Digests are computed here,
         # not folded into R5_HELLO/R5_NONE, since they depend on the fixture
@@ -198,6 +211,7 @@ build_fixture() {
 
     printf 'greeting from the catalog\n' > "$FX/hello.conf"
     printf 'your own settings go here\n' > "$FX/mine.conf"
+    printf 'retire me if I am never edited\n' > "$FX/retiree.conf"
     printf '#!/bin/sh\necho fakebin 1\n' > "$FX/fakebin-1"
     printf '#!/bin/sh\necho fakebin 2\n' > "$FX/fakebin-2"
     printf '#!/bin/sh\necho fakebin 3\n' > "$FX/fakebin-3"
@@ -1577,6 +1591,84 @@ y
     expect_out "the remove steps stream too" $'^step\thello\t30\tfetched$'
     expect_out "and finish ready" $'^step\thello\t100\tready$'
     expect_out "the done line for a remove" $'^done\thello\tok\tremoved$'
+
+    # --- retiring an item: update takes it away once its row carries
+    # retired=1, or leaves an edited copy alone; install refuses it outright ---
+    forget_state
+    rm -rf "$TESTHOME/.config/retiree"
+    write_catalog "$TESTHOME/.local/share/tlstore/catalog.tsv" 2026090700 9 fakebin-3
+    tl install retiree retiree-pkg -y
+    expect_status "installing the fixture that will be retired" 0
+    expect_file "the file item landed" "$TESTHOME/.config/retiree/nested/retiree.conf"
+    if grep -q demo-retiree "$ROOT/pkg.log"; then pass; else fail "the pkg fixture's package was asked for"; fi
+
+    # (c) install refuses a retired item
+    write_catalog "$TESTHOME/.local/share/tlstore/catalog.tsv" 2026090701 9 fakebin-3 1
+    tl install retiree -y
+    expect_status "install of a retired item fails" 1
+    expect_out "and says why" "retiree was retired"
+
+    # (e) the check/tsv path counts a retired, installed item as an update
+    tl update --check --tsv --offline
+    expect_status "update --check --tsv --offline" 0
+    expect_out "the file item is flagged retired" $'^retiree\t1\t1\tretired$'
+    expect_out "so is the pkg item" $'^retiree-pkg\t-\t-\tretired$'
+
+    # (a) update removes an unmodified retired file item, and the now-empty
+    # directories it leaves behind; the pkg item just stops being tracked
+    tl update -y --offline
+    expect_status "update retires the fixture" 0
+    expect_out "the file item was retired and removed" "retiree was retired and removed"
+    expect_out "the pkg item just stops being tracked" \
+        "retiree-pkg is no longer tracked; the package itself stays installed"
+    expect_no_file "the shipped file is gone" "$TESTHOME/.config/retiree/nested/retiree.conf"
+    expect_no_file "its now-empty directory went with it" "$TESTHOME/.config/retiree/nested"
+    expect_no_file "and its now-empty parent too, up to \$HOME" "$TESTHOME/.config/retiree"
+    if grep -q "$(printf '^retiree\t')" "$TESTHOME/.local/share/tlstore/installed.tsv" 2>/dev/null; then
+        fail "retiree's state should have been forgotten"
+    else
+        pass
+    fi
+    if grep -q "$(printf '^retiree-pkg\t')" "$TESTHOME/.local/share/tlstore/installed.tsv" 2>/dev/null; then
+        fail "retiree-pkg's state should have been forgotten"
+    else
+        pass
+    fi
+
+    # (b) an edited copy is kept, never overwritten or deleted — only the
+    # state entry is forgotten
+    write_catalog "$TESTHOME/.local/share/tlstore/catalog.tsv" 2026090702 9 fakebin-3
+    tl install retiree -y
+    expect_status "reinstalling the fixture" 0
+    printf 'edited by the person, never touched again\n' > "$TESTHOME/.config/retiree/nested/retiree.conf"
+    write_catalog "$TESTHOME/.local/share/tlstore/catalog.tsv" 2026090703 9 fakebin-3 1
+    tl update -y --offline
+    expect_status "update still succeeds on an edited copy" 0
+    expect_out "it says the edited file was kept" "kept your retiree.conf — retiree was retired"
+    expect_content "and the file itself is never touched" \
+        "$TESTHOME/.config/retiree/nested/retiree.conf" "edited by the person, never touched again"
+    if grep -q "$(printf '^retiree\t')" "$TESTHOME/.local/share/tlstore/installed.tsv" 2>/dev/null; then
+        fail "retiree's state should still have been forgotten"
+    else
+        pass
+    fi
+
+    # (d) update --progress emits the same step/done lines a remove does, with
+    # a done message of "retired"
+    rm -rf "$TESTHOME/.config/retiree"
+    write_catalog "$TESTHOME/.local/share/tlstore/catalog.tsv" 2026090704 9 fakebin-3
+    tl install retiree -y
+    write_catalog "$TESTHOME/.local/share/tlstore/catalog.tsv" 2026090705 9 fakebin-3 1
+    tl_stdout update --progress --offline
+    expect_status "a --progress retirement" 0
+    expect_out "the remove-shaped steps stream" $'^step\tretiree\t30\tfetched$'
+    expect_out "and finish ready" $'^step\tretiree\t100\tready$'
+    expect_out "the done line says retired" $'^done\tretiree\tok\tretired$'
+
+    # Back to the catalog the rest of the suite expects.
+    write_catalog "$TESTHOME/.local/share/tlstore/catalog.tsv" 2026090603 2 fakebin-2
+    forget_state
+    rm -rf "$TESTHOME/.config/retiree"
 
     # --- cancel: SIGTERM to the whole process group (what tlstore-ui sends
     # when the person backs out of a running --progress job) stops cleanly ---
