@@ -289,7 +289,9 @@ that has never heard of `retired=1` reads the row as an ordinary hidden part and
 so retiring never breaks a phone running an old tlstore. `install` refuses a retired item outright,
 and nothing may pull it in through `requires`.
 
-On a phone running the new engine, the next `tlstore update` deletes an installed
+On a phone running the new engine, the next `tlstore update` — or, without anyone asking, the next
+`tlstore snapshot` the store UI runs when it opens (a retired row is hidden, so the UI never offers
+it as an update) — deletes an installed
 file/file-once/binary item only when the file on disk still matches the digest that shipped it —
 an edited copy is left in place and the item is simply forgotten, never overwritten or deleted.
 Anything else (a `pkg`, `bundle` or `fisher` item) just stops being tracked, the way `remove`

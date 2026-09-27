@@ -1383,6 +1383,17 @@ retire_item() {
     return 0
 }
 
+# retire_pending — retire every installed item whose row now carries
+# retired=1, saying what happened on stderr so a --tsv caller's stdout stays
+# clean. snapshot runs it: the launcher writes a new catalog into $PREFIX on
+# every start without any refresh, and a retired row is hidden, so the store
+# UI can neither show it as an update nor ask for one.
+retire_pending() {
+    for rp_n in $(installed_names); do
+        ! retired_item "$rp_n" || retire_item "$rp_n" >&2
+    done
+}
+
 # ---------------------------------------------------------------------------
 # Refresh
 # ---------------------------------------------------------------------------
@@ -2312,9 +2323,10 @@ snapshot_rows() {
             }
             if (name in inst) {
                 retired = (opts ~ /(^|;)retired=1(;|$)/)
+                # A retired row is hidden: the UI could count it but never
+                # show or run it. snapshot has already retired it anyway.
                 if (retired) {
-                    upd = 1
-                    note = "retired"
+                    upd = 0
                 } else {
                     upd = 0
                     note = (kind == "file") ? "config-asks" : ""
@@ -2381,6 +2393,7 @@ cmd_snapshot() {
     done
     [ "$sn_tsv" = 1 ] || { err "snapshot is for programs: use --tsv"; return 2; }
     need_catalog
+    retire_pending
     sn_key=$(snapshot_key)
     sn_file="$CACHE_DIR/snapshot.tsv"
     sn_head="# tlstore snapshot${TAB}key=$sn_key"
@@ -2847,11 +2860,8 @@ update_items() {
         for cu_nv in $cu_resolved; do
             printf '%s\t%s\t%s\t%s\n' "${cu_nv%%=*}" "$(installed_version "${cu_nv%%=*}")" "${cu_nv#*=}" latest
         done
-        for cu_n in $cu_retired; do
-            cu_row=$(row "$cu_n")
-            printf '%s\t%s\t%s\t%s\n' "$cu_n" \
-                "$(installed_version "$cu_n")" "$(field "$cu_row" 3)" retired
-        done
+        # No line for a retired item: it is hidden, so the store UI could
+        # count it but never show or run it (snapshot retires it instead).
         return 0
     fi
 

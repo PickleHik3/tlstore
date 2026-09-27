@@ -1608,11 +1608,14 @@ y
     expect_status "install of a retired item fails" 1
     expect_out "and says why" "retiree was retired"
 
-    # (e) the check/tsv path counts a retired, installed item as an update
+    # (e) the machine output never offers a retired item as an update (it is
+    # hidden: the UI could count it but not show it); the human check says it
     tl update --check --tsv --offline
     expect_status "update --check --tsv --offline" 0
-    expect_out "the file item is flagged retired" $'^retiree\t1\t1\tretired$'
-    expect_out "so is the pkg item" $'^retiree-pkg\t-\t-\tretired$'
+    expect_no_out "no tsv line for the retired file item" $'^retiree\t'
+    expect_no_out "nor for the retired pkg item" $'^retiree-pkg\t'
+    tl update --check --offline
+    expect_out "the human check says it will go" "retiree was retired; update will remove it"
 
     # (a) update removes an unmodified retired file item, and the now-empty
     # directories it leaves behind; the pkg item just stops being tracked
@@ -1664,6 +1667,18 @@ y
     expect_out "the remove-shaped steps stream" $'^step\tretiree\t30\tfetched$'
     expect_out "and finish ready" $'^step\tretiree\t100\tready$'
     expect_out "the done line says retired" $'^done\tretiree\tok\tretired$'
+
+    # (g) snapshot (what the store UI runs on every start, when the launcher
+    # has just written a new catalog) retires it quietly: no update line, a
+    # clean stdout, the file gone
+    write_catalog "$TESTHOME/.local/share/tlstore/catalog.tsv" 2026090706 9 fakebin-3
+    tl install retiree -y
+    write_catalog "$TESTHOME/.local/share/tlstore/catalog.tsv" 2026090707 9 fakebin-3 1
+    tl_stdout snapshot --tsv
+    expect_status "snapshot with a retired item installed" 0
+    expect_no_out "no update line for it" $'^update\tretiree\t'
+    expect_no_out "and no narration on stdout" "was retired"
+    expect_no_file "snapshot retired the file" "$TESTHOME/.config/retiree/nested/retiree.conf"
 
     # Back to the catalog the rest of the suite expects.
     write_catalog "$TESTHOME/.local/share/tlstore/catalog.tsv" 2026090603 2 fakebin-2
