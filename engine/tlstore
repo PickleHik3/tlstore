@@ -364,6 +364,16 @@ hidden_item() {
     [ "$(opt "$(field "$hi_row" 9)" hidden)" = 1 ]
 }
 
+# A retired item's row stays in the catalog (hidden, so old engines never
+# offer it) purely so update can find it on a phone that already installed
+# it and take it away. A new engine never installs one, directly or through
+# another item's requires.
+retired_item() {
+    rti_row=$(row "$1")
+    [ -n "$rti_row" ] || return 1
+    [ "$(opt "$(field "$rti_row" 9)" retired)" = 1 ]
+}
+
 # row <name> — the row for one item, empty when it has none here.
 row() {
     rows | awk -F "$TAB" -v want="$1" '$1 == want { print; exit }'
@@ -829,6 +839,10 @@ plan_for() {
         pf_next=""
         for pf_n in $pf_todo; do
             in_list "$pf_closure" "$pf_n" && continue
+            if retired_item "$pf_n"; then
+                err "$pf_n was retired"
+                return 1
+            fi
             pf_closure="$pf_closure $pf_n"
             pf_deps=$(item_deps "$pf_n")
             pf_next="$pf_next $pf_deps"
@@ -1314,6 +1328,57 @@ remove_item() {
         pkg) say "$ri_name is no longer tracked; the package itself stays installed" ;;
         bundle) say "removed $ri_name" ;;
         *) say "removed $ri_name" ;;
+    esac
+    return 0
+}
+
+# retire_item <name> — an installed item whose row now carries retired=1,
+# found by update. A file/file-once/binary is deleted only when the file on
+# disk still matches what tlstore shipped (its sha256 equals the row's
+# digest); an edited file is left alone and the state entry is simply
+# forgotten, so a retirement never overwrites or deletes the person's own
+# changes. Every other kind falls back to remove_item's own behaviour (a pkg
+# just stops being tracked; the package itself stays installed).
+retire_item() {
+    rt_name="$1"
+    rt_row=$(row "$rt_name")
+    rt_kind=$(field "$rt_row" 2)
+    case "$rt_kind" in
+        binary|file|file-once)
+            rt_digest=$(field "$rt_row" 6)
+            rt_state=$(state_row "$rt_name" 2>/dev/null || true)
+            rt_files=$(field "$rt_state" 5)
+            rt_main="${rt_files%% *}"
+            if [ -n "$rt_main" ] && [ -f "$rt_main" ] \
+                && [ -n "$rt_digest" ] && [ "$rt_digest" != "-" ] \
+                && [ "$(file_digest "$rt_main")" = "$rt_digest" ]; then
+                for rt_f in $rt_files; do
+                    if [ -d "$rt_f" ]; then
+                        rm -rf "$rt_f"
+                    else
+                        rm -f "$rt_f"
+                    fi
+                    rt_dir=$(dirname "$rt_f")
+                    while [ -n "$rt_dir" ] && [ "$rt_dir" != "$HOME" ] && [ "$rt_dir" != "/" ]; do
+                        rmdir "$rt_dir" 2>/dev/null || break
+                        rt_dir=$(dirname "$rt_dir")
+                    done
+                done
+                state_forget "$rt_name"
+                say "$rt_name was retired and removed"
+            elif [ -n "$rt_main" ]; then
+                state_forget "$rt_name"
+                say "kept your $(basename "$rt_main") — $rt_name was retired"
+            else
+                # Nothing was ever recorded here (a file-once you already had
+                # was kept at install time, with no file of ours to check).
+                state_forget "$rt_name"
+                say "$rt_name was retired and removed"
+            fi
+            ;;
+        *)
+            remove_item "$rt_name"
+            ;;
     esac
     return 0
 }
@@ -2246,11 +2311,18 @@ snapshot_rows() {
                 }
             }
             if (name in inst) {
-                upd = 0
-                if (kind == "pkg" || kind == "bundle" || kind == "fisher") upd = 0
-                else if (kind == "npm-musl") upd = (ver != "latest" && ver != have)
-                else upd = (ver != have)
-                if (upd) print "update", name, have, ver, (kind == "file") ? "config-asks" : ""
+                retired = (opts ~ /(^|;)retired=1(;|$)/)
+                if (retired) {
+                    upd = 1
+                    note = "retired"
+                } else {
+                    upd = 0
+                    note = (kind == "file") ? "config-asks" : ""
+                    if (kind == "pkg" || kind == "bundle" || kind == "fisher") upd = 0
+                    else if (kind == "npm-musl") upd = (ver != "latest" && ver != have)
+                    else upd = (ver != have)
+                }
+                if (upd) print "update", name, have, ver, note
             }
             if (!hidden) {
                 if (dash($23) != "-") asset(name, "picture", $23, dash($24))
@@ -2599,11 +2671,14 @@ cmd_install() {
 
     for ci_n in $ci_names; do
         [ -n "$(row "$ci_n")" ] || { err "$ci_n is not in the list"; return 1; }
+        ! retired_item "$ci_n" || { err "$ci_n was retired"; return 1; }
         ! hidden_item "$ci_n" || { err "$ci_n is part of another item"; return 1; }
     done
 
     # shellcheck disable=SC2086  # a list of names, split on purpose
-    ci_plan=$(plan_for $ci_names)
+    if ! ci_plan=$(plan_for $ci_names); then
+        return 1
+    fi
     say "Installing: $(words_list "$ci_plan")"
     ask_yn "Go ahead?" || { say "Nothing was installed."; return 0; }
     add_build_tools "$ci_plan" 0 || return 1
@@ -2717,6 +2792,7 @@ update_items() {
     cu_pkgs=""
     cu_latest=""
     cu_resolved=""
+    cu_retired=""
     for cu_n in $cu_names; do
         if ! is_installed "$cu_n"; then
             [ "$cu_tsv" = 1 ] || say "$cu_n is not installed"
@@ -2725,6 +2801,10 @@ update_items() {
         cu_row=$(row "$cu_n")
         if [ -z "$cu_row" ]; then
             [ "$cu_tsv" = 1 ] || say "$cu_n is no longer in the list"
+            continue
+        fi
+        if [ "$(opt "$(field "$cu_row" 9)" retired)" = 1 ]; then
+            cu_retired="$cu_retired $cu_n"
             continue
         fi
         cu_kind=$(field "$cu_row" 2)
@@ -2767,6 +2847,11 @@ update_items() {
         for cu_nv in $cu_resolved; do
             printf '%s\t%s\t%s\t%s\n' "${cu_nv%%=*}" "$(installed_version "${cu_nv%%=*}")" "${cu_nv#*=}" latest
         done
+        for cu_n in $cu_retired; do
+            cu_row=$(row "$cu_n")
+            printf '%s\t%s\t%s\t%s\n' "$cu_n" \
+                "$(installed_version "$cu_n")" "$(field "$cu_row" 3)" retired
+        done
         return 0
     fi
 
@@ -2774,7 +2859,10 @@ update_items() {
         for cu_nv in $cu_resolved; do
             say "${cu_nv%%=*} ${cu_nv#*=} is available; you have $(installed_version "${cu_nv%%=*}")"
         done
-        if [ -z "$(printf '%s%s' "$cu_out" "$cu_resolved" | tr -d ' ')" ]; then
+        for cu_n in $cu_retired; do
+            say "$cu_n was retired; update will remove it"
+        done
+        if [ -z "$(printf '%s%s%s' "$cu_out" "$cu_resolved" "$cu_retired" | tr -d ' ')" ]; then
             say "Everything is up to date."
         else
             for cu_n in $cu_out; do
@@ -2801,31 +2889,50 @@ update_items() {
         upgrade_pkg $cu_pkgs || FAILED=1
     fi
     cu_out="$cu_out $cu_latest"
-    if [ -z "$(printf '%s' "$cu_out" | tr -d ' ')" ]; then
+    if [ -z "$(printf '%s%s' "$cu_out" "$cu_retired" | tr -d ' ')" ]; then
         [ -n "$(printf '%s' "$cu_pkgs" | tr -d ' ')" ] || say "Everything is up to date."
     else
-        add_build_tools "$cu_out" 1 || return 1
-        for cu_n in $cu_out; do
+        if [ -n "$(printf '%s' "$cu_out" | tr -d ' ')" ]; then
+            add_build_tools "$cu_out" 1 || return 1
+            for cu_n in $cu_out; do
+                if [ "$PROGRESS" = 1 ]; then
+                    CANCEL_ITEM="$cu_n"
+                    PROGRESS_AT=0
+                    progress_stage 10 fetched
+                    PROGRESS_NOTE=""
+                    if install_item "$cu_n" 1; then
+                        progress_stage 60 "signature checked"
+                        progress_stage 90 "putting files in place"
+                        progress_stage 100 ready
+                        progress_done "$cu_n" ok "${PROGRESS_NOTE:-updated}"
+                    else
+                        FAILED=1
+                        progress_done "$cu_n" failed "could not update $cu_n"
+                    fi
+                    CANCEL_ITEM=""
+                else
+                    install_item "$cu_n" 1 || FAILED=1
+                fi
+            done
+            drop_build_tools
+        fi
+        for cu_n in $cu_retired; do
             if [ "$PROGRESS" = 1 ]; then
                 CANCEL_ITEM="$cu_n"
-                PROGRESS_AT=0
-                progress_stage 10 fetched
-                PROGRESS_NOTE=""
-                if install_item "$cu_n" 1; then
-                    progress_stage 60 "signature checked"
-                    progress_stage 90 "putting files in place"
-                    progress_stage 100 ready
-                    progress_done "$cu_n" ok "${PROGRESS_NOTE:-updated}"
+                progress_line step "$cu_n" 30 fetched
+                if retire_item "$cu_n"; then
+                    progress_line step "$cu_n" 75 "putting files in place"
+                    progress_line step "$cu_n" 100 ready
+                    progress_done "$cu_n" ok retired
                 else
                     FAILED=1
-                    progress_done "$cu_n" failed "could not update $cu_n"
+                    progress_done "$cu_n" failed "could not retire $cu_n"
                 fi
                 CANCEL_ITEM=""
             else
-                install_item "$cu_n" 1 || FAILED=1
+                retire_item "$cu_n" || FAILED=1
             fi
         done
-        drop_build_tools
     fi
     [ "$FAILED" = 0 ] || return 1
     return 0

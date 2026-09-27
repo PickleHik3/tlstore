@@ -279,6 +279,23 @@ the lane itself is verified on a phone.
 Delete its row (and its parts, if nothing else needs them), rebuild, test, release. Phones that
 have it installed keep it; `tlstore remove <name>` still works from the old catalog they cached.
 
+## Retiring an item
+
+Dropping the row is fine for something nobody has. For an item phones already installed, retire it
+instead so `tlstore update` takes it away for them: keep the row (same kind, source, target and
+digest — build-catalog.sh still computes the digest normally) and set `options` to
+`hidden=1;retired=1`. `hidden=1` is required alongside it, not just implied by it: an older engine
+that has never heard of `retired=1` reads the row as an ordinary hidden part and leaves it alone,
+so retiring never breaks a phone running an old tlstore. `install` refuses a retired item outright,
+and nothing may pull it in through `requires`.
+
+On a phone running the new engine, the next `tlstore update` deletes an installed
+file/file-once/binary item only when the file on disk still matches the digest that shipped it —
+an edited copy is left in place and the item is simply forgotten, never overwritten or deleted.
+Anything else (a `pkg`, `bundle` or `fisher` item) just stops being tracked, the way `remove`
+already leaves the underlying package installed. Once every phone has had a chance to update, the
+row can be deleted for good (see "Removing an item" above).
+
 ## Release cut
 
 A launcher release pins one `dist` tag from this repository in its own build (see `AGENTS.md`
