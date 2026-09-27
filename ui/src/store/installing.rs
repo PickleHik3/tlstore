@@ -8,7 +8,7 @@ use crate::render::{Sizing, Underline};
 use crate::term::{Event, Key};
 
 use super::data::STEPS;
-use super::paint::{draw_header, Facts, HeaderContent, Masthead, Paint, Slot, Slots, A_BACK, A_CONTEXT};
+use super::paint::{self, draw_header, Facts, HeaderContent, Masthead, Paint, Slot, Slots, A_BACK, A_CONTEXT};
 use super::scene::El;
 use super::{header_for, Go, SelfUpdate, Store, Verb, View, STORE_REPO};
 
@@ -184,7 +184,7 @@ impl View for Installing {
         let first = if st.job_running() {
             Slot::new("x", "cancel", Key::Char('x'))
         } else {
-            Slot::new("⏎", "done", Key::Enter)
+            Slot::new(paint::key_glyphs(st.env.launcherctl.is_some()).0, "done", Key::Enter)
         };
         [Some(first), None, None, None, Some(Slot::new("esc", "back", Key::Esc))]
     }

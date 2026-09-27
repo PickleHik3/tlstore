@@ -453,7 +453,7 @@ fn rows_show_numbers_tags_and_statuses() {
     // The key row: five fixed slots.
     let keys = h.row(hdr.keys as usize);
     // Two blank columns after the widest hint of every slot.
-    for (col, word) in [(2, "⏎ open"), (13, "i install"), (24, "␣ select"), (34, "f full"), (42, "q quit")]
+    for (col, word) in [(2, "\u{f0311} open"), (13, "i install"), (24, "\u{f1050} select"), (34, "f full"), (42, "q quit")]
     {
         let at = keys.find(word).unwrap_or_else(|| panic!("{word} missing: {keys:?}"));
         assert_eq!(unicode_width_of(&keys[..at]), col, "{word} at {col}: {keys:?}");
@@ -540,7 +540,7 @@ fn update_key_on_an_updatable_row_updates_that_item() {
 fn selection_marks_names_and_installs_with_the_right_arguments() {
     let mut h = H::new(53, 26, Opts::default());
     h.key(Key::Char(' '));
-    assert!(h.has("1 selected · i installs them, ␣ clears"), "{}", h.text);
+    assert!(h.has("1 selected · i installs them, \u{f1050} clears"), "{}", h.text);
     go_to(&mut h, "sigye");
     h.key(Key::Char(' '));
     assert!(h.has("2 selected"));
@@ -560,7 +560,7 @@ fn selection_marks_names_and_installs_with_the_right_arguments() {
     // The list was read again: both now show installed; selecting installed items offers remove.
     assert!(h.row(list_row(&h, "sigye")).contains("installed"), "{}", h.text);
     h.key(Key::Char(' '));
-    assert!(h.has("1 selected · r removes them, ␣ clears") && h.has("r remove"), "{}", h.text);
+    assert!(h.has("1 selected · r removes them, \u{f1050} clears") && h.has("r remove"), "{}", h.text);
     h.key(Key::Esc);
     assert!(!h.has("selected"));
 }
@@ -648,7 +648,7 @@ fn key_slots_stay_in_place_and_taps_send_their_key() {
     let row = h.row(keys as usize);
     let col =
         |word: &str| unicode_width_of(&row[..row.find(word).unwrap_or_else(|| panic!("{word}: {row:?}"))]);
-    assert_eq!(col("⏎ open"), 1, "{row:?}");
+    assert_eq!(col("\u{f0311} open"), 1, "{row:?}");
     assert_eq!(col("i inst…"), 8, "{row:?}");
     assert_eq!(col("q quit"), 32, "{row:?}");
 }
@@ -804,10 +804,10 @@ fn installing_shows_the_number_steps_and_summary() {
     assert!(h.row(hdr.body.y as usize).contains("fetched"));
     assert!(h.row(hdr.body.y as usize + 1).contains("signature checked"));
     assert!(h.row(hdr.body.y as usize + 5).contains("───"), "a text track without pictures");
-    assert!(h.has("x cancel") && h.has("esc back") && !h.has("⏎ done"));
+    assert!(h.has("x cancel") && h.has("esc back") && !h.has("\u{f0311} done"));
     h.key(Key::Char('x'));
     h.settle();
-    assert!(h.has("Stopped before sigye was done.") && h.has("⏎ done"), "{}", h.text);
+    assert!(h.has("Stopped before sigye was done.") && h.has("\u{f0311} done"), "{}", h.text);
     std::fs::remove_file(h.dir.join("hold")).unwrap();
 }
 
@@ -837,7 +837,7 @@ fn a_failed_item_shows_failed_on_installing_and_front() {
     let hdr = layout::header(53, 26, 7, None);
     assert!(h.row(hdr.facts as usize).starts_with("  failed 0.6.0"), "{}", h.text);
     assert!(h.row(hdr.notice as usize).contains("Could not install sigye. Try again later."), "{}", h.text);
-    assert!(h.has("⏎ done"));
+    assert!(h.has("\u{f0311} done"));
     h.key(Key::Enter);
     assert_eq!(h.r().top(), "front");
     let y = list_row(&h, "sigye");
@@ -927,7 +927,7 @@ fn a_refused_self_update_is_reported_and_the_store_goes_on() {
     let hdr = layout::header(53, 26, 7, None);
     assert!(h.row(hdr.facts as usize).starts_with("  failed 0.6 → 0.7"), "{}", h.text);
     assert!(h.row(hdr.notice as usize).contains("Could not update tlstore. Try again later."), "{}", h.text);
-    assert!(h.has("⏎ done"), "{}", h.text);
+    assert!(h.has("\u{f0311} done"), "{}", h.text);
     assert!(h.r().st.exit.borrow().is_none() && !h.r().finished());
     h.key(Key::Enter);
     assert_eq!(h.r().top(), "front");
