@@ -1,0 +1,1369 @@
+diff --git a/src/dawn.c b/src/dawn.c
+--- a/src/dawn.c
++++ b/src/dawn.c
+@@ -40,6 +40,7 @@
+     int32_t text_area_cols;
+     int32_t ai_cols;
+     int32_t ai_start_col;
++    bool ai_overlay; //!< The chat covers the whole screen (narrow terminals) instead of a side panel
+     int32_t margin;
+     int32_t text_width;
+     int32_t top_margin;
+@@ -109,7 +110,13 @@
+     l.ai_cols = 0;
+     l.ai_start_col = app.cols + 1;
+ 
+-    if (app.ai_open) {
++    if (app.ai_open && app.cols < AI_PANEL_MIN_COLS) {
++        // A phone-width terminal has no room beside the note: the chat takes the whole screen,
++        // and the note keeps its full-width layout underneath for when the chat closes.
++        l.ai_overlay = true;
++        l.ai_cols = app.cols;
++        l.ai_start_col = 1;
++    } else if (app.ai_open) {
+         l.ai_cols = app.cols * AI_PANEL_WIDTH / 100;
+         if (l.ai_cols < 30)
+             l.ai_cols = 30;
+@@ -119,10 +126,20 @@
+         l.ai_start_col = l.text_area_cols + 1;
+     }
+ 
++    if (l.ai_cols < 1)
++        l.ai_cols = 1;
++    if (l.text_area_cols < 1)
++        l.text_area_cols = 1;
+     l.margin = l.text_area_cols > 80 ? (l.text_area_cols - 70) / 2 : 4;
+     l.text_width = l.text_area_cols - l.margin * 2;
++    if (l.text_width < 1) {
++        l.margin = 0;
++        l.text_width = l.text_area_cols;
++    }
+     l.top_margin = 2;
+     l.text_height = app.rows - l.top_margin - 2;
++    if (l.text_height < 1)
++        l.text_height = 1;
+     return l;
+ }
+ 
+@@ -434,9 +451,29 @@
+ 
+ // #region Undo/Redo
+ 
++//! Whether the text is what the snapshot at undo_pos holds.
++static bool undo_at_current(void)
++{
++    if (app.undo_count == 0)
++        return false;
++    const GapBuffer* gb = &app.text;
++    size_t len = gap_len(gb);
++    const char* saved = app.undo_stack[app.undo_pos].text;
++    if (app.undo_stack[app.undo_pos].text_len != len)
++        return false;
++    // The text is the buffer with its gap cut out: the part before the gap, then the part after.
++    size_t front = gb->gap_start;
++    return memcmp(gb->buffer, saved, front) == 0
++        && memcmp(gb->buffer + gb->gap_end, saved + front, len - front) == 0;
++}
++
+ //! Save current text state to undo stack
+ void save_undo_state(void)
+ {
++    // Whatever follows is a change of its own; typing no longer joins the step before it.
++    app.undo_typing = 0;
++    app.dirty = true;
++
+     if (app.undo_pos < app.undo_count - 1) {
+         for (int32_t i = app.undo_pos + 1; i < app.undo_count; i++) {
+             free(app.undo_stack[i].text);
+@@ -444,6 +481,13 @@
+         app.undo_count = app.undo_pos + 1;
+     }
+ 
++    // The top of the stack already holds this text (a change was just undone, or an edit tool
++    // took its "after" snapshot): only the cursor is new, so no second copy.
++    if (undo_at_current()) {
++        app.undo_stack[app.undo_pos].cursor = app.cursor;
++        return;
++    }
++
+     if (app.undo_count >= MAX_UNDO) {
+         free(app.undo_stack[0].text);
+         memmove(&app.undo_stack[0], &app.undo_stack[1], (MAX_UNDO - 1) * sizeof(app.undo_stack[0]));
+@@ -452,7 +496,7 @@
+     }
+ 
+     size_t text_len = gap_len(&app.text);
+-    char* saved_text = malloc(text_len);
++    char* saved_text = malloc(text_len > 0 ? text_len : 1); // an empty note is a state too
+     if (saved_text) {
+         gap_copy_to(&app.text, 0, text_len, saved_text);
+         app.undo_stack[app.undo_count].text = saved_text;
+@@ -463,6 +507,48 @@
+     }
+ }
+ 
++void undo_reset(void)
++{
++    for (int32_t i = 0; i < app.undo_count; i++)
++        free(app.undo_stack[i].text);
++    app.undo_count = 0;
++    app.undo_pos = 0;
++    app.undo_typing = 0;
++    // The text as loaded is the floor: Ctrl+Z stops here instead of reaching the note before.
++    save_undo_state();
++}
++
++//! Whether a typed character continues a word: letters, digits, '_' and anything non-ASCII.
++static inline bool is_word_key(int32_t key)
++{
++    return key >= 128 || key == '_' || (key >= '0' && key <= '9') || (key >= 'a' && key <= 'z') || (key >= 'A' && key <= 'Z');
++}
++
++//! The undo step for typing key at the cursor. A word typed straight through is one step, with
++//! the spaces after it; a new word after a space, punctuation, a line break, a move of the cursor,
++//! a change of any other kind or a pause over a second starts the next one. Call before the
++//! insert; the cursor after it goes to undo_typed().
++static void save_undo_typing(int32_t key)
++{
++    int64_t now = DAWN_BACKEND(app)->clock(DAWN_CLOCK_MS);
++    bool word = is_word_key(key);
++    bool space = key == ' ';
++    bool joins = app.undo_typing != 0 && !has_selection() && app.cursor == app.undo_typing_cursor
++        && now - app.undo_typing_ms <= 1000
++        && ((word && app.undo_typing == 1) || (space && app.undo_typing != 0));
++    if (!joins)
++        save_undo_state();
++    app.undo_typing = word ? 1 : space ? 2 : 0;
++    app.undo_typing_ms = now;
++    app.dirty = true;
++}
++
++//! Where the last typed character left the cursor: the next one joins its step only from there.
++static inline void undo_typed(void)
++{
++    app.undo_typing_cursor = app.cursor;
++}
++
+ //! Restore undo state at given position
+ static void restore_undo_state(int32_t pos)
+ {
+@@ -492,9 +578,15 @@
+ 
+ static void undo(void)
+ {
++    // Snapshots are taken before a change, so the latest text has none of its own yet: take it
++    // now, so one Ctrl+Z undoes one change and Ctrl+Y can come back to this.
++    if (app.undo_pos == app.undo_count - 1 && !undo_at_current())
++        save_undo_state();
+     if (app.undo_pos > 0) {
+         app.undo_pos--;
+         restore_undo_state(app.undo_pos);
++        app.undo_typing = 0;
++        app.dirty = true;
+     }
+ }
+ 
+@@ -503,6 +595,8 @@
+     if (app.undo_pos < app.undo_count - 1) {
+         app.undo_pos++;
+         restore_undo_state(app.undo_pos);
++        app.undo_typing = 0;
++        app.dirty = true;
+     }
+ }
+ 
+@@ -1045,6 +1139,10 @@
+     char lastmod_buf[32];
+     dawn_format_iso_time(&lt, lastmod_buf, sizeof(lastmod_buf));
+     fm_set_string(app.frontmatter, "lastmod", lastmod_buf);
++
++    // The user asked for frontmatter in this note, plain file or not.
++    app.write_fm = true;
++    app.dirty = true;
+ }
+ 
+ // #endregion
+@@ -2335,14 +2433,18 @@
+ {
+     int32_t padding = 1;
+     int32_t prefix_len = 4;
+-    int32_t content_start = L->ai_start_col + 1 + padding;
+-    int32_t content_width = L->ai_cols - 1 - (padding * 2);
++    // As an overlay there is no border column: the panel starts at the screen's edge.
++    int32_t border_cols = L->ai_overlay ? 0 : 1;
++    int32_t content_start = L->ai_start_col + border_cols + padding;
++    int32_t content_width = L->ai_cols - border_cols - (padding * 2);
++    if (content_width < 1)
++        content_width = 1;
+     int32_t first_line_width = content_width - prefix_len;
+     int32_t cont_line_width = content_width - prefix_len;
+-    if (first_line_width < 10)
+-        first_line_width = 10;
+-    if (cont_line_width < 10)
+-        cont_line_width = 10;
++    if (first_line_width < 1)
++        first_line_width = 1;
++    if (cont_line_width < 1)
++        cont_line_width = 1;
+ 
+     if (!app.ai_focused)
+         set_dim(true);
+@@ -2352,12 +2454,13 @@
+         move_to(row, L->ai_start_col);
+         set_bg(get_ai_bg());
+         set_fg(get_border());
+-        out_str("│");
+-        clear_range(L->ai_cols - 1);
++        if (!L->ai_overlay)
++            out_str("│");
++        clear_range(L->ai_cols - border_cols);
+     }
+ 
+     // Header
+-    move_to(1, L->ai_start_col + 1);
++    move_to(1, L->ai_start_col + border_cols);
+     set_bg(get_ai_bg());
+     out_spaces(padding);
+     set_fg(get_fg());
+@@ -2370,20 +2473,28 @@
+     move_to(2, L->ai_start_col);
+     set_bg(get_ai_bg());
+     set_fg(get_border());
+-    out_str("├");
+-    for (int32_t ic = 0; ic < L->ai_cols - 2; ic++)
++    if (!L->ai_overlay)
++        out_str("├");
++    int32_t dashes = L->ai_overlay ? L->ai_cols : L->ai_cols - 2;
++    for (int32_t ic = 0; ic < dashes; ic++)
+         out_str("─");
+ 
+     // Hint
+     const char* hint = app.ai_thinking && app.ai_focused && !app.ai_stopping ? "esc stop" : "esc close";
+-    int32_t hint_col = L->ai_start_col + L->ai_cols - (int32_t)strlen(hint) - padding - 1;
+-    move_to(1, hint_col);
+-    set_bg(get_ai_bg());
+-    set_fg(get_dim());
+-    out_str(hint);
++    int32_t hint_col = L->ai_start_col + L->ai_cols - (int32_t)strlen(hint) - padding;
++    if (hint_col < content_start + 5)
++        hint_col = content_start + 5;
++    if (hint_col + (int32_t)strlen(hint) <= L->ai_start_col + L->ai_cols) {
++        move_to(1, hint_col);
++        set_bg(get_ai_bg());
++        set_fg(get_dim());
++        out_str(hint);
++    }
+ 
+     // Calculate input area
+     int32_t input_width = content_width - 2;
++    if (input_width < 1)
++        input_width = 1;
+     int32_t input_lines = 1, icol = 0;
+     for (size_t i = 0; i < app.ai_input_len; i++) {
+         if (app.ai_input[i] == '\n') {
+@@ -2689,6 +2800,14 @@
+     snprintf(words_buf, sizeof(words_buf), "%d word%s", words, words == 1 ? "" : "s");
+     out_str(words_buf);
+ 
++    // The note could not be written; it stays here until a save gets through.
++    if (app.save_failed) {
++        set_fg(get_border());
++        out_str(" · ");
++        set_fg(get_accent());
++        out_str("not saved");
++    }
++
+     if (app.focus_mode) {
+         set_fg(get_border());
+         out_str(" · ");
+@@ -3367,36 +3486,26 @@
+ 
+ // #region Session Management
+ 
+-static void new_session(void)
++//! Start an empty note at path (taken over), with no frontmatter. Nothing is written until the
++//! first edit is saved.
++static void begin_session(char* path)
+ {
+     gap_free(&app.text);
+     gap_init(&app.text, 4096);
+ 
+-    // Generate path in .dawn directory
+     free(app.session_path);
+-    DAWN_BACKEND(app)->mkdir_p(history_dir());
+-    DawnTime lt;
+-    DAWN_BACKEND(app)->localtime(&lt);
+-    char timestamp[20];
+-    dawn_format_filename_time(&lt, timestamp, sizeof(timestamp));
+-    char path[PATH_MAX];
+-#ifdef _WIN32
+-    snprintf(path, sizeof(path), "%s\\%s.md", history_dir(), timestamp);
+-#else
+-    snprintf(path, sizeof(path), "%s/%s.md", history_dir(), timestamp);
+-#endif
+-    app.session_path = dawn_strdup(path);
++    app.session_path = path;
+ 
+     fm_free(app.frontmatter);
+-    app.frontmatter = fm_create();
+-    fm_set_string(app.frontmatter, "title", "Untitled");
+-    fm_set_string(app.frontmatter, "author", DAWN_BACKEND(app)->username());
+-    char date_buf[32];
+-    dawn_format_iso_time(&lt, date_buf, sizeof(date_buf));
+-    fm_set_string(app.frontmatter, "date", date_buf);
++    app.frontmatter = NULL;
++    app.write_fm = false;
+ 
+     app.cursor = 0;
++    app.scroll_y = 0;
+     app.selecting = false;
++    undo_reset();
++    app.dirty = false;
++    app.save_failed = false;
+     app.timer_done = false;
+     app.timer_on = (app.timer_mins > 0);
+     if (app.timer_on) {
+@@ -3414,6 +3523,32 @@
+ #endif
+ }
+ 
++static void new_session(void)
++{
++    // Generate path in .dawn directory
++    DAWN_BACKEND(app)->mkdir_p(history_dir());
++    DawnTime lt;
++    DAWN_BACKEND(app)->localtime(&lt);
++    char timestamp[20];
++    dawn_format_filename_time(&lt, timestamp, sizeof(timestamp));
++    char path[PATH_MAX];
++#ifdef _WIN32
++    snprintf(path, sizeof(path), "%s\\%s.md", history_dir(), timestamp);
++#else
++    snprintf(path, sizeof(path), "%s/%s.md", history_dir(), timestamp);
++#endif
++    begin_session(dawn_strdup(path));
++
++    // A note of dawn's own carries frontmatter from the start.
++    app.frontmatter = fm_create();
++    fm_set_string(app.frontmatter, "title", "Untitled");
++    fm_set_string(app.frontmatter, "author", DAWN_BACKEND(app)->username());
++    char date_buf[32];
++    dawn_format_iso_time(&lt, date_buf, sizeof(date_buf));
++    fm_set_string(app.frontmatter, "date", date_buf);
++    app.write_fm = true;
++}
++
+ // #endregion
+ 
+ // #region Input Handlers
+@@ -3443,7 +3578,11 @@
+         else if (app.preview_mode)
+             app.quit = true;
+         else {
+-            save_session();
++            // A note that could not be saved stays open, with the status bar saying so; the next
++            // esc after that warning leaves anyway, since the disk may never come back.
++            bool warned = app.save_failed;
++            if (!save_session() && !warned)
++                break;
+             app.mode = app.timer_on ? MODE_FINISHED : MODE_WELCOME;
+         }
+         break;
+@@ -3848,6 +3987,7 @@
+     case '\t': {
+         if (!CAN_MODIFY())
+             break;
++        save_undo_state();
+         size_t line_start = find_line_start(app.cursor);
+         // Use block query to check if in list
+         bool in_list = is_in_list_item(line_start, NULL, NULL, NULL, NULL);
+@@ -3872,6 +4012,7 @@
+         while (line_start + spaces < gap_len(&app.text) && gap_at(&app.text, line_start + spaces) == ' ' && spaces < 2)
+             spaces++;
+         if (spaces > 0) {
++            save_undo_state();
+             gap_delete(&app.text, line_start, spaces);
+             app.cursor = (app.cursor >= line_start + spaces) ? app.cursor - spaces : (app.cursor > line_start) ? line_start
+                                                                                                                : app.cursor;
+@@ -3948,7 +4089,7 @@
+             break;
+         // Accept printable chars but not special keys (DAWN_KEY_UP=1000 and above)
+         if (IS_PRINTABLE(key)) {
+-            save_undo_state();
++            save_undo_typing(key);
+             delete_selection_if_any();
+             uint8_t utf8_buf[4];
+             utf8proc_ssize_t len = utf8proc_encode_char((utf8proc_int32_t)key, utf8_buf);
+@@ -3962,6 +4103,7 @@
+                 if (key == ']')
+                     footnote_maybe_create_at_cursor(&app.text, app.cursor);
+             }
++            undo_typed();
+         }
+         break;
+     }
+@@ -3981,6 +4123,13 @@
+         app.ai_open = false;
+         break;
+ 
++    case 31:
++        // The key that opened the chat closes it, from the chat too: as an overlay the note
++        // never sees a key while the chat is up.
++        app.ai_open = false;
++        app.ai_focused = false;
++        break;
++
+     case '\r':
+     case '\n':
+         if (app.ai_input_len > 0 && !app.ai_thinking) {
+@@ -4240,7 +4389,9 @@
+ 
+     case MODE_WRITING:
+         if (app.ai_open && key == '\t') {
+-            app.ai_focused = !app.ai_focused;
++            // Over the note there is nothing to hand the focus to; esc brings the note back.
++            if (!calc_layout().ai_overlay)
++                app.ai_focused = !app.ai_focused;
+             break;
+         }
+         if (app.ai_open && app.ai_focused)
+@@ -4695,6 +4846,7 @@
+                         new_syntax[len++] = '\n';
+                     }
+ 
++                    save_undo_state();
+                     gap_delete(&app.text, app.block_edit.pos, app.block_edit.len);
+                     gap_insert_str(&app.text, app.block_edit.pos, new_syntax, (size_t)len);
+                     app.cursor = app.block_edit.pos;
+@@ -4956,8 +5108,11 @@
+ {
+     DAWN_BACKEND(app)->set_title(NULL);
+ 
+-    if (gap_len(&app.text) > 0 && app.mode == MODE_WRITING && !app.preview_mode)
+-        save_session();
++    // save_session writes only what changed; an empty note that was emptied on purpose counts.
++    if (app.session_path && app.mode == MODE_WRITING && !app.preview_mode) {
++        if (!save_session())
++            fprintf(stderr, "dawn: could not save %s\n", app.session_path);
++    }
+ 
+     gap_free(&app.text);
+     free(app.session_path);
+@@ -4979,6 +5134,7 @@
+     for (int32_t i = 0; i < app.undo_count; i++)
+         free(app.undo_stack[i].text);
+     app.undo_count = 0;
++    app.undo_pos = 0;
+ 
+     if (app.block_cache) {
+         block_cache_free((BlockCache*)app.block_cache);
+@@ -5007,15 +5163,14 @@
+     if (app.timer_on)
+         timer_check();
+ 
+-    if (app.mode == MODE_WRITING && gap_len(&app.text) > 0 && !app.preview_mode) {
++    // Autosave touches the file only once something changed; a note merely opened stays as it was.
++    if (app.mode == MODE_WRITING && app.dirty && !app.preview_mode) {
+         int64_t now = DAWN_BACKEND(app)->clock(DAWN_CLOCK_SEC);
+         if (app.last_save_time == 0)
+             app.last_save_time = now;
+         else if (now - app.last_save_time >= 5) {
+-            if (app.mode == MODE_WRITING) {
+-                save_session();
+-                app.last_save_time = now;
+-            }
++            save_session();
++            app.last_save_time = now;
+         }
+     }
+ #if HAS_LIBAI
+@@ -5033,13 +5188,22 @@
+ 
+ bool dawn_load_document(const char* path)
+ {
+-    load_file_for_editing(path);
++    if (DAWN_BACKEND(app)->file_exists(path))
++        return load_file_for_editing(path);
++
++    // A file that does not exist yet: an empty note bound to that path, plain like any file the
++    // user names, and created by its first save. Its directory has to be there already.
++    char* abs = note_path_for(path);
++    if (!abs)
++        return false;
++    begin_session(abs);
+     return true;
+ }
+ 
+ bool dawn_preview_document(const char* path)
+ {
+-    load_file_for_editing(path);
++    if (!load_file_for_editing(path))
++        return false;
+     app.preview_mode = true;
+     app.mode = MODE_WRITING;
+     app.timer_on = false;
+@@ -5049,7 +5213,8 @@
+ 
+ bool dawn_print_document(const char* path)
+ {
+-    load_file_for_editing(path);
++    if (!load_file_for_editing(path))
++        return false;
+     app.preview_mode = true;
+     app.mode = MODE_WRITING;
+     app.timer_on = false;
+@@ -5251,6 +5416,17 @@
+ 
+     Layout L = calc_layout();
+ 
++    // On a narrow screen the chat is all there is while it is open: the note, its images and its
++    // status bar wait underneath. Every key goes to the chat, so it holds the focus.
++    if (!print_mode && L.ai_overlay) {
++        app.ai_focused = true;
++        image_frame_start();
++        render_ai_panel(&L);
++        image_frame_end();
++        out_flush();
++        return;
++    }
++
+     // In print mode: capture theme bg for margin fills
+     if (print_mode) {
+         set_bg(get_bg());
+diff --git a/src/dawn_backend_posix.c b/src/dawn_backend_posix.c
+--- a/src/dawn_backend_posix.c
++++ b/src/dawn_backend_posix.c
+@@ -1767,16 +1767,40 @@
+     return data;
+ }
+ 
++//! Write the whole file or none of it: the data goes to <path>.tmp beside it, reaches the disk,
++//! and then takes the old file's place in one rename. A failure anywhere leaves the old file as
++//! it was and removes the temporary one.
+ static bool posix_write_file(const char* path, const char* data, size_t len)
+ {
+-    FILE* f = fopen(path, "wb");
+-    if (!f)
++    char tmp[PATH_MAX];
++    if (snprintf(tmp, sizeof(tmp), "%s.tmp", path) >= (int)sizeof(tmp))
+         return false;
+ 
+-    size_t written = fwrite(data, 1, len, f);
+-    fclose(f);
++    // A file that exists keeps its permissions through the rename.
++    struct stat st;
++    bool existed = stat(path, &st) == 0;
++
++    int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0644);
++    if (fd < 0)
++        return false;
++    if (existed)
++        fchmod(fd, st.st_mode & 07777);
+ 
+-    return written == len;
++    FILE* f = fdopen(fd, "wb");
++    if (!f) {
++        close(fd);
++        unlink(tmp);
++        return false;
++    }
++
++    bool ok = fwrite(data, 1, len, f) == len && fflush(f) == 0 && fsync(fd) == 0;
++    if (fclose(f) != 0)
++        ok = false;
++    if (ok && rename(tmp, path) != 0)
++        ok = false;
++    if (!ok)
++        unlink(tmp);
++    return ok;
+ }
+ 
+ static bool posix_list_dir(const char* path, char*** out_names, int32_t* out_count)
+@@ -2290,6 +2314,22 @@
+     return true;
+ }
+ 
++//! The image cache lives under $XDG_CACHE_HOME (or ~/.cache), never under ~/.dawn: that directory
++//! is what history_dir() takes for a legacy install, and creating it moved the notes out of sight.
++static bool posix_image_cache_dir(char* out, size_t out_size)
++{
++    const char* xdg_cache = getenv("XDG_CACHE_HOME");
++    if (xdg_cache && xdg_cache[0] == '/') {
++        snprintf(out, out_size, "%s/dawn/image-cache", xdg_cache);
++    } else {
++        const char* home = posix_get_home_dir();
++        if (!home)
++            return false;
++        snprintf(out, out_size, "%s/.cache/dawn/image-cache", home);
++    }
++    return posix_mkdir_p(out);
++}
++
+ static bool download_url_to_cache(const char* url, char* cached_path, size_t path_size)
+ {
+     if (!url || !cached_path)
+@@ -2298,13 +2338,9 @@
+     if (is_failed_url(url))
+         return false;
+ 
+-    const char* home = posix_get_home_dir();
+-    if (!home)
+-        return false;
+-
+     char cache_dir[512];
+-    snprintf(cache_dir, sizeof(cache_dir), "%s/.dawn/image-cache", home);
+-    posix_mkdir_p(cache_dir);
++    if (!posix_image_cache_dir(cache_dir, sizeof(cache_dir)))
++        return false;
+ 
+     char hash_hex[17];
+     term_hash_to_hex(url, hash_hex);
+@@ -2359,12 +2395,9 @@
+     }
+ 
+     // Need to convert - get cache directory
+-    const char* home = posix_get_home_dir();
+-    assert(home && "Failed to get home directory");
+-
+     char cache_dir[512];
+-    snprintf(cache_dir, sizeof(cache_dir), "%s/.dawn/image-cache", home);
+-    posix_mkdir_p(cache_dir);
++    if (!posix_image_cache_dir(cache_dir, sizeof(cache_dir)))
++        return false;
+ 
+     // Use absolute path + mtime as cache key
+     char abs_path[PATH_MAX];
+diff --git a/src/dawn_chat.c b/src/dawn_chat.c
+--- a/src/dawn_chat.c
++++ b/src/dawn_chat.c
+@@ -9,6 +9,7 @@
+ #include "dawn_block.h"
+ #include "dawn_fm.h"
+ 
++#include <ctype.h>
+ #include <strings.h>
+ 
+ // #region Message Management
+@@ -229,6 +230,10 @@
+ #define NOTE_CONTEXT_LIMIT 8000
+ #define SELECTION_CONTEXT_LIMIT 4000
+ 
++//! Whether the note went to the model cut short this turn. A model that saw only the beginning
++//! cannot rewrite the whole: its replace_note would drop the part it never read.
++static bool g_turn_note_cut;
++
+ //! [start, start + limit) of the note, shortened to end on a UTF-8 character boundary.
+ static char* note_slice(size_t start, size_t end, size_t limit, bool* cut)
+ {
+@@ -261,6 +266,7 @@
+ 
+     bool note_cut, sel_cut = false;
+     char* note = note_slice(0, len, NOTE_CONTEXT_LIMIT, &note_cut);
++    g_turn_note_cut = note_cut;
+     size_t s, e;
+     get_selection(&s, &e);
+     char* sel = s != e ? note_slice(s, e, SELECTION_CONTEXT_LIMIT, &sel_cut) : NULL;
+@@ -398,6 +404,26 @@
+ //! still the open one, so a slow reply cannot rewrite the note the user has since switched to.
+ static char* g_turn_path;
+ 
++//! The user's message this turn, in lower case, for whether it asked for a shorter note.
++static char* g_turn_prompt;
++
++//! Where the last AI edit's pre-edit copy went, or "" when none was kept.
++static char g_version_path[PATH_MAX];
++
++//! Whether the user's message asked for the note to get shorter, so a much shorter replace_note
++//! is what they want rather than a model that lost part of the note.
++static bool prompt_asks_to_shorten(void)
++{
++    static const char* const words[] = { "shorten", "shorter", "summar", "condense", "concise", "trim",
++        "cut ", "cut.", "delete", "remove", "drop ", "brief", "tldr", "tl;dr", "reduce", "compress", "abridge" };
++    if (!g_turn_prompt)
++        return false;
++    for (size_t i = 0; i < sizeof(words) / sizeof(words[0]); i++)
++        if (strstr(g_turn_prompt, words[i]))
++            return true;
++    return false;
++}
++
+ //! text with carriage returns dropped, in place.
+ static void drop_carriage_returns(char* text)
+ {
+@@ -440,10 +466,14 @@
+     return true;
+ }
+ 
+-//! Replace [start, end) with text as one undoable step and leave the cursor after it.
++//! Replace [start, end) with text as one undoable step and leave the cursor after it. The note
++//! as it was goes to a versions file first: the undo stack is short and gone after a restart,
++//! and autosave will have written the edit over the file within seconds.
+ static void apply_edit(size_t start, size_t end, const char* text)
+ {
+     size_t n = strlen(text);
++    if (!save_note_version(g_version_path, sizeof(g_version_path)))
++        g_version_path[0] = '\0';
+     save_undo_state();
+     if (end > start)
+         gap_delete(&app.text, start, end - start);
+@@ -488,8 +518,9 @@
+     return n > 0;
+ }
+ 
+-//! Rename the note, in the frontmatter the next save writes and in the window title.
+-static bool set_note_title(const char* raw)
++//! Rename the note, in the frontmatter the next save writes and in the window title. A plain
++//! file gets no frontmatter for it unless asked: the title then lives in the history list only.
++static bool set_note_title(const char* raw, bool asked)
+ {
+     char title[81];
+     if (!clean_title(raw, title, sizeof(title)))
+@@ -498,6 +529,10 @@
+         app.frontmatter = fm_create();
+     fm_set_string(app.frontmatter, "title", title);
+     DAWN_BACKEND(app)->set_title(title);
++    if (asked)
++        app.write_fm = true;
++    if (app.write_fm)
++        app.dirty = true;
+     return true;
+ }
+ 
+@@ -524,9 +559,19 @@
+         return "Missing the \"text\" argument.";
+     size_t len = gap_len(&app.text);
+     switch (kind) {
+-    case EDIT_REPLACE_NOTE:
++    case EDIT_REPLACE_NOTE: {
++        // The whole note may be replaced only by a model that read the whole note, with a note
++        // of its own, and not one that lost most of the text unless that is what was asked for.
++        if (g_turn_note_cut || len > NOTE_CONTEXT_LIMIT)
++            return "The note is too long to replace whole: only its beginning was shown. Ask the user to select the part to change and use replace_selection.";
++        if (!text[0])
++            return "The new note is empty. To empty the note, ask the user to select all and delete.";
++        size_t new_len = strlen(text);
++        if (len > 2000 && new_len < len / 2 && !prompt_asks_to_shorten())
++            return "The new note is less than half the length of the old one and the user did not ask for a shorter note. Ask the user to select the part to change and use replace_selection.";
+         apply_edit(0, len, text);
+         break;
++    }
+     case EDIT_REPLACE_SELECTION: {
+         size_t start, end;
+         get_selection(&start, &end);
+@@ -557,7 +602,7 @@
+         break;
+     }
+     case EDIT_TITLE:
+-        if (!set_note_title(text))
++        if (!set_note_title(text, true))
+             return "The title is empty.";
+         break;
+     default:
+@@ -566,24 +611,31 @@
+     return NULL;
+ }
+ 
++//! The chat's line for an edit that was made, or why it was not. Every change the AI makes, or
++//! fails to make, is stated in the chat whether or not the model mentions it.
++static void edit_line(EditKind kind, const char* error, char* line, size_t size)
++{
++    if (error)
++        snprintf(line, size, "✗ Couldn't %s: %s", EDITS[kind].name, error);
++    else if (kind == EDIT_TITLE)
++        snprintf(line, size, "✓ Renamed the note to \"%s\".", note_title());
++    else if (g_version_path[0])
++        snprintf(line, size, "✓ %s The previous version is saved in %s", EDITS[kind].done, g_version_path);
++    else
++        snprintf(line, size, "✓ %s", EDITS[kind].done);
++}
++
+ static char* edit_tool(EditKind kind, const char* params_json)
+ {
+     char* text = edit_text_param(params_json);
+     const char* error = edit_note(kind, text);
+     char* result;
+-    // Every change the AI makes, or fails to make, is stated in the chat whether or not the
+-    // model mentions it.
+-    char line[256];
++    char line[512 + PATH_MAX];
++    edit_line(kind, error, line, sizeof(line));
++    chat_step(line);
+     if (error) {
+-        snprintf(line, sizeof(line), "✗ Couldn't %s: %s", EDITS[kind].name, error);
+-        chat_step(line);
+         result = edit_error(error);
+     } else {
+-        if (kind == EDIT_TITLE)
+-            snprintf(line, sizeof(line), "✓ Renamed the note to \"%s\".", note_title());
+-        else
+-            snprintf(line, sizeof(line), "✓ %s", EDITS[kind].done);
+-        chat_step(line);
+         cJSON* response = cJSON_CreateObject();
+         cJSON_AddBoolToObject(response, "ok", true);
+         result = cJSON_PrintUnformatted(response);
+@@ -640,7 +692,7 @@
+     if (!shown)
+         return;
+     size_t shown_len = 0;
+-    char notes[1024] = "";
++    char notes[4096] = "";
+     size_t notes_len = 0;
+ 
+     const char* from = m->text;
+@@ -666,13 +718,8 @@
+             drop_carriage_returns(text);
+         }
+         const char* error = edit_note(kind, text);
+-        char line[256];
+-        if (error)
+-            snprintf(line, sizeof(line), "✗ Couldn't %s: %s", EDITS[kind].name, error);
+-        else if (kind == EDIT_TITLE)
+-            snprintf(line, sizeof(line), "✓ Renamed the note to \"%s\".", note_title());
+-        else
+-            snprintf(line, sizeof(line), "✓ %s", EDITS[kind].done);
++        char line[512 + PATH_MAX];
++        edit_line(kind, error, line, sizeof(line));
+         free(text);
+         notes_len += (size_t)snprintf(notes + notes_len, sizeof(notes) - notes_len, "%s%s",
+             notes_len ? "\n" : "", line);
+@@ -752,6 +799,14 @@
+     g_after_step = false;
+     free(g_turn_path);
+     g_turn_path = app.session_path ? dawn_strdup(app.session_path) : NULL;
++    // What the model gets to see of the note (note_context() states it exactly when asked for
++    // it; a bridge that never asks gets the same answer from the length).
++    g_turn_note_cut = gap_len(&app.text) > NOTE_CONTEXT_LIMIT;
++    free(g_turn_prompt);
++    g_turn_prompt = dawn_strdup(prompt);
++    if (g_turn_prompt)
++        for (char* p = g_turn_prompt; *p; p++)
++            *p = (char)tolower((unsigned char)*p);
+ 
+     // The bridge attaches the note to the question itself (read_document's "context" action),
+     // so this is only the user's own words, and the session history stays small.
+@@ -791,7 +846,8 @@
+                                       "CHANGING THE NOTE\n"
+                                       "Only change the note when the user asks you to; otherwise answer in the chat. "
+                                       "To change it, put one of these blocks in your reply:\n"
+-                                      "<replace_note>the whole new note</replace_note> to rewrite, fix, translate, reformat or reorganize the whole note\n"
++                                      "<replace_note>the whole new note</replace_note> to rewrite, fix, translate, reformat or reorganize the whole note; "
++                                      "only when the whole note was shown to you (it is refused when the note was cut short, and when the new note is much shorter than the old without being asked)\n"
+                                       "<replace_selection>the new text</replace_selection> to rewrite only the selected text\n"
+                                       "<insert_at_cursor>the new text</insert_at_cursor> to add text where the user's cursor is\n"
+                                       "<append_to_note>the new text</append_to_note> to add text at the end of the note\n"
+@@ -829,7 +885,7 @@
+                                     "},"
+                                     "{"
+                                     "\"name\":\"replace_note\","
+-                                    "\"description\":\"Replace the whole note with new text. Use when the user asks to rewrite, fix, translate, reformat or reorganize the whole note.\","
++                                    "\"description\":\"Replace the whole note with new text. Use when the user asks to rewrite, fix, translate, reformat or reorganize the whole note. Only works when the whole note was shown to you: it is refused when the note was cut short, and when the new text is much shorter than the note without the user asking for that. For a part of a long note, ask the user to select it and use replace_selection.\","
+                                     "\"input_schema\":{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\",\"description\":\"The whole new note, in Markdown\"}},\"required\":[\"text\"]}"
+                                     "},"
+                                     "{"
+@@ -932,7 +988,7 @@
+         g_title_path = NULL;
+         g_title_retry_at = DAWN_BACKEND(app)->clock(DAWN_CLOCK_SEC) + TITLE_RETRY_SECS;
+     } else if (app.session_path && g_title_path && strcmp(app.session_path, g_title_path) == 0
+-        && note_is_untitled() && set_note_title(g_title_reply)) {
++        && note_is_untitled() && set_note_title(g_title_reply, false)) {
+         save_session();
+     }
+     free(g_title_reply);
+diff --git a/src/dawn_file.c b/src/dawn_file.c
+--- a/src/dawn_file.c
++++ b/src/dawn_file.c
+@@ -14,10 +14,12 @@
+ #include "dawn_history.h"
+ #include "dawn_image.h"
+ #include "dawn_utils.h"
++#include <ctype.h>
+ #include <limits.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
++#include <time.h>
+ 
+ // #region History Directory
+ 
+@@ -43,10 +45,19 @@
+     build_legacy_dir(path, sizeof(path));
+     return path;
+ #else
+-    // Legacy path takes precedence so existing users keep their data.
++    // Legacy path takes precedence so existing users keep their data. The directory alone does
++    // not mark one: older builds put the image cache in it, so it exists on installs that never
++    // kept a note there. Its history file does.
+     static char legacy[PATH_MAX];
+     build_legacy_dir(legacy, sizeof(legacy));
+-    if (DAWN_BACKEND(app)->file_exists(legacy)) {
++    char marker[PATH_MAX];
++    snprintf(marker, sizeof(marker), "%s/.sessions", legacy);
++    bool is_legacy = DAWN_BACKEND(app)->file_exists(marker);
++    if (!is_legacy) {
++        snprintf(marker, sizeof(marker), "%s/.history", legacy);
++        is_legacy = DAWN_BACKEND(app)->file_exists(marker);
++    }
++    if (is_legacy) {
+         memcpy(path, legacy, sizeof(path));
+         return path;
+     }
+@@ -101,43 +112,23 @@
+ 
+ // #region Session Persistence
+ 
+-void save_session(void)
++//! The note as its file holds it: the frontmatter, when this note carries one, then the text.
++static char* session_content(size_t* out_len)
+ {
+-    if (gap_len(&app.text) == 0 || !app.session_path)
+-        return;
+-
+     char* txt = gap_to_str(&app.text);
++    if (!txt)
++        return NULL;
+     size_t txt_len = strlen(txt);
+ 
+-    // Ensure we have frontmatter
+-    Frontmatter* fm = app.frontmatter;
+-    if (!fm) {
+-        fm = fm_create();
+-        app.frontmatter = fm;
+-    }
+-
+-    // Set default fields if missing
+-    if (!fm_has_key(fm, "title")) {
+-        fm_set_string(fm, "title", "Untitled");
+-    }
+-    if (!fm_has_key(fm, "author")) {
+-        fm_set_string(fm, "author", get_username());
+-    }
+-
+-    // Always update date with ISO 8601 format
+-    DawnTime lt;
+-    DAWN_BACKEND(app)->localtime(&lt);
+-    char date_buf[32];
+-    dawn_format_iso_time(&lt, date_buf, sizeof(date_buf));
+-    fm_set_string(fm, "date", date_buf);
+-
+-    // Serialize frontmatter
+     size_t fm_len = 0;
+-    char* fm_str = fm_to_string(fm, &fm_len);
++    char* fm_str = app.write_fm ? fm_to_string(app.frontmatter, &fm_len) : NULL;
+ 
+-    // Build final content
+-    size_t total = (fm_str ? fm_len : 0) + 1 + txt_len;
+-    char* content = malloc(total + 1);
++    char* content = malloc(fm_len + 1 + txt_len + 1);
++    if (!content) {
++        free(fm_str);
++        free(txt);
++        return NULL;
++    }
+ 
+     size_t pos = 0;
+     if (fm_str) {
+@@ -147,18 +138,80 @@
+         if (txt_len == 0 || txt[0] != '\n') {
+             content[pos++] = '\n';
+         }
+-        free(fm_str);
+     }
+     memcpy(content + pos, txt, txt_len);
+     content[pos + txt_len] = '\0';
+ 
+-    DAWN_BACKEND(app)->write_file(app.session_path, content, pos + txt_len);
++    free(fm_str);
++    free(txt);
++    *out_len = pos + txt_len;
++    return content;
++}
+ 
+-    // Update history
+-    hist_upsert(app.session_path, fm_get_string(fm, "title"), app.cursor);
++//! Whether path is a file inside dir, either as given or with dir's links resolved (note paths
++//! are stored resolved; the data dir is not).
++static bool path_in_dir(const char* path, const char* dir)
++{
++    size_t n = strlen(dir);
++    if (strncmp(path, dir, n) == 0 && (path[n] == '/' || path[n] == '\\'))
++        return true;
++#ifndef _WIN32
++    char resolved[PATH_MAX];
++    if (realpath(dir, resolved)) {
++        n = strlen(resolved);
++        return strncmp(path, resolved, n) == 0 && path[n] == '/';
++    }
++#endif
++    return false;
++}
+ 
+-    free(content);
+-    free(txt);
++bool save_session(void)
++{
++    if (!app.session_path)
++        return true;
++
++    if (app.dirty) {
++        // dawn's own notes carry a title, an author and the date of their last edit. A file opened
++        // from elsewhere keeps the frontmatter it came with, as it came, and gets none if it had
++        // none: dawn is a guest in that file.
++        if (app.write_fm && path_in_dir(app.session_path, history_dir())) {
++            Frontmatter* fm = app.frontmatter;
++            if (!fm) {
++                fm = fm_create();
++                app.frontmatter = fm;
++            }
++            if (!fm_has_key(fm, "title")) {
++                fm_set_string(fm, "title", "Untitled");
++            }
++            if (!fm_has_key(fm, "author")) {
++                fm_set_string(fm, "author", get_username());
++            }
++            DawnTime lt;
++            DAWN_BACKEND(app)->localtime(&lt);
++            char date_buf[32];
++            dawn_format_iso_time(&lt, date_buf, sizeof(date_buf));
++            fm_set_string(fm, "date", date_buf);
++        }
++
++        size_t len = 0;
++        char* content = session_content(&len);
++        bool ok = content && DAWN_BACKEND(app)->write_file(app.session_path, content, len);
++        free(content);
++        if (!ok) {
++            app.save_failed = true;
++            return false;
++        }
++        app.dirty = false;
++    }
++    app.save_failed = false;
++
++    // A note that was never written (opened by a name that is not a file yet, or dawn's own and
++    // still empty) has nothing to list in the history.
++    if (!DAWN_BACKEND(app)->file_exists(app.session_path))
++        return true;
++
++    // Update history
++    hist_upsert(app.session_path, fm_get_string(app.frontmatter, "title"), app.cursor);
+ 
+     // Save AI chat to companion .chat.json file
+     if (app.chat_count > 0) {
+@@ -182,6 +235,87 @@
+             free(json);
+         }
+     }
++    return true;
++}
++
++static int compare_names(const void* a, const void* b)
++{
++    return strcmp(*(char* const*)a, *(char* const*)b);
++}
++
++//! Remove all but the newest MAX_NOTE_VERSIONS copies in dir. The names are UTC times, so their
++//! order is their age.
++static void prune_versions(const char* dir)
++{
++    char** names = NULL;
++    int32_t count = 0;
++    if (!DAWN_BACKEND(app)->list_dir(dir, &names, &count))
++        return;
++    if (count > MAX_NOTE_VERSIONS) {
++        qsort(names, (size_t)count, sizeof(char*), compare_names);
++        for (int32_t i = 0; i < count - MAX_NOTE_VERSIONS; i++) {
++            char path[PATH_MAX];
++            snprintf(path, sizeof(path), "%s" DAWN_PATH_SEP "%s", dir, names[i]);
++            DAWN_BACKEND(app)->rm(path);
++        }
++    }
++    for (int32_t i = 0; i < count; i++)
++        free(names[i]);
++    free(names);
++}
++
++bool save_note_version(char* out, size_t out_size)
++{
++    if (!app.session_path || gap_len(&app.text) == 0)
++        return false;
++
++    // The note's file name, without its .md and with anything unsafe in a directory name replaced.
++    const char* base = strrchr(app.session_path, '/');
++    const char* base_win = strrchr(app.session_path, '\\');
++    if (base_win && (!base || base_win > base))
++        base = base_win;
++    base = base ? base + 1 : app.session_path;
++    char name[128];
++    size_t n = 0;
++    for (const char* p = base; *p && n < sizeof(name) - 1; p++) {
++        unsigned char c = (unsigned char)*p;
++        name[n++] = (isalnum(c) || c == '-' || c == '_' || c == '.' || c >= 0x80) ? (char)c : '_';
++    }
++    if (n > 3 && strncmp(name + n - 3, ".md", 3) == 0)
++        n -= 3;
++    name[n] = '\0';
++    if (n == 0)
++        snprintf(name, sizeof(name), "note");
++
++    char dir[PATH_MAX];
++    snprintf(dir, sizeof(dir), "%s" DAWN_PATH_SEP "versions" DAWN_PATH_SEP "%s", history_dir(), name);
++    if (!DAWN_BACKEND(app)->mkdir_p(dir))
++        return false;
++
++    // Named by the UTC time; a second copy within the same second gets a suffix, not the first's place.
++    time_t now = (time_t)DAWN_BACKEND(app)->clock(DAWN_CLOCK_SEC);
++    struct tm* utc = gmtime(&now);
++    char stamp[32];
++    if (!utc || strftime(stamp, sizeof(stamp), "%Y%m%dT%H%M%SZ", utc) == 0)
++        snprintf(stamp, sizeof(stamp), "%lld", (long long)now);
++    for (int32_t i = 0;; i++) {
++        if (i == 0)
++            snprintf(out, out_size, "%s" DAWN_PATH_SEP "%s.md", dir, stamp);
++        else
++            snprintf(out, out_size, "%s" DAWN_PATH_SEP "%s-%d.md", dir, stamp, i);
++        if (!DAWN_BACKEND(app)->file_exists(out))
++            break;
++        if (i >= 99)
++            return false;
++    }
++
++    size_t len = 0;
++    char* content = session_content(&len);
++    bool ok = content && DAWN_BACKEND(app)->write_file(out, content, len);
++    free(content);
++    if (ok)
++        prune_versions(dir);
++    return ok;
+ }
+ 
+ void load_history(void)
+@@ -261,9 +395,14 @@
+     // Reset editor state
+     free(app.session_path);
+     app.session_path = path ? dawn_strdup(path) : NULL;
++    // Only a file that came with frontmatter gets it back on save; a plain file stays plain.
++    app.write_fm = fm != NULL;
+     app.cursor = 0;
+     app.scroll_y = 0;
+     app.selecting = false;
++    undo_reset();
++    app.dirty = false;
++    app.save_failed = false;
+     app.timer_done = false;
+     app.timer_on = false;
+     app.mode = MODE_WRITING;
+@@ -289,15 +428,63 @@
+     DAWN_BACKEND(app)->set_title(title);
+ }
+ 
+-void load_file_for_editing(const char* path)
++char* note_path_for(const char* path)
++{
++    if (!path || !path[0])
++        return NULL;
++#ifdef _WIN32
++    return dawn_strdup(path);
++#else
++    const char* slash = strrchr(path, '/');
++    const char* name = path;
++    char dir[PATH_MAX];
++    if (slash) {
++        size_t n = (size_t)(slash - path);
++        if (n == 0)
++            n = 1; // "/name": the root
++        if (n >= sizeof(dir))
++            return NULL;
++        memcpy(dir, path, n);
++        dir[n] = '\0';
++        name = slash + 1;
++    } else {
++        snprintf(dir, sizeof(dir), ".");
++    }
++
++    char resolved[PATH_MAX];
++    if (!name[0] || strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
++        // The path names a directory; resolve the whole of it and let the open fail on its own.
++        if (!realpath(path, resolved))
++            return NULL;
++        return dawn_strdup(resolved);
++    }
++    if (!realpath(dir, resolved))
++        return NULL;
++
++    size_t n = strlen(resolved) + 1 + strlen(name) + 1;
++    char* out = malloc(n);
++    if (out)
++        snprintf(out, n, "%s%s%s", resolved, strcmp(resolved, "/") == 0 ? "" : "/", name);
++    return out;
++#endif
++}
++
++bool load_file_for_editing(const char* path)
+ {
++    char* abs = note_path_for(path);
++    const char* open_path = abs ? abs : path;
++
+     size_t size;
+-    char* content = DAWN_BACKEND(app)->read_file(path, &size);
+-    if (!content)
+-        return;
++    char* content = DAWN_BACKEND(app)->read_file(open_path, &size);
++    if (!content) {
++        free(abs);
++        return false;
++    }
+ 
+-    load_content(content, size, path);
++    load_content(content, size, open_path);
+     free(content);
++    free(abs);
++    return true;
+ }
+ 
+ void load_buffer_for_editing(const char* content, size_t size)
+diff --git a/src/dawn_file.h b/src/dawn_file.h
+--- a/src/dawn_file.h
++++ b/src/dawn_file.h
+@@ -25,9 +25,22 @@
+ // #region Session Persistence
+ 
+ //! Save current session to disk
+-//! Creates new file if first save, writes markdown with YAML frontmatter
+-//! Also saves AI chat history to companion .chat.json file
+-void save_session(void);
++//! Writes the note only when it changed since the last successful save (app.dirty), with YAML
++//! frontmatter when the note carries one (app.write_fm); always updates the history entry and
++//! the companion .chat.json file.
++//! @return false when the note could not be written; app.save_failed then stays set until it is
++bool save_session(void);
++
++//! Keep a copy of the note as it is now, under <data dir>/versions/<note name>/<UTC time>.md,
++//! for the AI's edits: Ctrl+Z reaches them only so far. The newest MAX_NOTE_VERSIONS per note
++//! are kept.
++//! @param out receives the copy's path
++//! @param out_size size of out
++//! @return false when the note is empty or has no path, or the copy could not be written
++bool save_note_version(char* out, size_t out_size);
++
++//! Drop the undo history and start it again from the current text (dawn.c)
++void undo_reset(void);
+ 
+ //! Load list of past sessions from history directory
+ //! Populates app.history array, sorted newest first
+@@ -41,9 +54,16 @@
+ 
+ // #region File Operations
+ 
++//! path made absolute: its directory resolved through realpath, its file name kept as given.
++//! History entries hold this form, so they open from any working directory.
++//! @param path path to a file, which need not exist yet
++//! @return newly allocated path, or NULL when the directory it names does not exist
++char* note_path_for(const char* path);
++
+ //! Load a file for editing, parsing frontmatter
+ //! @param path path to the .md file to open
+-void load_file_for_editing(const char* path);
++//! @return false when the file could not be read; the editor is then left as it was
++bool load_file_for_editing(const char* path);
+ 
+ //! Load content from buffer for editing, parsing frontmatter
+ //! @param content buffer containing markdown content
+diff --git a/src/dawn_types.h b/src/dawn_types.h
+--- a/src/dawn_types.h
++++ b/src/dawn_types.h
+@@ -68,6 +68,12 @@
+ //! AI chat panel width in columns
+ #define AI_PANEL_WIDTH 45
+ 
++//! Below this many columns the chat covers the screen instead of sitting beside the note
++#define AI_PANEL_MIN_COLS 80
++
++//! How many pre-edit copies of a note the AI's edits keep, per note
++#define MAX_NOTE_VERSIONS 20
++
+ //! Maximum AI response size
+ #define MAX_AI_RESPONSE (64 * 1024)
+ 
+@@ -331,6 +337,9 @@
+     } undo_stack[MAX_UNDO];
+     int32_t undo_count; //!< Number of undo states
+     int32_t undo_pos; //!< Current position in undo stack
++    int32_t undo_typing; //!< The keystroke the open undo step ends with: 0 none, 1 a word character, 2 a space
++    size_t undo_typing_cursor; //!< Where that keystroke left the cursor
++    int64_t undo_typing_ms; //!< When it was typed, DAWN_CLOCK_MS
+ 
+     // State flags
+     bool resize_needed; //!< Display resize pending
+@@ -339,6 +348,9 @@
+ 
+     // Auto-save
+     int64_t last_save_time; //!< Last auto-save timestamp
++    bool dirty; //!< The note or its frontmatter changed since the last successful save
++    bool save_failed; //!< The last save failed; the status bar says so until one succeeds
++    bool write_fm; //!< Save with frontmatter: dawn's own notes, and files that came with some
+ 
+     // Block cache (forward declared, allocated on demand)
+     void* block_cache; //!< BlockCache* - block-based document model
+diff --git a/src/main_term.c b/src/main_term.c
+--- a/src/main_term.c
++++ b/src/main_term.c
+@@ -5,6 +5,12 @@
+ #include "dawn_backend.h"
+ #include <stdio.h>
+ #include <stdlib.h>
++#include <string.h>
++#include <sys/stat.h>
++
++#ifndef S_ISDIR
++#define S_ISDIR(m) (((m) & S_IFMT) == S_IFDIR)
++#endif
+ 
+ #ifdef _WIN32
+ extern const DawnBackend dawn_backend_win32;
+@@ -14,6 +20,28 @@
+ #define DAWN_BACKEND_PLATFORM dawn_backend_posix
+ #endif
+ 
++//! Whether a file by this name could be opened for editing: it exists, or the directory it names
++//! does and the file can be created there on the first save. Checked before the terminal is taken
++//! over, since an error printed after that is lost with the alternate screen.
++static bool file_openable(const char* path, char* dir, size_t dir_size)
++{
++    struct stat st;
++    if (stat(path, &st) == 0)
++        return true;
++    const char* slash = strrchr(path, '/');
++#ifdef _WIN32
++    const char* bslash = strrchr(path, '\\');
++    if (bslash && (!slash || bslash > slash))
++        slash = bslash;
++#endif
++    size_t n = slash ? (size_t)(slash - path) : 0;
++    if (n == 0)
++        snprintf(dir, dir_size, "%s", slash ? "/" : ".");
++    else
++        snprintf(dir, dir_size, "%.*s", (int)(n < dir_size ? n : dir_size - 1), path);
++    return stat(dir, &st) == 0 && S_ISDIR(st.st_mode);
++}
++
+ int32_t main(int32_t argc, char* argv[])
+ {
+     // Parse command-line arguments
+@@ -50,6 +78,17 @@
+             args_free(&args);
+             return 1;
+         }
++    }
++
++    // A file to edit may be new, but the directory it goes in has to be there already.
++    if (args.file && !(args.flags & (ARG_PRINT | ARG_PREVIEW))) {
++        char dir[4096];
++        if (!file_openable(args.file, dir, sizeof(dir))) {
++            fprintf(stderr, "dawn: cannot open %s: no such directory: %s\n", args.file, dir);
++            free(stdin_content);
++            args_free(&args);
++            return 1;
++        }
+     }
+ 
+     // Determine mode
