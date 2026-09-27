@@ -721,13 +721,51 @@ same_file() {
     [ -n "$sf_a" ] && [ "$sf_a" = "$sf_b" ]
 }
 
+# pm_run <command...> — run the package manager. Inside a --progress job, for
+# the job's own item, what it prints is turned into step lines, since pkg, apt
+# and pacman draw no progress bar a pipe can carry: each download line moves
+# the bar a third of the way on towards the checksum step, the integrity check
+# and the unpacking move it past that, and everything it says goes to stderr so
+# stdout stays the machine stream.
+pm_run() {
+    if [ "$PROGRESS" != 1 ] || [ -z "$CANCEL_ITEM" ]; then
+        "$@"
+        return
+    fi
+    mkdir -p "$CACHE_DIR"
+    pr_rc="$CACHE_DIR/pm.rc"
+    # As in curl_to, the exit status comes back through a file; so does the
+    # last percentage reported, so progress_stage never steps back behind it.
+    { "$@" 2>&1; echo "$?" > "$pr_rc"; } |
+        tr '\r' '\n' |
+        awk -v name="$CANCEL_ITEM" -v from="$PROGRESS_AT" -v to="$PROGRESS_FETCH_END" -v atf="$pr_rc.at" '
+            function step(v, w) {
+                if (v > last) { last = v; printf "step\t%s\t%d\t%s\n", name, v, w; fflush() }
+            }
+            BEGIN { last = from; at = from }
+            { print | "cat 1>&2" }
+            /^(Get|Hit):[0-9]/ || /downloading/ || /^:: (Synchronizing|Retrieving)/ {
+                at += (to - at) / 3; step(int(at), "fetched"); next
+            }
+            /^Fetched / || /checking (package integrity|keys)/ { step(60, "signature checked"); next }
+            /^(Preparing to unpack|Unpacking) / || /^\([0-9]+\/[0-9]+\) (installing|upgrading) / {
+                step(75, "putting files in place"); next
+            }
+            /^Setting up / || /^:: Running post-transaction/ { step(85, "putting files in place") }
+            END { print last > atf }'
+    pr_status=$(cat "$pr_rc" 2>/dev/null || echo 1)
+    PROGRESS_AT=$(cat "$pr_rc.at" 2>/dev/null || echo "$PROGRESS_AT")
+    rm -f "$pr_rc" "$pr_rc.at"
+    [ "$pr_status" = 0 ]
+}
+
 install_pkg() {
     if have pacman; then
         # shellcheck disable=SC2068
-        pacman -S --needed --noconfirm $@
+        pm_run pacman -S --needed --noconfirm $@
     elif have pkg; then
         # shellcheck disable=SC2068
-        pkg install -y $@
+        pm_run pkg install -y $@
     else
         err "no package manager here — cannot install $*"
         return 1
@@ -737,13 +775,13 @@ install_pkg() {
 upgrade_pkg() {
     if have pacman; then
         # shellcheck disable=SC2068
-        pacman -S --needed --noconfirm $@
+        pm_run pacman -S --needed --noconfirm $@
     elif have apt; then
         # shellcheck disable=SC2068
-        apt-get install -y -qq --only-upgrade $@
+        pm_run apt-get install -y -qq --only-upgrade $@
     elif have pkg; then
         # shellcheck disable=SC2068
-        pkg install -y $@
+        pm_run pkg install -y $@
     else
         err "no package manager here — cannot update $*"
         return 1

@@ -252,6 +252,14 @@ EOF
     cat > "$FIXBIN/pacman" <<EOF
 #!/bin/sh
 echo "\$@" >> "$ROOT/pkg.log"
+if [ "\${1:-}" = -S ]; then
+    # What the real one prints with no terminal, so --progress has lines to read.
+    echo ":: Synchronizing package databases..."
+    echo " demo-one-1-1-aarch64 downloading..."
+    echo "(1/1) checking package integrity"
+    echo "(1/1) installing demo-one"
+    echo ":: Running post-transaction hooks..."
+fi
 [ "\${1:-}" = -Q ] || exit 0
 [ "\${2:-}" = demo-build ] && exit 1
 exit 0
@@ -1522,6 +1530,24 @@ y
     fi
     expect_no_out "stdout alone carries no human narration" "Installing:"
     expect_file "the item really is installed" "$TESTHOME/.local/bin/fakebin"
+
+    # A package-manager item: what pacman prints becomes steps, and none of it
+    # reaches stdout.
+    tl remove demo-pkg -y
+    tl_stdout install demo-pkg --progress
+    expect_status "a --progress package install" 0
+    got=$(printf '%s\n' "$OUT" | awk -F '\t' '$1 == "step" && $2 == "demo-pkg" { print $3 }' | tr '\n' ' ')
+    case "$got" in
+        "10 "[1-5][0-9]" "*"60 75 85 90 100 ") pass ;;
+        *) fail "the package manager moves the bar: download, integrity, unpack, ready" "$got" ;;
+    esac
+    if printf '%s\n' "$got" | tr ' ' '\n' | awk 'NF && $1 + 0 <= last { bad = 1 } NF { last = $1 + 0 } END { exit bad }'; then
+        pass
+    else
+        fail "package step percentages only ever grow" "$got"
+    fi
+    expect_out "the package done line, ok" $'^done\tdemo-pkg\tok\tinstalled$'
+    expect_no_out "the package manager's own words stay off stdout" "checking package integrity"
 
     tl install badsum --progress
     expect_status "a failing --progress install still exits nonzero" 1
