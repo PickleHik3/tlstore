@@ -10,7 +10,7 @@ use crate::term::{Event, Key, MouseKind};
 
 use super::data::{Info, Item};
 use super::paint::{
-    draw_header, HeaderContent, Masthead, Paint, Slot, Slots, A_ALL, A_CONTEXT, A_HEADER, A_HOME,
+    self, draw_header, HeaderContent, Masthead, Paint, Slot, Slots, A_ALL, A_CONTEXT, A_HEADER, A_HOME,
 };
 use super::scene::El;
 use super::{header_for, installing::Installing, item::ItemView, Go, Store, Verb, View};
@@ -298,7 +298,8 @@ impl View for Front {
         if st.notice.is_none() && !self.sel.is_empty() {
             let names: Vec<String> = self.sel.iter().cloned().collect();
             let verb = if self.all_installed(st, &names) { "r removes them" } else { "i installs them" };
-            let text = format!("{} selected · {verb}, ␣ clears", self.sel.len());
+            let (_, space) = paint::key_glyphs(st.env.launcherctl.is_some());
+            let text = format!("{} selected · {verb}, {space} clears", self.sel.len());
             let line = layout::fit_line(&text, hdr.content.w);
             p.text(El::Notice, hdr.gutter, hdr.notice, &line, pal.dim_s());
         }
@@ -322,10 +323,11 @@ impl View for Front {
                 _ => Slot::new("i", "install", Key::Char('i')),
             }
         };
+        let (enter, space) = paint::key_glyphs(st.env.launcherctl.is_some());
         [
-            Some(Slot::new("⏎", "open", Key::Enter).when(has)),
+            Some(Slot::new(enter, "open", Key::Enter).when(has)),
             Some(verb.when(has)),
-            Some(Slot::new("␣", "select", Key::Char(' ')).when(has)),
+            Some(Slot::new(space, "select", Key::Char(' ')).when(has)),
             Some(Slot::new("f", "full", Key::Char('f')).when(st.env.launcherctl.is_some())),
             Some(Slot::new("q", "quit", Key::Char('q'))),
         ]

@@ -493,6 +493,14 @@ impl Slot {
     }
 }
 
+/// The Enter and Space key glyphs. Inside the launcher, the Nerd Font keyboard icons: its terminal
+/// routes the private-use planes to the bundled Symbols Nerd Font Mono, which draws them centred
+/// on the text's middle. Elsewhere ⏎ and ␣, which most text fonts lack, so a fallback face draws
+/// them — ⏎ above the middle, ␣ below the baseline.
+pub fn key_glyphs(launcher: bool) -> (&'static str, &'static str) {
+    if launcher { ("\u{f0311}", "\u{f1050}") } else { ("⏎", "␣") }
+}
+
 /// The five fixed slots.
 pub type Slots = [Option<Slot>; 5];
 

@@ -442,14 +442,6 @@ fn clip(
         .next_frame()?
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "APNG without frames"))?;
     drop(apng);
-    // The crop is chosen once, on the first frame, and every frame is cut there.
-    let fit = match fit {
-        Fit::Width => {
-            let band = (box_h as f64 * sw as f64 / box_w.max(1) as f64).round() as u32;
-            Fit::WidthFrom(file::busiest_top(sw, sh, &first.rgba, band))
-        }
-        f => f,
-    };
     let (w, h, rgba) = file::fit_into(sw, sh, &first.rgba, box_w, box_h, fit);
     let stride = apng::stride(frames, rgba.len());
     if frames.div_ceil(stride) <= 1 {

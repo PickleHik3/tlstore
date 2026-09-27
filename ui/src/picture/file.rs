@@ -10,12 +10,9 @@ pub enum Fit {
     Contain,
     /// Box filled exactly, aspect kept; the overflow is cropped evenly from both sides.
     Cover,
-    /// Box width filled, aspect kept; a picture taller than the box keeps the band with the
-    /// most detail (see [`busiest_top`]), a wider one comes back shorter than the box.
+    /// Box width filled, aspect kept; a picture taller than the box keeps its top (where a
+    /// screenshot's window and title bar are), a wider one comes back shorter than the box.
     Width,
-    /// As [`Fit::Width`], the band starting at this source row: every frame of a clip is cut
-    /// where its first frame was, so the crop never jumps.
-    WidthFrom(u32),
 }
 
 /// Decodes a PNG or JPEG (by its first bytes) to (width, height, straight RGBA).
@@ -88,71 +85,19 @@ pub fn fit_into(sw: u32, sh: u32, src: &[u8], box_w: u32, box_h: u32, fit: Fit) 
             let dh = ((sh as f64 * s).round() as u32).clamp(1, bh);
             (dw, dh, resize(sw, sh, src, (0.0, 0.0, sw as f64, sh as f64), dw, dh))
         }
-        Fit::Width | Fit::WidthFrom(_) if (sh as f64 * bw as f64 / sw as f64).round() as u32 <= bh => {
+        Fit::Width if (sh as f64 * bw as f64 / sw as f64).round() as u32 <= bh => {
             let dh = ((sh as f64 * bw as f64 / sw as f64).round() as u32).max(1);
             (bw, dh, resize(sw, sh, src, (0.0, 0.0, sw as f64, sh as f64), bw, dh))
         }
-        Fit::Cover | Fit::Width | Fit::WidthFrom(_) => {
+        Fit::Cover | Fit::Width => {
             let s = (bw as f64 / sw as f64).max(bh as f64 / sh as f64);
             let cw = bw as f64 / s;
             let ch = bh as f64 / s;
             let cx = (sw as f64 - cw) / 2.0;
-            let cy = match fit {
-                Fit::Width => busiest_top(sw, sh, src, ch.round() as u32) as f64,
-                Fit::WidthFrom(y) => (y as f64).min(sh as f64 - ch),
-                _ => (sh as f64 - ch) / 2.0,
-            };
+            let cy = if fit == Fit::Width { 0.0 } else { (sh as f64 - ch) / 2.0 };
             (bw, bh, resize(sw, sh, src, (cx, cy, cw, ch), bw, bh))
         }
     }
-}
-
-/// The first source row of the `band`-row stretch of a `sw`×`sh` picture with the most detail
-/// (summed luminance steps to the left and above, every other pixel), so a crop keeps what the
-/// picture is showing — a clock in the middle, a window at the top — not its empty margins.
-/// Rows near the band's middle weigh more, so the detail ends up centred; ties go to the higher
-/// band.
-pub fn busiest_top(sw: u32, sh: u32, src: &[u8], band: u32) -> u32 {
-    let (w, h) = (sw as usize, sh as usize);
-    let band = (band as usize).clamp(1, h.max(1));
-    if h <= band || w < 2 {
-        return 0;
-    }
-    let lum = |x: usize, y: usize| {
-        let i = (y * w + x) * 4;
-        let a = src[i + 3] as u32;
-        (src[i] as u32 * 3 + src[i + 1] as u32 * 6 + src[i + 2] as u32) * a / 2550
-    };
-    let rows: Vec<u64> = (0..h)
-        .map(|y| {
-            (1..w)
-                .step_by(2)
-                .map(|x| {
-                    let here = lum(x, y);
-                    let left = here.abs_diff(lum(x - 1, y));
-                    let up = if y > 0 { here.abs_diff(lum(x, y - 1)) } else { 0 };
-                    (left + up) as u64
-                })
-                .sum()
-        })
-        .collect();
-    // Rows count less towards the band's edges (down to half at the very edge), so the chosen
-    // band has its detail in the middle rather than pressed against the card's border.
-    let weight: Vec<u64> = (0..band)
-        .map(|i| {
-            let off = (2 * i as i64 + 1 - band as i64).unsigned_abs();
-            (2 * band as u64).saturating_sub(off) // 2·band at the centre, ~band at the edges
-        })
-        .collect();
-    let (mut best, mut best_sum) = (0, 0u64);
-    for top in 0..=h - band {
-        let sum: u64 = rows[top..top + band].iter().zip(&weight).map(|(r, w)| r * w).sum();
-        if sum > best_sum {
-            best = top;
-            best_sum = sum;
-        }
-    }
-    best as u32
 }
 
 /// Resamples the source window (x, y, w, h) in source pixels to dw×dh with a separable tent
@@ -261,22 +206,14 @@ mod tests {
     }
 
     #[test]
-    fn width_crops_to_the_busiest_band() {
-        // 10×40, flat except a striped band at rows 24–31: a 10×10 box keeps that band.
+    fn width_keeps_the_top_of_a_tall_picture() {
+        // 10×40, dark except a bright band at rows 24–31: a 10×10 box keeps rows 0–9 only.
         let mut src = solid(10, 40, [20, 20, 20, 255]);
-        for y in 24..32 {
-            for x in 0..10 {
-                let v = if (x + y) % 2 == 0 { 250 } else { 0 };
-                let i = (y * 10 + x) * 4;
-                src[i..i + 3].copy_from_slice(&[v, v, v]);
-            }
+        for px in src[24 * 40..32 * 40].chunks_mut(4) {
+            px[..3].copy_from_slice(&[250, 250, 250]);
         }
-        let top = busiest_top(10, 40, &src, 10);
-        assert!((22..=24).contains(&top), "{top}");
         let (_, _, px) = fit_into(10, 40, &src, 10, 10, Fit::Width);
-        assert!(px.chunks(4).any(|p| p[0] == 250), "the stripes are in the crop");
-        let (_, _, px) = fit_into(10, 40, &src, 10, 10, Fit::WidthFrom(0));
-        assert!(px.chunks(4).all(|p| p[0] == 20), "a fixed band at the top has none");
+        assert!(px.chunks(4).all(|p| p[0] == 20), "the crop is the top band");
     }
 
     #[test]
