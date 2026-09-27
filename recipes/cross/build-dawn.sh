@@ -23,6 +23,7 @@ PATCHES=(
     "$SCRIPT_DIR/0003-dawn-edit-tools.patch"
     "$SCRIPT_DIR/0004-dawn-skip-unchanged-frames.patch"
     "$SCRIPT_DIR/0005-dawn-note-context.patch"
+    "$SCRIPT_DIR/0006-dawn-ai-stop-and-status.patch"
 )
 
 TL_NDK=${TL_NDK:-"$HOME/android-sdk/ndk/27.2.12479018"}
