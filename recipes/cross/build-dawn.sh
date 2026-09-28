@@ -18,7 +18,7 @@
 set -euo pipefail
 
 DAWN_URL="https://github.com/PickleHik3/dawn.git"
-DAWN_COMMIT="167268194c2f148d2e17ccbdb7ee45433c2cad00"   # tl: upstream 0e958747 (v0.1.3 plus fixes) + touch
+DAWN_COMMIT="8f936464d241f0dc607232630b00c144e2c2e347"   # tl: upstream 0e958747 (v0.1.3 plus fixes) + touch, data safety, P1 (palette, notices, AI queue)
 DAWN_VERSION_STRING="0.1.3+0e958747"
 
 TL_NDK=${TL_NDK:-"$HOME/android-sdk/ndk/27.2.12479018"}
