@@ -26,6 +26,7 @@ PATCHES=(
     "$SCRIPT_DIR/0006-dawn-ai-stop-and-status.patch"
     "$SCRIPT_DIR/0007-dawn-heading-cursor.patch"
     "$SCRIPT_DIR/0008-dawn-p0-data-safety.patch"
+    "$SCRIPT_DIR/0009-dawn-touch.patch"
 )
 
 TL_NDK=${TL_NDK:-"$HOME/android-sdk/ndk/27.2.12479018"}
