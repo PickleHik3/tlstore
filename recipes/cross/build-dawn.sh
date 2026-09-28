@@ -1,6 +1,10 @@
 #!/bin/bash
 # build-dawn.sh — cross-compile the dawn markdown drafter for Termux aarch64 from a Linux host.
 #
+# The source is the PickleHik3/dawn fork, branch tl: upstream andrewmd5/dawn 0e958747 with the
+# launcher's changes as commits (they used to be patches 0001-0009 here). The store still credits
+# and stars andrewmd5/dawn — that is the catalog's `upstream` column, not this URL.
+#
 # dawn is plain C with its parsers vendored in, so the only library it needs from the device is
 # libcurl. The AI chat is built in: upstream's chat talks only to Apple Intelligence, and the
 # bridge patch points it at Termux Launcher's TAI instead, or at any OpenAI-compatible server
@@ -13,21 +17,9 @@
 #   ./termux-sysroot.sh libcurl openssl zlib libnghttp2
 set -euo pipefail
 
-DAWN_URL="https://github.com/andrewmd5/dawn.git"
-DAWN_COMMIT="0e9587477463ece157ef7eea66c9e34bc5c7737a"   # main, 2026-04-29 (v0.1.3 plus fixes)
+DAWN_URL="https://github.com/PickleHik3/dawn.git"
+DAWN_COMMIT="167268194c2f148d2e17ccbdb7ee45433c2cad00"   # tl: upstream 0e958747 (v0.1.3 plus fixes) + touch
 DAWN_VERSION_STRING="0.1.3+0e958747"
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-PATCHES=(
-    "$SCRIPT_DIR/0001-dawn-termux-clipboard.patch"
-    "$SCRIPT_DIR/0002-dawn-openai-bridge.patch"
-    "$SCRIPT_DIR/0003-dawn-edit-tools.patch"
-    "$SCRIPT_DIR/0004-dawn-skip-unchanged-frames.patch"
-    "$SCRIPT_DIR/0005-dawn-note-context.patch"
-    "$SCRIPT_DIR/0006-dawn-ai-stop-and-status.patch"
-    "$SCRIPT_DIR/0007-dawn-heading-cursor.patch"
-    "$SCRIPT_DIR/0008-dawn-p0-data-safety.patch"
-    "$SCRIPT_DIR/0009-dawn-touch.patch"
-)
 
 TL_NDK=${TL_NDK:-"$HOME/android-sdk/ndk/27.2.12479018"}
 TL_SYSROOT=${TL_SYSROOT:-"$PWD/sysroot"}
@@ -43,13 +35,14 @@ PREFIX_IN_SYSROOT="$TL_SYSROOT$TERMUX_PREFIX"
     exit 1
 }
 [ -d "$TL_NDK" ] || { echo "error: NDK not found at $TL_NDK (set TL_NDK)" >&2; exit 1; }
-for patch in "${PATCHES[@]}"; do
-    [ -f "$patch" ] || { echo "error: patch not found at $patch" >&2; exit 1; }
-done
 
 mkdir -p "$TL_OUT" "$TL_BUILD_DIR"
 source_dir="$TL_BUILD_DIR/source"
 
+# A checkout left by an older pin (or by the patch-based recipe) is refetched, not reused.
+if [ -d "$source_dir/.git" ] && [ "$(git -C "$source_dir" rev-parse HEAD 2>/dev/null)" != "$DAWN_COMMIT" ]; then
+    rm -rf "$source_dir"
+fi
 if [ ! -d "$source_dir/.git" ]; then
     echo "Fetching dawn $DAWN_COMMIT..."
     git init -q "$source_dir"
@@ -57,10 +50,6 @@ if [ ! -d "$source_dir/.git" ]; then
     git -C "$source_dir" fetch -q --depth 1 origin "$DAWN_COMMIT"
     git -C "$source_dir" checkout -q --detach FETCH_HEAD
     git -C "$source_dir" submodule update -q --init --recursive --depth 1
-    for patch in "${PATCHES[@]}"; do
-        echo "Applying $(basename "$patch")..."
-        git -C "$source_dir" apply "$patch"
-    done
 fi
 
 # The same CMAKE_FIND_ROOT_PATH_MODE_* reasoning as build-fastfetch.sh: with BOTH, CMake finds the
