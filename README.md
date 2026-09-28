@@ -80,8 +80,8 @@ line of `SHA256SUMS`.
 | `kitten-aarch64` | kitty `v0.48.2` (`2cb1d95c`), unmodified | [kovidgoyal/kitty `v0.48.2`](https://github.com/kovidgoyal/kitty/tree/v0.48.2) |
 | `fastfetch-aarch64` | Fastfetch `v2.67.0` + `recipes/termux/fastfetch/0001-kitty-animation.patch`, for the `com.termux` prefix | [fastfetch-cli/fastfetch `9c7cfb86`](https://github.com/fastfetch-cli/fastfetch/tree/9c7cfb864ff9154ffe951fae191c14d60bb91544) |
 | `fastfetch-io.vaj.tl-aarch64` | the same build, for the `io.vaj.tl` prefix | [fastfetch-cli/fastfetch `9c7cfb86`](https://github.com/fastfetch-cli/fastfetch/tree/9c7cfb864ff9154ffe951fae191c14d60bb91544) |
-| `dawn-aarch64` | dawn `0.1.3+0e958747` with the launcher's changes (clipboard, AI chat and editing, touch, data safety), for the `com.termux` prefix | [PickleHik3/dawn `8f936464`](https://github.com/PickleHik3/dawn/tree/8f936464d241f0dc607232630b00c144e2c2e347), a fork of andrewmd5/dawn `0e958747` |
-| `dawn-io.vaj.tl-aarch64` | the same build, for the `io.vaj.tl` prefix | [PickleHik3/dawn `8f936464`](https://github.com/PickleHik3/dawn/tree/8f936464d241f0dc607232630b00c144e2c2e347) |
+| `dawn-aarch64` | dawn `0.1.3+0e958747` with the launcher's changes (clipboard, AI chat and editing, touch, data safety), for the `com.termux` prefix | [PickleHik3/dawn `d17ee4ae`](https://github.com/PickleHik3/dawn/tree/d17ee4ae9f29cb7da99edf7566d4d7ebf02a95c5), a fork of andrewmd5/dawn `0e958747` |
+| `dawn-io.vaj.tl-aarch64` | the same build, for the `io.vaj.tl` prefix | [PickleHik3/dawn `d17ee4ae`](https://github.com/PickleHik3/dawn/tree/d17ee4ae9f29cb7da99edf7566d4d7ebf02a95c5) |
 | `sigye-aarch64` | Sigye `v0.6.0` + `recipes/termux/sigye/0001-termux-clipboard.patch` | [am2rican5/sigye `0f0b8caa`](https://github.com/am2rican5/sigye/tree/0f0b8caaccb4ca01ab5d1fad1237c4a01a49766f) |
 | `btop-aarch64` | btop `v1.4.7` + `recipes/cross/0001`–`0006-btop-*.patch`, fully static | [aristocratos/btop `6e39144a`](https://github.com/aristocratos/btop/tree/6e39144aaf5a6bc01b9f795010b0914431067183) |
 | `tl-priv-aarch64` | `recipes/cross/tl-priv/tl-priv.c`, fully static | this repository |
@@ -236,7 +236,7 @@ top of andrewmd5/dawn `0e958747`:
 
 ```sh
 git clone --branch tl https://github.com/PickleHik3/dawn && cd dawn
-git checkout 8f936464d241f0dc607232630b00c144e2c2e347
+git checkout d17ee4ae9f29cb7da99edf7566d4d7ebf02a95c5
 git submodule update --init --recursive
 ```
 
