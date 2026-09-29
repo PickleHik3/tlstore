@@ -594,3 +594,24 @@ after every tick.
 
 `TLSTORE_VERSION` moves to 0.7: a phone on 0.6 only sees this once a release carries a newer
 script.
+
+## Revision 10 — items that own commands a package owns (tlstore 0.8)
+
+`termux-api-shims` installs commands (`termux-clipboard-get`, `termux-notification`, ...) that the
+apt package `termux-api` also installs. tlstore never writes into Termux's own `bin`, so the two
+would not overwrite each other — but `~/.local/bin` comes first on PATH, and the shims would
+silently shadow the real commands. The engine learns to refuse instead.
+
+| addition | meaning |
+|---|---|
+| `conflicts=<pkg,pkg>` | any kind. `install` refuses the item — exit 1, `<name> cannot be installed while the <pkg> package is: both provide the same commands. Remove it first (pkg uninstall <pkg>), then install <name> again.` — while a listed package is installed (`pacman -Q`, else `dpkg-query` status `installed`, so a removed package with only config files left does not count, else `command -v`). It is checked for every item in the plan before the "Go ahead?" question and before anything is fetched, and again in `install_item`. An item that is already installed is not refused afterwards, and `update`, `remove` and `snapshot` never look at it. A part installs before the item that needs it, so the option goes on the visible item and on every part |
+
+An engine older than 0.8 ignores the option (an unknown `options` key is skipped), which is why
+`TLSTORE_VERSION` moves to 0.8: a phone takes the new script with the release that carries the
+row. `scripts/test.sh` covers the option with a bundle and a part under a fake `pacman` that
+reports `termux-api` only while a marker file exists.
+
+The shims themselves are `file` items, one per command, each `mode=755` at
+`~/.local/bin/<command>`, sourced as `binaries:shims/termux-api/<command>@<ref>` — a path in this
+repository, digest-checked from `SHA256SUMS` like a pinned readme. The visible item is a
+`bundle`. See `docs/maintainer/termux-api-shims.md`.

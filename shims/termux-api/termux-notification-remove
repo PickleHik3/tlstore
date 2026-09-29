@@ -1,0 +1,35 @@
+#!/bin/sh
+# termux-notification-remove — Termux:API-compatible shim over `launcherctl notify --close`.
+# Part of the tlstore item termux-api-shims (docs/maintainer/termux-api-shims.md).
+#
+# Mirrors termux-api-package scripts/termux-notification-remove.in:
+#   https://github.com/termux/termux-api-package/blob/master/scripts/termux-notification-remove.in
+# Removes a notification shown earlier with termux-notification --id.
+set -eu
+
+SCRIPTNAME=termux-notification-remove
+die() { echo "$SCRIPTNAME: $*" >&2; exit 1; }
+command -v launcherctl >/dev/null 2>&1 ||
+    die "launcherctl not found; this command needs Termux Launcher (open the app once so it installs launcherctl)"
+lctl() {
+    if LCTL_OUT=$(launcherctl "$@" 2>&1); then return 0; fi
+    die "launcherctl $1 failed${LCTL_OUT:+: $LCTL_OUT}"
+}
+
+show_usage() {
+    echo "Usage: $SCRIPTNAME notification-id"
+    echo "Remove a notification previously shown with termux-notification --id."
+    exit 0
+}
+
+while getopts :h option; do
+    case "$option" in
+        h) show_usage ;;
+        ?) echo "$SCRIPTNAME: illegal option -$OPTARG" >&2; exit 1 ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+if [ $# != 1 ]; then echo "$SCRIPTNAME: no notification id specified" >&2; exit 1; fi
+
+lctl notify --close "$1" </dev/null

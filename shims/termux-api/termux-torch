@@ -1,0 +1,33 @@
+#!/bin/sh
+# termux-torch — Termux:API-compatible shim over `launcherctl torch`.
+# Part of the tlstore item termux-api-shims (docs/maintainer/termux-api-shims.md).
+#
+# Mirrors termux-api-package scripts/termux-torch.in:
+#   https://github.com/termux/termux-api-package/blob/master/scripts/termux-torch.in
+# termux-torch on|off. Prints nothing on success, as upstream does.
+set -eu
+
+SCRIPTNAME=termux-torch
+die() { echo "$SCRIPTNAME: $*" >&2; exit 1; }
+command -v launcherctl >/dev/null 2>&1 ||
+    die "launcherctl not found; this command needs Termux Launcher (open the app once so it installs launcherctl)"
+lctl() {
+    if LCTL_OUT=$(launcherctl "$@" 2>&1); then return 0; fi
+    die "launcherctl $1 failed${LCTL_OUT:+: $LCTL_OUT}"
+}
+
+show_usage() {
+    echo "Usage: $SCRIPTNAME [on | off]"
+    echo "Toggle LED Torch on device"
+    exit 1
+}
+
+if [ "$#" -ne 1 ]; then
+    echo "Illegal param count" >&2
+    show_usage
+fi
+
+case "$1" in
+    on|off) lctl torch "$1" </dev/null ;;
+    *) echo "Illegal parameter: $1" >&2; show_usage ;;
+esac

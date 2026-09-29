@@ -1,0 +1,49 @@
+#!/bin/sh
+# termux-vibrate — Termux:API-compatible shim over `launcherctl vibrate`.
+# Part of the tlstore item termux-api-shims (docs/maintainer/termux-api-shims.md).
+#
+# Mirrors termux-api-package scripts/termux-vibrate.in:
+#   https://github.com/termux/termux-api-package/blob/master/scripts/termux-vibrate.in
+# -d duration in ms (default 1000, launcherctl caps it at 10 s), -f force even when the
+# launcher's haptics setting is off. Prints nothing on success, as upstream does.
+set -eu
+
+SCRIPTNAME=termux-vibrate
+die() { echo "$SCRIPTNAME: $*" >&2; exit 1; }
+command -v launcherctl >/dev/null 2>&1 ||
+    die "launcherctl not found; this command needs Termux Launcher (open the app once so it installs launcherctl)"
+lctl() {
+    if LCTL_OUT=$(launcherctl "$@" 2>&1); then return 0; fi
+    die "launcherctl $1 failed${LCTL_OUT:+: $LCTL_OUT}"
+}
+
+show_usage() {
+    echo "Usage: $SCRIPTNAME [-d duration] [-f]"
+    echo "Vibrate the device."
+    echo "  -d duration  the duration to vibrate in ms (default:1000)"
+    echo "  -f           force vibration even in silent mode"
+    exit 0
+}
+
+duration=""
+force=0
+while getopts :hfd: option; do
+    case "$option" in
+        h) show_usage ;;
+        d) duration=$OPTARG ;;
+        f) force=1 ;;
+        ?) echo "$SCRIPTNAME: illegal option -$OPTARG" >&2; exit 1 ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+if [ $# != 0 ]; then echo "$SCRIPTNAME: too many arguments" >&2; exit 1; fi
+
+case "$duration" in
+    *[!0-9]*) die "duration must be a whole number of milliseconds, got: $duration" ;;
+esac
+
+set -- vibrate
+if [ -n "$duration" ]; then set -- "$@" -d "$duration"; fi
+if [ "$force" = 1 ]; then set -- "$@" --force; fi
+lctl "$@" </dev/null

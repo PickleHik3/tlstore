@@ -21,7 +21,7 @@ which opens a picker over every item you do not have yet.
 
 ## What's in the store
 
-Eight items, and each one brings whatever it needs along with it.
+Nine items, and each one brings whatever it needs along with it.
 
 | item | what you get |
 | --- | --- |
@@ -33,6 +33,7 @@ Eight items, and each one brings whatever it needs along with it.
 | `kitten` | Kitty's companion tool, for showing images and sending files from the terminal. |
 | `opencode` | [opencode](https://opencode.ai), an open source coding agent for the terminal. About 200 MB. |
 | `sigye` | A clock for the terminal. |
+| `termux-api-shims` | The `termux-clipboard-get`, `termux-notification`, `termux-toast`, `termux-battery-status` and other Termux:API commands, working without the Termux:API app. See "The termux-api commands" below. |
 
 The wallpaper-matching oh-my-posh prompt theme and the Neovim colour scheme are set up from
 Settings › Look now, not from tlstore.
@@ -129,6 +130,24 @@ and `fisher update` in a fish shell brings them forward.
 
 The wallpaper-matching prompt theme itself, and a matching Neovim colour scheme, come from
 Settings › Look's "Tools that follow the terminal colours" instead of tlstore.
+
+## The termux-api commands
+
+`tlstore install termux-api-shims` puts the familiar Termux:API commands in `~/.local/bin`:
+`termux-clipboard-get`, `termux-clipboard-set`, `termux-notification`, `termux-notification-remove`,
+`termux-notification-list`, `termux-toast`, `termux-vibrate`, `termux-torch`,
+`termux-battery-status`, `termux-volume` and `termux-wallpaper`. They print what the originals
+print (plain text for the clipboard, JSON with the same field names for the battery, the volumes
+and the notification list) and take the same options, so scripts written for Termux:API run
+unchanged — no companion app needed, only this launcher.
+
+Options the launcher cannot honour (notification buttons and actions, sounds, LED colours, toast
+colours and position) are accepted and skipped with a one-line warning on stderr. When the launcher
+is not running, or `launcherctl` is not on the path, the commands exit non-zero and say why.
+
+The real Termux:API package provides the same commands, so tlstore refuses to install the shims
+while it is there and tells you to remove it first (`pkg uninstall termux-api`). `termux-wallpaper`
+needs a launcher build with `launcherctl wallpaper`.
 
 ## Where things go
 

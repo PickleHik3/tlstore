@@ -1,0 +1,108 @@
+#!/bin/sh
+# termux-notification — Termux:API-compatible shim over `launcherctl notify`.
+# Part of the tlstore item termux-api-shims (docs/maintainer/termux-api-shims.md).
+#
+# Mirrors termux-api-package scripts/termux-notification.in:
+#   https://github.com/termux/termux-api-package/blob/master/scripts/termux-notification.in
+#
+# Supported: -t/--title, -c/--content (else stdin), -i/--id, --priority (min/low -> low,
+# default -> normal, high/max -> critical). Every other option upstream knows (--action,
+# --button*, --image-path, --led-*, --sound, --vibrate, --ongoing, --type media, ...) is
+# accepted, ignored, and named in a one-line warning on stderr; none of them fails the command.
+# Prints nothing on success, as upstream does. Options take their value as "--opt value",
+# "--opt=value", "-t value" or "-tvalue".
+set -eu
+
+SCRIPTNAME=termux-notification
+die() { echo "$SCRIPTNAME: $*" >&2; exit 1; }
+warn() { echo "$SCRIPTNAME: ignoring unsupported option $1" >&2; }
+command -v launcherctl >/dev/null 2>&1 ||
+    die "launcherctl not found; this command needs Termux Launcher (open the app once so it installs launcherctl)"
+lctl() {
+    if LCTL_OUT=$(launcherctl "$@" 2>&1); then return 0; fi
+    die "launcherctl $1 failed${LCTL_OUT:+: $LCTL_OUT}"
+}
+
+show_usage() {
+    echo "Usage: termux-notification [options]"
+    echo "Display a notification. Content text is specified using -c/--content or read from stdin."
+    echo "  -c/--content content     content to show in the notification (takes precedence over stdin)"
+    echo "  -h/--help                show this help"
+    echo "  -i/--id id               notification id (overwrites any previous notification with the same id)"
+    echo "  --priority prio          notification priority (high/low/max/min/default)"
+    echo "  -t/--title title         notification title to show"
+    echo "Accepted and ignored, with a warning, because the launcher cannot honour them:"
+    echo "  --action, --alert-once, --button1..3, --button1..3-action, --channel, --group, --icon,"
+    echo "  --image-path, --led-color, --led-off, --led-on, --media-*, --on-delete, --ongoing,"
+    echo "  --sound, --type (other than default), --vibrate"
+    exit 0
+}
+
+title=""
+content=""
+have_content=0
+id=""
+priority=""
+
+while [ $# -gt 0 ]; do
+    opt=$1
+    val=""
+    hasval=0
+    case "$opt" in
+        --) shift; break ;;
+        --*=*) val=${opt#*=}; opt=${opt%%=*}; hasval=1; shift ;;
+        -[tci]?*) val=${opt#??}; opt=${opt%"$val"}; hasval=1; shift ;;
+        -?|--*) shift ;;
+        *) break ;;
+    esac
+    case "$opt" in
+        -h|--help|--help-actions) show_usage ;;
+        --alert-once|--ongoing|--sound) warn "$opt"; continue ;;
+        -t|--title|-c|--content|-i|--id|--priority|--type| \
+        --action|--button1|--button1-action|--button2|--button2-action|--button3|--button3-action| \
+        --channel|--group|--icon|--image-path|--led-color|--led-off|--led-on| \
+        --media-next|--media-pause|--media-play|--media-previous|--on-delete|--vibrate)
+            if [ "$hasval" = 0 ]; then
+                [ $# -gt 0 ] || die "option '$opt' requires an argument"
+                val=$1
+                shift
+            fi
+            ;;
+        *) die "unrecognized option '$opt'" ;;
+    esac
+    case "$opt" in
+        -t|--title) title=$val ;;
+        -c|--content) content=$val; have_content=1 ;;
+        -i|--id) id=$val ;;
+        --priority) priority=$val ;;
+        --type) if [ "$val" != default ]; then warn "$opt $val"; fi ;;
+        *) warn "$opt" ;;
+    esac
+done
+
+if [ $# != 0 ]; then echo "$SCRIPTNAME: too many arguments" >&2; exit 1; fi
+
+case "$priority" in
+    "") urgency="" ;;
+    min|low) urgency=low ;;
+    default) urgency=normal ;;
+    high|max) urgency=critical ;;
+    *) echo "$SCRIPTNAME: unknown priority '$priority', using default" >&2; urgency=normal ;;
+esac
+
+# Content that was not passed as an argument is read from stdin; upstream waits at most 3 s.
+if [ "$have_content" = 0 ] && [ ! -t 0 ]; then
+    if command -v timeout >/dev/null 2>&1; then
+        content=$(timeout 3 cat || true)
+    else
+        content=$(cat)
+    fi
+fi
+
+[ -n "$title" ] || [ -n "$content" ] || die "nothing to show (give -t/--title or -c/--content, or text on stdin)"
+
+set -- notify
+if [ -n "$title" ]; then set -- "$@" --title "$title"; fi
+if [ -n "$id" ]; then set -- "$@" --id "$id"; fi
+if [ -n "$urgency" ]; then set -- "$@" --urgency "$urgency"; fi
+lctl "$@" -- "$content" </dev/null

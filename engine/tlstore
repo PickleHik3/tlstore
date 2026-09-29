@@ -46,7 +46,7 @@
 
 set -u
 
-TLSTORE_VERSION=0.7
+TLSTORE_VERSION=0.8
 
 # The store program that pairs with this script, one digest per processor.
 # Empty in the source tree: scripts/release.sh --prepare fills them in from
@@ -820,6 +820,33 @@ pkg_present() {
     fi
 }
 
+# Is this package really installed? Like pkg_present, but on a dpkg host a package that was
+# removed and left only its config files behind ("rc") does not count — apt's own view of it.
+conflict_present() {
+    if have pacman || ! have dpkg-query; then
+        pkg_present "$1"
+    else
+        # shellcheck disable=SC2016  # dpkg-query's format, not a shell expansion
+        [ "$(dpkg-query -W -f='${db:Status-Status}' "$1" 2>/dev/null)" = installed ]
+    fi
+}
+
+# conflict_check <name> — an item with conflicts=<packages> owns commands a package also owns,
+# so it is refused (return 1, saying which package to remove) while one of them is installed,
+# rather than shadowing or overwriting what that package put there.
+conflict_check() {
+    cc_list=$(opt "$(field "$(row "$1")" 9)" conflicts)
+    [ -n "$cc_list" ] || return 0
+    for cc_p in $(commas "$cc_list"); do
+        if conflict_present "$cc_p"; then
+            err "$1 cannot be installed while the $cc_p package is: both provide the same commands. Remove it first (pkg uninstall $cc_p), then install $1 again."
+            PROGRESS_NOTE="remove the $cc_p package first"
+            return 1
+        fi
+    done
+    return 0
+}
+
 # ---------------------------------------------------------------------------
 # Lists of names (space separated; names are [a-z0-9-]+ so words are safe)
 # ---------------------------------------------------------------------------
@@ -988,6 +1015,7 @@ install_item() {
         PROGRESS_NOTE="already installed"
         return 0
     fi
+    conflict_check "$ii_name" || return 1
 
     case "$ii_kind" in
         pkg) do_pkg ;;
@@ -2692,6 +2720,10 @@ cmd_install() {
     if ! ci_plan=$(plan_for $ci_names); then
         return 1
     fi
+    # A package that owns the same commands is reported before anything is asked or fetched.
+    for ci_n in $ci_plan; do
+        is_installed "$ci_n" || conflict_check "$ci_n" || return 1
+    done
     say "Installing: $(words_list "$ci_plan")"
     ask_yn "Go ahead?" || { say "Nothing was installed."; return 0; }
     add_build_tools "$ci_plan" 0 || return 1

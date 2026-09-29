@@ -33,7 +33,11 @@
 #           shell user through its privileged lane. The program lands off PATH
 #           under ~/.local/lib/tlstore/priv/<name> and a wrapper at
 #           ~/.local/bin/<name> hands it to tl-priv, so the row requires
-#           tl-priv and is host=launcher; docs/maintainer/catalog.md)
+#           tl-priv and is host=launcher; docs/maintainer/catalog.md),
+#           conflicts=<pkg,pkg> (packages that own the same commands: install
+#           refuses, naming the package to remove, while one of them is
+#           installed. Put it on the visible item and on every part, since a
+#           part installs first. docs/maintainer/termux-api-shims.md)
 # summary   one plain sentence — it is what list and search show the user
 #
 # tlstore-ui (Revision 5) reads the rest through `tlstore info --tsv`/`list
@@ -61,8 +65,9 @@
 #               digest for `readme` and for `demo`) alongside it the same way
 #               it already computes picture-digest for `picture`.
 #
-# Eight items are visible, in the order they appear here: btop, claude-code,
-# dawn, fastfetch, fish-shell, kitten, opencode, sigye. Everything else is
+# Nine items are visible, in the order they appear here: btop, claude-code,
+# dawn, fastfetch, fish-shell, kitten, opencode, sigye, termux-api-shims.
+# Everything else is
 # hidden=1 — a part another item pulls in, never listed and never installed by
 # name.
 #
@@ -79,6 +84,7 @@ fish-shell	bundle	-	*	-	-	fish,config-fish,personal-fish,oh-my-posh,eza,zoxide,f
 kitten	binary	0.48.2	*	binaries:kitten@bins-2026.09.25-2	-	-	-	Kitty's companion tool, for images and files in the terminal.	Tools	kovidgoyal/kitty	0	a companion for pictures and files	Shows pictures right in the terminal	Sends files between machines	Compares files side by side	kitten --help	best in a kitty-compatible terminal	Kovid Goyal	GPL-3.0	-	launcher:scripts/tlstore/pictures/kitten.jpg@5253e29ae8e128aad09b08fd57eb115ba66140d8	-	0	-	-
 opencode	npm-musl	latest	com.termux,io.vaj.tl	npm:@opencode/cli-linux-arm64-musl#bin/opencode	-	musl-loader,musl-libstdcxx,musl-libgcc,ripgrep,launcher-skill	env=OPENCODE_DISABLE_AUTOUPDATE=1;tz=1;build=patchelf;musl-libs=musl-libstdcxx,musl-libgcc	The open source coding agent, version 2, about 200 MB.	AI	anomalyco/opencode	0	an open source agent for the terminal	Writes and edits code from your prompts	Talks to the provider you choose	Keeps its own updater switched off	opencode	about 200 mb|needs a provider account to sign in|keeps a background server running; opencode service stop ends it	anomalyco	MIT	~200 MB	launcher:scripts/tlstore/pictures/opencode.jpg@5253e29ae8e128aad09b08fd57eb115ba66140d8	-	0	-	binaries:readme/opencode.md@2026.09.24
 sigye	binary	0.6.0	*	binaries:sigye@bins-2026.09.25-3	-	-	-	A clock for the terminal.	Tools	am2rican5/sigye	0	a clock built for the terminal	Shows the time in ascii art	Switches between clock styles	Cycles through colour themes	sigye	-	am2rican5	MIT	-	launcher:scripts/tlstore/pictures/sigye.jpg@5253e29ae8e128aad09b08fd57eb115ba66140d8	binaries:hero/sigye.png@2026.09.24	0	-	binaries:readme/sigye.md@2026.09.24
+termux-api-shims	bundle	-	*	-	-	termux-api-shim-battery-status,termux-api-shim-clipboard-get,termux-api-shim-clipboard-set,termux-api-shim-notification,termux-api-shim-notification-list,termux-api-shim-notification-remove,termux-api-shim-toast,termux-api-shim-torch,termux-api-shim-vibrate,termux-api-shim-volume,termux-api-shim-wallpaper	conflicts=termux-api;host=launcher	The Termux:API commands, working without the Termux:API app.	Tools	-	0	the termux-api commands, without the app	-	-	-	termux-battery-status	needs launcherctl from this launcher|refuses to install beside the termux-api package	PickleHik3	GPL-3.0	-	-	-	0	-	binaries:readme/termux-api-shims.md@98bac2968cba00166609dee25d4e2665b21a38db
 config-fish	file	e4422e22	*	launcher:docs/en/examples/config.fish@e4422e22c5a7a760c5bb1391e5978c8c7b36eb5f	~/.config/fish/config.fish	fish	hidden=1	The launcher's fish configuration.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
 dawn-libs	pkg	-	*	libcurl	-	-	hidden=1	The web library dawn uses to fetch a linked picture.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
 eza	pkg	-	*	eza	-	-	hidden=1	A colourful, icon-aware replacement for ls.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
@@ -106,3 +112,14 @@ launcher-skill-show	file	b3d9334e	*	launcher:resources/agent-skills/termux-launc
 launcher-skill-copy	file	b3d9334e	*	launcher:resources/agent-skills/termux-launcher/scripts/copy.sh@b3d9334e4e1994d5a2ab666e8d9179d9fc67494b	~/.claude/skills/termux-launcher/scripts/copy.sh	-	hidden=1;mode=755	Lets an agent put text on the clipboard.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
 launcher-skill	bundle	-	*	-	-	launcher-skill-md,launcher-skill-launcherctl,launcher-skill-terminal,launcher-skill-display,launcher-skill-notify,launcher-skill-progress,launcher-skill-show,launcher-skill-copy	hidden=1	What agents need to use Termux Launcher's panes, signals and display.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
 claude-panes-skill	file-once	aea80bf2	*	launcher:resources/agent-skills/termux-launcher-panes/SKILL.md@aea80bf215a6a44951154d9b600abddca56c8c49	~/.claude/skills/termux-launcher-panes/SKILL.md	-	hidden=1;retired=1	Teaches Claude Code the launcher's pane commands.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
+termux-api-shim-battery-status	file	98bac296	*	binaries:shims/termux-api/termux-battery-status@98bac2968cba00166609dee25d4e2665b21a38db	~/.local/bin/termux-battery-status	-	hidden=1;mode=755;host=launcher;conflicts=termux-api	The termux-battery-status command.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
+termux-api-shim-clipboard-get	file	98bac296	*	binaries:shims/termux-api/termux-clipboard-get@98bac2968cba00166609dee25d4e2665b21a38db	~/.local/bin/termux-clipboard-get	-	hidden=1;mode=755;host=launcher;conflicts=termux-api	The termux-clipboard-get command.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
+termux-api-shim-clipboard-set	file	98bac296	*	binaries:shims/termux-api/termux-clipboard-set@98bac2968cba00166609dee25d4e2665b21a38db	~/.local/bin/termux-clipboard-set	-	hidden=1;mode=755;host=launcher;conflicts=termux-api	The termux-clipboard-set command.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
+termux-api-shim-notification	file	98bac296	*	binaries:shims/termux-api/termux-notification@98bac2968cba00166609dee25d4e2665b21a38db	~/.local/bin/termux-notification	-	hidden=1;mode=755;host=launcher;conflicts=termux-api	The termux-notification command.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
+termux-api-shim-notification-list	file	98bac296	*	binaries:shims/termux-api/termux-notification-list@98bac2968cba00166609dee25d4e2665b21a38db	~/.local/bin/termux-notification-list	-	hidden=1;mode=755;host=launcher;conflicts=termux-api	The termux-notification-list command.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
+termux-api-shim-notification-remove	file	98bac296	*	binaries:shims/termux-api/termux-notification-remove@98bac2968cba00166609dee25d4e2665b21a38db	~/.local/bin/termux-notification-remove	-	hidden=1;mode=755;host=launcher;conflicts=termux-api	The termux-notification-remove command.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
+termux-api-shim-toast	file	98bac296	*	binaries:shims/termux-api/termux-toast@98bac2968cba00166609dee25d4e2665b21a38db	~/.local/bin/termux-toast	-	hidden=1;mode=755;host=launcher;conflicts=termux-api	The termux-toast command.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
+termux-api-shim-torch	file	98bac296	*	binaries:shims/termux-api/termux-torch@98bac2968cba00166609dee25d4e2665b21a38db	~/.local/bin/termux-torch	-	hidden=1;mode=755;host=launcher;conflicts=termux-api	The termux-torch command.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
+termux-api-shim-vibrate	file	98bac296	*	binaries:shims/termux-api/termux-vibrate@98bac2968cba00166609dee25d4e2665b21a38db	~/.local/bin/termux-vibrate	-	hidden=1;mode=755;host=launcher;conflicts=termux-api	The termux-vibrate command.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
+termux-api-shim-volume	file	98bac296	*	binaries:shims/termux-api/termux-volume@98bac2968cba00166609dee25d4e2665b21a38db	~/.local/bin/termux-volume	-	hidden=1;mode=755;host=launcher;conflicts=termux-api	The termux-volume command.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
+termux-api-shim-wallpaper	file	98bac296	*	binaries:shims/termux-api/termux-wallpaper@98bac2968cba00166609dee25d4e2665b21a38db	~/.local/bin/termux-wallpaper	-	hidden=1;mode=755;host=launcher;conflicts=termux-api	The termux-wallpaper command.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-

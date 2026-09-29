@@ -1,0 +1,140 @@
+#!/bin/sh
+# termux-notification-list — Termux:API-compatible shim over `launcherctl notifications active`.
+# Part of the tlstore item termux-api-shims (docs/maintainer/termux-api-shims.md).
+#
+# Mirrors termux-api-package scripts/termux-notification-list.in:
+#   https://github.com/termux/termux-api-package/blob/master/scripts/termux-notification-list.in
+# Prints a top-level JSON array in upstream's field names, two-space indented:
+#   id, tag, key, group, packageName, title, content, when
+# mapped from what launcherctl reports:
+#   id, tag       taken from the notification key (userId|package|id|tag|uid); tag is "" when null
+#   key           key
+#   group         always "" (launcherctl does not report it)
+#   packageName   package
+#   title         title            ("" when there is none)
+#   content       text             ("" when there is none)
+#   when          postTime as "YYYY-MM-DD HH:MM:SS" in local time (timeIso if date cannot format it)
+# Differences from upstream: only apps the user enabled under the launcher's notification history
+# settings are listed (not every app), and ongoing/progress/media/group-summary notifications are
+# left out. When nothing is listed because access is off, launcherctl's hint goes to stderr.
+set -eu
+
+SCRIPTNAME=termux-notification-list
+die() { echo "$SCRIPTNAME: $*" >&2; exit 1; }
+command -v launcherctl >/dev/null 2>&1 ||
+    die "launcherctl not found; this command needs Termux Launcher (open the app once so it installs launcherctl)"
+lctl() {
+    if LCTL_OUT=$(launcherctl "$@" 2>&1); then return 0; fi
+    die "launcherctl $1 failed${LCTL_OUT:+: $LCTL_OUT}"
+}
+
+show_usage() {
+    echo "Usage: $SCRIPTNAME"
+    echo "Show the list of currently shown notifications."
+    exit 0
+}
+
+while getopts :h option; do
+    case "$option" in
+        h) show_usage ;;
+        ?) echo "$SCRIPTNAME: illegal option -$OPTARG" >&2; exit 1 ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+if [ $# != 0 ]; then echo "$SCRIPTNAME: too many arguments" >&2; exit 1; fi
+
+lctl notifications active --json </dev/null
+
+printf '%s' "$LCTL_OUT" | LC_ALL=C awk '
+function skipws() { while (p <= n && index(" \t\r\n,", substr(s, p, 1)) > 0) p++ }
+function rdstr(   st, c) {
+    p++; st = p
+    while (p <= n) {
+        c = substr(s, p, 1)
+        if (c == "\\") { p += 2; continue }
+        if (c == "\"") break
+        p++
+    }
+    r = substr(s, st, p - st); p++
+    return r
+}
+# One flat object at p (a "{"): K/V hold its keys and raw values, "null" for a JSON null.
+function rdobj(   k, c, st) {
+    nk = 0; p++
+    for (;;) {
+        skipws()
+        if (p > n) return
+        c = substr(s, p, 1)
+        if (c == "}") { p++; return }
+        if (c != "\"") { p++; continue }
+        k = rdstr()
+        while (p <= n && index(" \t\r\n:", substr(s, p, 1)) > 0) p++
+        c = substr(s, p, 1)
+        nk++; K[nk] = k
+        if (c == "\"") { V[nk] = rdstr(); S[nk] = 1 }
+        else {
+            st = p
+            while (p <= n && index(",}] \t\r\n", substr(s, p, 1)) == 0) p++
+            V[nk] = substr(s, st, p - st); S[nk] = 0
+        }
+    }
+}
+# A string field, or "" when it is absent or null.
+function str(name,   i) {
+    for (i = 1; i <= nk; i++) if (K[i] == name) return (S[i] ? V[i] : (V[i] == "null" ? "" : V[i]))
+    return ""
+}
+function fmt_when(   ms, sec, cmd, w) {
+    ms = str("postTime")
+    if (ms !~ /^[0-9]+$/) ms = str("time")
+    if (ms ~ /^[0-9]+$/) {
+        sec = int(ms / 1000)
+        cmd = "date -d @" sec " \"+%Y-%m-%d %H:%M:%S\" 2>/dev/null"
+        w = ""
+        cmd | getline w
+        close(cmd)
+        sub(/[\r\n]+$/, "", w)
+        if (w != "") return w
+    }
+    return str("timeIso")
+}
+BEGIN { RS = "\001" }
+{
+    s = $0; n = length(s)
+    if (!match(s, /"notifications"[ \t\r\n]*:[ \t\r\n]*\[/)) {
+        print "termux-notification-list: unexpected answer from launcherctl: " s > "/dev/stderr"; bad = 1; exit
+    }
+    p = RSTART + RLENGTH
+    rows = 0
+    for (;;) {
+        skipws()
+        if (p > n || substr(s, p, 1) == "]") break
+        if (substr(s, p, 1) != "{") { p++; continue }
+        rdobj()
+        rows++
+        key = str("key")
+        np = split(key, part, "|")
+        id = (np >= 3 && part[3] ~ /^-?[0-9]+$/) ? part[3] : 0
+        tag = (np >= 4 && part[4] != "null") ? part[4] : ""
+        obj[rows] = sprintf("  {\n    \"id\": %s,\n    \"tag\": \"%s\",\n    \"key\": \"%s\",\n    \"group\": \"\",\n    \"packageName\": \"%s\",\n    \"title\": \"%s\",\n    \"content\": \"%s\",\n    \"when\": \"%s\"\n  }",
+            id, tag, key, str("package"), str("title"), str("text"), fmt_when())
+    }
+    # Whatever the server said about why the list may be empty ("hint") goes to stderr.
+    if (rows == 0 && match(substr(s, p), /"hint"[ \t]*:[ \t]*"/)) {
+        q = p + RSTART + RLENGTH - 1
+        h = ""
+        while (q <= n) {
+            c = substr(s, q, 1)
+            if (c == "\\") { h = h substr(s, q, 2); q += 2; continue }
+            if (c == "\"") break
+            h = h c; q++
+        }
+        print "termux-notification-list: " h > "/dev/stderr"
+    }
+    if (rows == 0) { print "[]"; exit }
+    print "["
+    for (j = 1; j <= rows; j++) print obj[j] (j < rows ? "," : "")
+    print "]"
+}
+END { if (bad) exit 1 }'
