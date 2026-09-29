@@ -33,7 +33,11 @@
 #           shell user through its privileged lane. The program lands off PATH
 #           under ~/.local/lib/tlstore/priv/<name> and a wrapper at
 #           ~/.local/bin/<name> hands it to tl-priv, so the row requires
-#           tl-priv and is host=launcher; docs/maintainer/catalog.md)
+#           tl-priv and is host=launcher; docs/maintainer/catalog.md),
+#           conflicts=<pkg,pkg> (packages that own the same commands: install
+#           refuses, naming the package to remove, while one of them is
+#           installed. Put it on the visible item and on every part, since a
+#           part installs first. docs/maintainer/termux-api-shims.md)
 # summary   one plain sentence — it is what list and search show the user
 #
 # tlstore-ui (Revision 5) reads the rest through `tlstore info --tsv`/`list
@@ -61,8 +65,9 @@
 #               digest for `readme` and for `demo`) alongside it the same way
 #               it already computes picture-digest for `picture`.
 #
-# Eight items are visible, in the order they appear here: btop, claude-code,
-# dawn, fastfetch, fish-shell, kitten, opencode, sigye. Everything else is
+# Nine items are visible, in the order they appear here: btop, claude-code,
+# dawn, fastfetch, fish-shell, kitten, opencode, sigye, termux-api-shims.
+# Everything else is
 # hidden=1 — a part another item pulls in, never listed and never installed by
 # name.
 #

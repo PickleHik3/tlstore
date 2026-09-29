@@ -88,6 +88,13 @@ in `setup`/`featured`.
 7. **Commit** `items.tsv` and any picture. `dist/` is not committed by hand at this step — cut a
    release (below) once the item is ready to ship.
 
+### Script-only items and conflicts
+
+An item made of scripts kept in this repository (no binary to build) is a set of hidden `file`
+rows, `mode=755`, sourced as `binaries:<path>@<ref>` with their digests in `SHA256SUMS`, under one
+visible `bundle`. `termux-api-shims` is the model, including `conflicts=<pkg>` for an item that
+owns commands a Termux package owns: `docs/maintainer/termux-api-shims.md`.
+
 ## Cutting a release
 
 `dist/` is never hand-edited. `scripts/release.sh <tag>` builds it from the sources

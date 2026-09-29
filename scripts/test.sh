@@ -134,6 +134,10 @@ write_catalog() {
         printf 'musl-cxx\tbinary\t1\t*\tfile://%s/musllib.bin\t%s\t~/.local/lib/musl/libdemo++.so.6\t-\thidden=1\tA library tools from other systems need.\t%s\n' "$FX" "$(sha "$FX/musllib.bin")" "$R5_NONE"
         printf 'agent\tnpm-musl\tlatest\t*\tnpm:demo-agent#bin/agent\t-\t-\tmusl-loader,musl-cxx\tmusl-libs=musl-cxx\tAn agent that comes from npm.\t%s\n' "$R5_NONE"
         printf 'kit\tbundle\t-\t*\t-\t-\t-\thello,fakebin,demo-pkg,secret\t-\tA few things at once.\t%s\n' "$R5_NONE"
+        # conflicts=: a bundle and its part that refuse to install while the package termux-api is
+        # (the marker file the fake pacman looks for), the way the termux-api-shims item does.
+        printf 'shimset\tbundle\t-\t*\t-\t-\t-\tshimpart\tconflicts=termux-api\tA bundle that owns commands a package owns.\t%s\n' "$R5_NONE"
+        printf 'shimpart\tfile\t1\t*\tfile://%s/hello.conf\t%s\t~/.config/shimpart.conf\t-\thidden=1;conflicts=termux-api\tA part that owns a command a package owns.\t%s\n' "$FX" "$(sha "$FX/hello.conf")" "$R5_NONE"
         printf 'plug\tfisher\t-\t*\tdemo/one demo/two\t-\t-\t-\t-\tPlugins for the shell.\t%s\n' "$R5_NONE"
         printf 'secret\tfile\t1\t*\tfile://%s/mine.conf\t%s\t~/.config/secret.conf\t-\thidden=1\tA part of something else.\t%s\n' "$FX" "$(sha "$FX/mine.conf")" "$R5_NONE"
         printf 'launcheronly\tbinary\t1\t*\tfile://%s/twin.bin\t%s\t~/.local/bin/launcheronly\t-\thost=launcher\tOnly where the launcher runs it.\t%s\n' "$FX" "$(sha "$FX/twin.bin")" "$R5_NONE"
@@ -276,6 +280,8 @@ if [ "\${1:-}" = -S ]; then
 fi
 [ "\${1:-}" = -Q ] || exit 0
 [ "\${2:-}" = demo-build ] && exit 1
+# termux-api is "installed" only while the test has dropped this marker (the conflicts= tests).
+if [ "\${2:-}" = termux-api ] && [ ! -e "$ROOT/have-termux-api" ]; then exit 1; fi
 exit 0
 EOF
     chmod +x "$FIXBIN/pacman"
@@ -1737,6 +1743,29 @@ y
     forget_state
     rm -rf "$TESTHOME/.config/hello.conf" "$TESTHOME/.local/bin"
 
+    # --- conflicts=: refused while the package that owns the same commands is installed ---
+    touch "$ROOT/have-termux-api"
+    tl install shimset -y
+    expect_status "an item is refused while its conflicting package is installed" 1
+    expect_out "the refusal names the package" "termux-api package"
+    expect_out "and says how to get out of it" "pkg uninstall termux-api"
+    expect_no_file "nothing of it was installed" "$TESTHOME/.config/shimpart.conf"
+    expect_no_out "the plan was never shown" "Installing:"
+    tl install shimset -y --progress
+    expect_status "the refusal holds for --progress too" 1
+    expect_no_file "and installs nothing then either" "$TESTHOME/.config/shimpart.conf"
+    rm -f "$ROOT/have-termux-api"
+    tl install shimset -y
+    expect_status "the same item installs once the package is gone" 0
+    expect_file "and puts its part in place" "$TESTHOME/.config/shimpart.conf"
+    touch "$ROOT/have-termux-api"
+    tl install shimset -y
+    expect_status "an item that is already installed is not refused afterwards" 0
+    expect_out "it just says so" "already installed"
+    rm -f "$ROOT/have-termux-api"
+    tl remove shimset -y
+    expect_no_file "removing it takes the part away" "$TESTHOME/.config/shimpart.conf"
+
     # --- the numbered picker (the only picker now; fzf is gone) ---
     rm -rf "$TESTHOME/.local/share/tlstore" "$TESTHOME/.config/hello.conf"
     CATALOG_URL="file://$FX/newer.tsv"
@@ -1758,6 +1787,423 @@ n
     expect_out "picking nothing installs nothing" "Nothing to install"
 
     rm -rf "$ROOT"
+}
+
+# ---------------------------------------------------------------------------
+# The termux-api-shims scripts (shims/termux-api/*) against a fake launcherctl
+# ---------------------------------------------------------------------------
+
+# The shims are POSIX sh wrappers over `launcherctl`. Here launcherctl is a
+# script on PATH that logs its arguments (one line per call, |-separated) and
+# answers from files, so what each shim sends and how it maps the answer back
+# is exercised for real, under whichever shell the suite is running.
+shim_suite() {
+    local SD="$repo/shims/termux-api"
+    local R FB FD want when when2 got name args f t
+    R="$(mktemp -d)"
+    FB="$R/bin"
+    FD="$R/fake"
+    mkdir -p "$FB" "$FD"
+    SHIM_SH=("$(command -v "${SHCMD[0]}")" "${SHCMD[@]:1}")
+    cat > "$FB/launcherctl" <<'EOF'
+#!/bin/sh
+# Fake launcherctl: logs the call, answers from $FAKE_DIR/reply.<command>, fails when rc says so.
+d=$FAKE_DIR
+{ printf 'launcherctl'; for a in "$@"; do printf '|%s' "$a"; done; printf '\n'; } >> "$d/log"
+if [ -e "$d/rc" ]; then
+    cat "$d/err" >&2
+    exit "$(cat "$d/rc")"
+fi
+if [ "$1 $2" = "clipboard copy" ] && [ $# -eq 2 ]; then cat > "$d/stdin"; fi
+[ -e "$d/reply.$1" ] && cat "$d/reply.$1"
+exit 0
+EOF
+    chmod +x "$FB/launcherctl"
+    printf 'a picture\n' > "$R/pic.png"
+
+    fake_reset() { rm -rf "$FD"; mkdir -p "$FD"; }
+    fake_reply() { printf '%s' "$2" > "$FD/reply.$1"; }
+    fake_fail() { printf '%s\n' "$2" > "$FD/err"; printf '%s' "$1" > "$FD/rc"; }
+    # shim <name> [args...] — OUT is stdout, ERR stderr, ST the status. stdin is $SHIM_IN when
+    # set, else empty; SHIM_CWD runs it from another directory; SHIM_PATH replaces PATH.
+    shim() {
+        local name="$1"
+        shift
+        local in="${SHIM_IN:-/dev/null}" path="${SHIM_PATH:-$FB:/usr/bin:/bin}"
+        (
+            [ -z "${SHIM_CWD:-}" ] || cd "$SHIM_CWD" || exit 99
+            env -i PATH="$path" HOME="$R" TZ=UTC TMPDIR="$R" FAKE_DIR="$FD" \
+                "${SHIM_SH[@]}" "$SD/$name" "$@" < "$in" > "$R/out" 2> "$R/err"
+        )
+        ST=$?
+        OUT="$(cat "$R/out")"
+        ERR="$(cat "$R/err")"
+        SHIM_IN=""; SHIM_CWD=""; SHIM_PATH=""
+    }
+    last_call() { tail -1 "$FD/log" 2>/dev/null; }
+    expect_call() {
+        local got
+        got="$(last_call)"
+        if [ "$got" = "$2" ]; then pass; else fail "$1" "launcherctl was called as '$got', expected '$2'"; fi
+    }
+    expect_stdout() {
+        if [ "$OUT" = "$2" ]; then pass; else fail "$1" "stdout was '$OUT', expected '$2'"; fi
+    }
+    # expect_bytes <label> <printf format> — stdout is exactly that, byte for byte (no newline added).
+    expect_bytes() {
+        # shellcheck disable=SC2059
+        printf "$2" > "$R/want"
+        if cmp -s "$R/out" "$R/want"; then pass; else fail "$1" "stdout was $(od -An -c "$R/out" | tr -s ' ' | head -3 | tr '\n' ' ')"; fi
+    }
+    expect_err() {
+        if printf '%s' "$ERR" | grep -q -- "$2"; then pass; else fail "$1" "stderr was '$ERR', expected it to match: $2"; fi
+    }
+    expect_no_err() {
+        if printf '%s' "$ERR" | grep -q -- "$2"; then fail "$1" "stderr should not match: $2 (it was '$ERR')"; else pass; fi
+    }
+
+    # --- every shim: no launcherctl, launcherctl failing ---
+    for name in termux-clipboard-get termux-clipboard-set termux-notification termux-notification-remove \
+        termux-notification-list termux-toast termux-vibrate termux-torch termux-battery-status \
+        termux-volume termux-wallpaper; do
+        case "$name" in
+            termux-notification) args="-t x" ;;
+            termux-notification-remove) args="7" ;;
+            termux-toast) args="hi" ;;
+            termux-torch) args="on" ;;
+            termux-clipboard-set) args="text" ;;
+            termux-wallpaper) args="-f $R/pic.png" ;;
+            *) args="" ;;
+        esac
+        fake_reset
+        # shellcheck disable=SC2086
+        SHIM_PATH="/usr/bin:/bin" shim "$name" $args
+        expect_status "$name without launcherctl exits non-zero" 1
+        expect_err "$name says launcherctl is missing" "launcherctl not found"
+        expect_err "$name names the app it needs" "Termux Launcher"
+        fake_reset
+        fake_fail 1 "launcherctl: missing /home/x/.launcherctl/token; start Termux Launcher first"
+        # shellcheck disable=SC2086
+        shim "$name" $args
+        expect_status "$name exits non-zero when the API is not up" 1
+        expect_err "$name passes launcherctl's reason on" "start Termux Launcher first"
+        expect_stdout "$name prints nothing to stdout on failure" ""
+    done
+
+    # --- termux-clipboard-get: plain text, JSON escapes undone ---
+    fake_reset
+    fake_reply clipboard '{"ok":true,"text":"hello world"}'
+    shim termux-clipboard-get
+    expect_status "clipboard-get" 0
+    expect_call "clipboard-get asks launcherctl to paste" "launcherctl|clipboard|paste"
+    expect_bytes "clipboard-get prints plain text, no JSON and no added newline" 'hello world'
+    fake_reply clipboard '{"ok":true,"text":"a\nb\t\"q\" \\ é 😀 c\n"}'
+    shim termux-clipboard-get
+    expect_bytes "clipboard-get decodes newlines, tabs, quotes, backslashes, accents and emoji" \
+        'a\nb\t"q" \\ \303\251 \360\237\230\200 c\n'
+    fake_reply clipboard '{"ok":true,"text":"100% \\n %s \\0101 done"}'
+    shim termux-clipboard-get
+    expect_bytes "clipboard-get leaves percent signs and backslash sequences in the text alone" \
+        '100%% \\n %%s \\0101 done'
+    fake_reply clipboard '{"ok":true,"text":"é café ünï"}'
+    shim termux-clipboard-get
+    expect_bytes "clipboard-get passes raw UTF-8 through" '\303\251 caf\303\251 \303\274n\303\257'
+    fake_reply clipboard '{"ok":true,"text":""}'
+    shim termux-clipboard-get
+    expect_bytes "clipboard-get prints nothing for an empty clipboard" ''
+    shim termux-clipboard-get extra
+    expect_status "clipboard-get takes no arguments" 1
+    fake_reset
+    fake_fail 1 '{"error":{"code":"launcher_not_visible"}}'
+    shim termux-clipboard-get
+    expect_status "clipboard-get fails when the launcher is off screen" 1
+    expect_err "and passes the server's code on" "launcher_not_visible"
+
+    # --- termux-clipboard-set: arguments or stdin ---
+    fake_reset
+    fake_reply clipboard '{"ok":true,"length":3}'
+    shim termux-clipboard-set some words "and more"
+    expect_status "clipboard-set with arguments" 0
+    expect_call "clipboard-set joins its arguments with spaces" "launcherctl|clipboard|copy|some words and more"
+    expect_stdout "clipboard-set prints nothing on success" ""
+    fake_reset
+    printf 'from stdin\nline two\n' > "$R/in.txt"
+    SHIM_IN="$R/in.txt" shim termux-clipboard-set
+    expect_status "clipboard-set from stdin" 0
+    expect_call "clipboard-set with no arguments lets launcherctl read stdin" "launcherctl|clipboard|copy"
+    expect_content "clipboard-set forwards stdin whole" "$FD/stdin" "$(printf 'from stdin\nline two\n')"
+
+    # --- termux-notification ---
+    fake_reset
+    fake_reply notify '{"ok":true,"shown":true}'
+    shim termux-notification -t Title -c "Body text" -i 7 --priority high
+    expect_status "notification" 0
+    expect_call "notification maps title, content, id and priority" \
+        "launcherctl|notify|--title|Title|--id|7|--urgency|critical|--|Body text"
+    expect_stdout "notification prints nothing on success" ""
+    expect_no_err "notification with supported flags warns about nothing" "ignoring"
+    shim termux-notification --title=T2 --content=B2 --id=x --priority=low
+    expect_call "notification takes --opt=value" "launcherctl|notify|--title|T2|--id|x|--urgency|low|--|B2"
+    shim termux-notification -tT3 -cB3 --priority default
+    expect_call "notification takes -tVALUE and maps default" "launcherctl|notify|--title|T3|--urgency|normal|--|B3"
+    shim termux-notification -c "-starts with a dash"
+    expect_call "notification protects a body that starts with a dash" "launcherctl|notify|--|-starts with a dash"
+    printf 'piped body\nsecond line\n' > "$R/in.txt"
+    SHIM_IN="$R/in.txt" shim termux-notification -t FromStdin
+    got="$(tail -2 "$FD/log")"
+    want="launcherctl|notify|--title|FromStdin|--|piped body
+second line"
+    if [ "$got" = "$want" ]; then pass; else fail "notification reads content from stdin, trimming the last newline" "log was '$got'"; fi
+    SHIM_IN="$R/in.txt" shim termux-notification -t T -c "arg wins"
+    expect_call "notification content argument beats stdin" "launcherctl|notify|--title|T|--|arg wins"
+    shim termux-notification \
+        --button1 Yes --button1-action "termux-toast yes" --button2=No --action "true" --on-delete "true" \
+        --ongoing --alert-once --sound --led-color ff0000 --led-on 100 --led-off 100 --vibrate 100,200 \
+        --image-path /tmp/x.png --icon foo --group g --channel c --type media --media-play "true" \
+        -t Kept -c Body
+    expect_status "notification does not fail on options it cannot honour" 0
+    expect_call "notification still sends what it can" "launcherctl|notify|--title|Kept|--|Body"
+    for f in --button1 --button1-action --button2 --action --on-delete --ongoing --alert-once --sound \
+        --led-color --led-on --led-off --vibrate --image-path --icon --group --channel "--type media" --media-play; do
+        expect_err "notification warns about $f" "termux-notification: ignoring unsupported option $f\$"
+    done
+    shim termux-notification --type default -t T -c B
+    expect_no_err "notification --type default is not a warning" "ignoring"
+    shim termux-notification -c "no title"
+    expect_call "notification works with content alone" "launcherctl|notify|--|no title"
+    shim termux-notification
+    expect_status "notification with nothing to show fails" 1
+    shim termux-notification --nonsense
+    expect_status "notification rejects an option upstream does not have" 1
+    expect_err "and names it" "unrecognized option '--nonsense'"
+    shim termux-notification -t
+    expect_status "notification -t with no value fails" 1
+    shim termux-notification -t T -c B stray
+    expect_status "notification with a stray argument fails" 1
+
+    # --- termux-notification-remove ---
+    fake_reset
+    fake_reply notify '{"ok":true}'
+    shim termux-notification-remove 7
+    expect_status "notification-remove" 0
+    expect_call "notification-remove closes by id" "launcherctl|notify|--close|7"
+    shim termux-notification-remove
+    expect_status "notification-remove needs an id" 1
+    expect_err "notification-remove says so" "no notification id specified"
+
+    # --- termux-toast ---
+    fake_reset
+    shim termux-toast hello world
+    expect_status "toast" 0
+    expect_call "toast joins its arguments" "launcherctl|toast|--|hello world"
+    shim termux-toast -s brief
+    expect_call "toast -s is the short toast" "launcherctl|toast|--short|--|brief"
+    shim termux-toast -g top -c red -b blue tinted
+    expect_status "toast accepts -g -c -b" 0
+    expect_call "toast sends the text without them" "launcherctl|toast|--|tinted"
+    expect_err "toast warns about -g" "termux-toast: ignoring unsupported option -g\$"
+    expect_err "toast warns about -c" "termux-toast: ignoring unsupported option -c\$"
+    expect_err "toast warns about -b" "termux-toast: ignoring unsupported option -b\$"
+    printf 'from stdin\n' > "$R/in.txt"
+    SHIM_IN="$R/in.txt" shim termux-toast
+    expect_call "toast reads stdin when it has no text" "launcherctl|toast|--|from stdin"
+    shim termux-toast
+    expect_status "toast with no text fails" 1
+
+    # --- termux-vibrate ---
+    fake_reset
+    shim termux-vibrate
+    expect_status "vibrate" 0
+    expect_call "vibrate with no options leaves the default to launcherctl" "launcherctl|vibrate"
+    shim termux-vibrate -d 300 -f
+    expect_call "vibrate -d and -f" "launcherctl|vibrate|-d|300|--force"
+    shim termux-vibrate -f
+    expect_call "vibrate -f alone" "launcherctl|vibrate|--force"
+    shim termux-vibrate -d abc
+    expect_status "vibrate rejects a duration that is not a number" 1
+    shim termux-vibrate -x
+    expect_status "vibrate rejects an unknown option" 1
+
+    # --- termux-torch ---
+    fake_reset
+    shim termux-torch on
+    expect_call "torch on" "launcherctl|torch|on"
+    shim termux-torch off
+    expect_call "torch off" "launcherctl|torch|off"
+    shim termux-torch maybe
+    expect_status "torch rejects anything else" 1
+    shim termux-torch
+    expect_status "torch needs an argument" 1
+
+    # --- termux-battery-status: upstream's field names and layout ---
+    fake_reset
+    fake_reply battery '{"health":"GOOD","percentage":87,"plugged":"UNPLUGGED","status":"DISCHARGING","temperature":29.5,"current":-312000}'
+    shim termux-battery-status
+    expect_status "battery-status" 0
+    expect_call "battery-status asks for the battery" "launcherctl|battery"
+    want='{
+  "health": "GOOD",
+  "percentage": 87,
+  "plugged": "UNPLUGGED",
+  "status": "DISCHARGING",
+  "temperature": 29.5,
+  "current": -312000
+}'
+    expect_stdout "battery-status prints upstream's object, two-space indented" "$want"
+    fake_reply battery '{
+  "ok": true,
+  "health": "COLD",
+  "percentage": 100,
+  "plugged": "PLUGGED_AC",
+  "status": "FULL",
+  "temperature": 12.0,
+  "current": 0
+}'
+    shim termux-battery-status
+    want='{
+  "health": "COLD",
+  "percentage": 100,
+  "plugged": "PLUGGED_AC",
+  "status": "FULL",
+  "temperature": 12.0,
+  "current": 0
+}'
+    expect_stdout "battery-status reads a pretty-printed answer too, and drops ok" "$want"
+    fake_reply battery 'not json'
+    shim termux-battery-status
+    expect_status "battery-status fails on an answer it cannot read" 1
+
+    # --- termux-volume: a top-level array, streams unwrapped ---
+    fake_reset
+    fake_reply volume '{"ok":true,"streams":[{"stream":"call","volume":5,"max_volume":5},{"stream":"music","volume":7,"max_volume":15},{"stream":"ring","volume":0,"max_volume":7}]}'
+    shim termux-volume
+    expect_status "volume" 0
+    expect_call "volume with no arguments lists the streams" "launcherctl|volume"
+    want='[
+  {
+    "stream": "call",
+    "volume": 5,
+    "max_volume": 5
+  },
+  {
+    "stream": "music",
+    "volume": 7,
+    "max_volume": 15
+  },
+  {
+    "stream": "ring",
+    "volume": 0,
+    "max_volume": 7
+  }
+]'
+    expect_stdout "volume prints a top-level array, not the streams wrapper" "$want"
+    fake_reply volume '{"ok":true,"streams":[]}'
+    shim termux-volume
+    expect_stdout "volume with no streams prints an empty array" "[]"
+    fake_reset
+    shim termux-volume music 7
+    expect_status "volume set" 0
+    expect_call "volume STREAM VALUE sets it" "launcherctl|volume|music|7"
+    expect_stdout "volume set prints nothing, as upstream does" ""
+    shim termux-volume music loud
+    expect_status "volume rejects a value that is not a number" 1
+    shim termux-volume music
+    expect_status "volume rejects one argument" 1
+
+    # --- termux-notification-list: upstream's fields, mapped from launcherctl ---
+    fake_reset
+    fake_reply notifications '{"ok":true,"count":2,"notifications":[{"id":9,"time":1790000000000,"timeIso":"2026-09-21T14:13:20Z","package":"com.example.chat","app":"Chat","conversation":null,"title":"Ann \"A\"","sender":null,"text":"Lunch, }{ at 12?","subText":null,"category":"msg","channel":"c1","key":"0|com.example.chat|42|null|10123","postTime":1790000000000,"removedTime":null},{"time":1790003600000,"timeIso":"2026-09-21T15:13:20Z","package":"com.example.mail","app":"Mail","conversation":"Inbox","title":null,"sender":"Bo","text":"café \\ done","subText":null,"category":null,"channel":"m","key":"0|com.example.mail|7|thread-1|10099","postTime":1790003600000,"removedTime":null}]}'
+    shim termux-notification-list
+    expect_status "notification-list" 0
+    expect_call "notification-list asks for the active notifications as JSON" "launcherctl|notifications|active|--json"
+    when=$(date -u -d @1790000000 '+%Y-%m-%d %H:%M:%S' 2>/dev/null || true)
+    when2=$(date -u -d @1790003600 '+%Y-%m-%d %H:%M:%S' 2>/dev/null || true)
+    if [ -z "$when" ]; then
+        skip "notification-list maps the fields" "date -d @seconds is not available here"
+    else
+        want='[
+  {
+    "id": 42,
+    "tag": "",
+    "key": "0|com.example.chat|42|null|10123",
+    "group": "",
+    "packageName": "com.example.chat",
+    "title": "Ann \"A\"",
+    "content": "Lunch, }{ at 12?",
+    "when": "'"$when"'"
+  },
+  {
+    "id": 7,
+    "tag": "thread-1",
+    "key": "0|com.example.mail|7|thread-1|10099",
+    "group": "",
+    "packageName": "com.example.mail",
+    "title": "",
+    "content": "café \\ done",
+    "when": "'"$when2"'"
+  }
+]'
+        expect_stdout "notification-list prints upstream's fields, id and tag from the key, escapes intact" "$want"
+    fi
+    fake_reply notifications '{"ok":true,"count":0,"notifications":[],"hint":"Notification access is not granted."}'
+    shim termux-notification-list
+    expect_status "notification-list with nothing to list" 0
+    expect_stdout "notification-list prints an empty array" "[]"
+    expect_err "and says why on stderr" "Notification access is not granted"
+    fake_reply notifications '{"ok":true,"count":0,"notifications":[]}'
+    shim termux-notification-list
+    expect_stdout "notification-list with no hint prints just the array" "[]"
+    expect_no_err "and says nothing" "notification-list:"
+    fake_reply notifications 'nope'
+    shim termux-notification-list
+    expect_status "notification-list fails on an answer it cannot read" 1
+
+    # --- termux-wallpaper ---
+    fake_reset
+    shim termux-wallpaper -f "$R/pic.png"
+    expect_status "wallpaper -f" 0
+    expect_call "wallpaper -f sets the home screen" "launcherctl|wallpaper|set|$R/pic.png|--home"
+    shim termux-wallpaper -l -f "$R/pic.png"
+    expect_call "wallpaper -l sets the lock screen" "launcherctl|wallpaper|set|$R/pic.png|--lock"
+    SHIM_CWD="$R" shim termux-wallpaper -f pic.png
+    expect_call "wallpaper makes a relative path absolute" "launcherctl|wallpaper|set|$R/pic.png|--home"
+    shim termux-wallpaper -f "$R/missing.png"
+    expect_status "wallpaper -f with no such file fails" 1
+    shim termux-wallpaper
+    expect_status "wallpaper needs -f or -u" 1
+    shim termux-wallpaper -f "$R/pic.png" -u "file://$R/pic.png"
+    expect_status "wallpaper refuses -f with -u" 1
+    fake_reset
+    shim termux-wallpaper -u "file://$R/pic.png"
+    expect_status "wallpaper -u downloads then sets" 0
+    got="$(last_call)"
+    case "$got" in
+        "launcherctl|wallpaper|set|$R/termux-wallpaper."*"|--home") pass ;;
+        *) fail "wallpaper -u hands launcherctl the downloaded file" "call was '$got'" ;;
+    esac
+    if ls "$R"/termux-wallpaper.* >/dev/null 2>&1; then fail "wallpaper -u cleans up its download"; else pass; fi
+    mkdir -p "$R/nocurl"
+    for t in mktemp rm; do ln -sf "$(command -v $t)" "$R/nocurl/$t"; done
+    ln -sf "$FB/launcherctl" "$R/nocurl/launcherctl"
+    SHIM_PATH="$R/nocurl" shim termux-wallpaper -u "file://$R/pic.png"
+    expect_status "wallpaper -u without curl fails" 1
+    expect_err "and says it needs curl" "needs curl"
+    fake_reset
+    fake_fail 2 "launcherctl supports: launch, pane, window, agent, notify, progress, clipboard"
+    shim termux-wallpaper -f "$R/pic.png"
+    expect_status "wallpaper on a launcher without the command fails" 1
+    expect_err "and says to update the app" "update the app"
+
+    # --- help text ---
+    fake_reset
+    for name in termux-clipboard-get termux-clipboard-set termux-notification termux-notification-remove \
+        termux-notification-list termux-toast termux-vibrate termux-battery-status termux-volume; do
+        shim "$name" -h
+        expect_status "$name -h exits 0" 0
+        if printf '%s' "$OUT" | grep -q "sage"; then pass; else fail "$name -h prints a usage line" "stdout was '$OUT'"; fi
+    done
+
+    rm -rf "$R"
 }
 
 # ---------------------------------------------------------------------------
@@ -1785,6 +2231,7 @@ for entry in "${shells[@]}"; do
     before_fail=$FAIL
     echo "== $entry"
     run_suite
+    shim_suite
     if [ "$FAIL" = "$before_fail" ]; then
         echo "   all checks passed"
     fi

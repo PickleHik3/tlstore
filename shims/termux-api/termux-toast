@@ -1,0 +1,60 @@
+#!/bin/sh
+# termux-toast — Termux:API-compatible shim over `launcherctl toast`.
+# Part of the tlstore item termux-api-shims (docs/maintainer/termux-api-shims.md).
+#
+# Mirrors termux-api-package scripts/termux-toast.in:
+#   https://github.com/termux/termux-api-package/blob/master/scripts/termux-toast.in
+# -s shows the brief toast. -g, -b and -c (position and colours) are accepted and ignored with a
+# warning: the launcher draws its own notice. The text is the arguments, else stdin. Prints
+# nothing on success, as upstream does.
+set -eu
+
+SCRIPTNAME=termux-toast
+die() { echo "$SCRIPTNAME: $*" >&2; exit 1; }
+command -v launcherctl >/dev/null 2>&1 ||
+    die "launcherctl not found; this command needs Termux Launcher (open the app once so it installs launcherctl)"
+lctl() {
+    if LCTL_OUT=$(launcherctl "$@" 2>&1); then return 0; fi
+    die "launcherctl $1 failed${LCTL_OUT:+: $LCTL_OUT}"
+}
+
+show_usage() {
+    echo "Usage: termux-toast [-b bgcolor] [-c color] [-g gravity] [-s] [text]"
+    echo "Show text in a Toast (a transient popup)."
+    echo "The toast text is either supplied as arguments or read from stdin"
+    echo "if no arguments are given. Arguments will take precedence over stdin."
+    echo " -h  show this help"
+    echo " -b  background color (ignored here, with a warning)"
+    echo " -c  text color (ignored here, with a warning)"
+    echo " -g  position of the toast (ignored here, with a warning)"
+    echo " -s  only show the toast for a short while"
+    exit 0
+}
+
+short=0
+while getopts :hsc:b:g: option; do
+    case "$option" in
+        h) show_usage ;;
+        s) short=1 ;;
+        c|b|g) echo "$SCRIPTNAME: ignoring unsupported option -$option" >&2 ;;
+        ?) echo "$SCRIPTNAME: illegal option -$OPTARG" >&2; exit 1 ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+if [ $# -gt 0 ]; then
+    text="$*"
+elif [ -t 0 ]; then
+    text=""
+elif command -v timeout >/dev/null 2>&1; then
+    # Upstream waits at most 3 s for stdin.
+    text=$(timeout 3 cat || true)
+else
+    text=$(cat)
+fi
+
+[ -n "$text" ] || die "no text to show (give it as arguments or on stdin)"
+
+set -- toast
+if [ "$short" = 1 ]; then set -- "$@" --short; fi
+lctl "$@" -- "$text" </dev/null

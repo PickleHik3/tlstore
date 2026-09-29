@@ -1,0 +1,85 @@
+#!/bin/sh
+# termux-battery-status — Termux:API-compatible shim over `launcherctl battery`.
+# Part of the tlstore item termux-api-shims (docs/maintainer/termux-api-shims.md).
+#
+# Mirrors termux-api-package scripts/termux-battery-status.in:
+#   https://github.com/termux/termux-api-package/blob/master/scripts/termux-battery-status.in
+# Prints upstream's JSON object, two-space indented, with upstream's field names and order:
+# health, percentage, plugged, status, temperature, current. launcherctl already answers with
+# those names; this only puts them in upstream's layout.
+set -eu
+
+SCRIPTNAME=termux-battery-status
+die() { echo "$SCRIPTNAME: $*" >&2; exit 1; }
+command -v launcherctl >/dev/null 2>&1 ||
+    die "launcherctl not found; this command needs Termux Launcher (open the app once so it installs launcherctl)"
+lctl() {
+    if LCTL_OUT=$(launcherctl "$@" 2>&1); then return 0; fi
+    die "launcherctl $1 failed${LCTL_OUT:+: $LCTL_OUT}"
+}
+
+show_usage() {
+    echo "Usage: $SCRIPTNAME"
+    echo "Get the status of the device battery."
+    exit 0
+}
+
+while getopts :h option; do
+    case "$option" in
+        h) show_usage ;;
+        ?) echo "$SCRIPTNAME: illegal option -$OPTARG" >&2; exit 1 ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+if [ $# != 0 ]; then echo "$SCRIPTNAME: too many arguments" >&2; exit 1; fi
+
+lctl battery </dev/null
+
+# One flat JSON object in, the same object out, one field per line. Strings are passed through
+# with their escapes as they came; "ok", if the server adds it, is not part of upstream's shape.
+printf '%s' "$LCTL_OUT" | LC_ALL=C awk '
+function skipws() { while (p <= n && index(" \t\r\n,", substr(s, p, 1)) > 0) p++ }
+function rdstr(   st, c) {
+    p++; st = p
+    while (p <= n) {
+        c = substr(s, p, 1)
+        if (c == "\\") { p += 2; continue }
+        if (c == "\"") break
+        p++
+    }
+    r = substr(s, st, p - st); p++
+    return r
+}
+function rdobj(   k, c, st) {
+    nk = 0; p++
+    for (;;) {
+        skipws()
+        if (p > n) return
+        c = substr(s, p, 1)
+        if (c == "}") { p++; return }
+        if (c != "\"") { p++; continue }
+        k = rdstr()
+        while (p <= n && index(" \t\r\n:", substr(s, p, 1)) > 0) p++
+        c = substr(s, p, 1)
+        nk++; K[nk] = k
+        if (c == "\"") { V[nk] = "\"" rdstr() "\"" }
+        else {
+            st = p
+            while (p <= n && index(",}] \t\r\n", substr(s, p, 1)) == 0) p++
+            V[nk] = substr(s, st, p - st)
+        }
+    }
+}
+BEGIN { RS = "\001" }
+{
+    s = $0; n = length(s); p = index(s, "{")
+    if (p == 0) { print "termux-battery-status: unexpected answer from launcherctl: " s > "/dev/stderr"; bad = 1; exit }
+    rdobj()
+    m = 0
+    for (i = 1; i <= nk; i++) if (K[i] != "ok") { m++; keep[m] = i }
+    print "{"
+    for (j = 1; j <= m; j++) printf "  \"%s\": %s%s\n", K[keep[j]], V[keep[j]], (j < m ? "," : "")
+    print "}"
+}
+END { if (bad) exit 1 }'

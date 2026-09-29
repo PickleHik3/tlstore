@@ -1,0 +1,74 @@
+#!/bin/sh
+# termux-wallpaper — Termux:API-compatible shim over `launcherctl wallpaper set`.
+# Part of the tlstore item termux-api-shims (docs/maintainer/termux-api-shims.md).
+#
+# Mirrors termux-api-package scripts/termux-wallpaper.in:
+#   https://github.com/termux/termux-api-package/blob/master/scripts/termux-wallpaper.in
+# -f FILE sets the home-screen wallpaper, -l sets the lock screen's instead, -u URL downloads
+# the picture with curl first (and refuses when curl is not installed). Prints nothing on success.
+#
+# NEEDS a Termux Launcher build that has `launcherctl wallpaper set FILE [--home|--lock|--both]`
+# (added on the launcher's dev branch after 2026-09-29); an older one answers that it does not
+# know the command, and this shim says so.
+set -eu
+
+SCRIPTNAME=termux-wallpaper
+die() { echo "$SCRIPTNAME: $*" >&2; exit 1; }
+command -v launcherctl >/dev/null 2>&1 ||
+    die "launcherctl not found; this command needs Termux Launcher (open the app once so it installs launcherctl)"
+
+show_usage() {
+    echo "Change wallpaper on your device"
+    echo
+    echo "Usage: $SCRIPTNAME [options]"
+    echo "-h         show this help"
+    echo "-f <file>  set wallpaper from file"
+    echo "-u <url>   set wallpaper from url resource (needs curl)"
+    echo "-l         set wallpaper for lockscreen"
+    exit 1
+}
+
+lock=0
+file=""
+url=""
+while getopts :hlf:u: option; do
+    case "$option" in
+        h) show_usage ;;
+        l) lock=1 ;;
+        f)
+            case "$OPTARG" in /*) path=$OPTARG ;; *) path=$PWD/$OPTARG ;; esac
+            [ -f "$path" ] || die "$path is not a file!"
+            file=$path
+            ;;
+        u) url=$OPTARG ;;
+        ?) echo "$SCRIPTNAME: illegal option -$OPTARG" >&2; exit 1 ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+if [ -z "$file$url" ]; then
+    die "you must specify either -f or -u"
+elif [ -n "$file" ] && [ -n "$url" ]; then
+    die "you must specify either -f or -u, but not both"
+fi
+if [ $# != 0 ]; then echo "$SCRIPTNAME: too many arguments" >&2; exit 1; fi
+
+tmp=""
+if [ -n "$url" ]; then
+    command -v curl >/dev/null 2>&1 || die "-u needs curl, which is not installed (pkg install curl), or download the picture yourself and use -f"
+    tmp=$(mktemp "${TMPDIR:-/tmp}/termux-wallpaper.XXXXXX") || die "cannot create a temporary file"
+    trap 'rm -f "$tmp"' EXIT HUP INT TERM
+    curl -fsSL -o "$tmp" "$url" </dev/null || die "could not download $url"
+    file=$tmp
+fi
+
+where=--home
+if [ "$lock" = 1 ]; then where=--lock; fi
+
+if ! LCTL_OUT=$(launcherctl wallpaper set "$file" "$where" </dev/null 2>&1); then
+    case "$LCTL_OUT" in
+        *"launcherctl supports:"*)
+            die "this Termux Launcher cannot set wallpapers yet (launcherctl has no 'wallpaper' command); update the app" ;;
+    esac
+    die "launcherctl wallpaper failed${LCTL_OUT:+: $LCTL_OUT}"
+fi

@@ -26,3 +26,5 @@ Notes:
   `download_url` GitHub's contents API returned was that exact URL; fetching the same content
   through `gh api .../contents/<path>?ref=<sha>` (base64-decoded) worked for both. Cause not
   diagnosed — noted here in case it recurs for a future re-pin.
+- `termux-api-shims.md` is not fetched from upstream: it is written for this store, so it has no
+  `<!-- tlstore: pinned from ... -->` line and no relative images to resolve.
