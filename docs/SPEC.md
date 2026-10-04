@@ -83,20 +83,23 @@ Initial items: `fish`, `oh-my-posh`, `zoxide`, `eza`, `neovim`, `build-tools` (p
 ## Commands
 
 ```
-tlstore                       help
+tlstore                       the store in the launcher, else the list
 tlstore list [-i|-a]          everything (installed marked), or installed only / available only
 tlstore search <term>         name and summary match
 tlstore info <name>           version, kind, source, digest, requires, files, summary
-tlstore install [name...] [-y]   no names → multi-select picker (fzf --multi, else numbered toggles)
-tlstore remove <name...> [-y]
-tlstore update [name...] [--check] [--offline]   refresh catalog, then upgrade what is newer
+tlstore install [name...] [-y] [--dry-run]   no names → multi-select picker (fzf --multi, else numbered toggles)
+tlstore remove <name...> [-y] [--dry-run]
+tlstore update [name...] [--check|--dry-run] [--offline]   refresh catalog, then upgrade what is newer (--check changes nothing)
 tlstore refresh               catalog only
-tlstore shell                 = install shell-setup
+tlstore self-update [--check] tlstore itself
+tlstore help [command]        the command list, or one command's options (also: <command> -h)
 tlstore doctor                prefix, PATH order, tools present, catalog serial, drift, loader check
 tlstore version
 ```
 
-Exit codes 0/1/2 (ok / failed / usage). `TLSTORE_ASSUME_YES=1` = `-y` everywhere. Output is plain
+Global `-y`/`--yes`, `-h`, `-v` go before the command. Strict arguments: `doctor`, `version`,
+`refresh` and `self-update` reject stray words (exit 2). `tlstore shell` was removed and says
+`install fish-shell`. Exit codes 0/1/2 (ok / failed / usage). `TLSTORE_ASSUME_YES=1` = `-y` everywhere. Output is plain
 text, one line per action, product copy (no mechanism talk); errors start with `tlstore: `.
 `update` for `pkg` items runs the package manager's own upgrade for exactly those names
 (`apt install --only-upgrade` / `pacman -S --needed`).
@@ -146,7 +149,7 @@ a hidden name still works, because names appear in `Needs` lines.
 
 Gone: `neovim`, `build-tools`, `dev-tools`, `shell-setup`, `showcase`, `setup-nvim`, and the
 standalone `patchelf` pkg item. `config-fish` and `personal-fish` became hidden parts of
-`fish-shell`. `tlstore shell` now means `install fish-shell`.
+`fish-shell`. `tlstore shell` was `install fish-shell`, and is now an error that says so.
 
 `list` drops the `installed`/`-` column for a leading `*`, and prints
 `needs while installing: <tools>` indented under an item that declares `build=`.
