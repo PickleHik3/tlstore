@@ -612,7 +612,7 @@ backup_existing() {
         *)
             bk_row=$(state_row "${ii_name:-}" 2>/dev/null || true)
             case " $(field "$bk_row" 5) " in
-                *" $bk_target "*) return 0 ;;
+                *" $bk_target "*) prune_backups "$bk_target"; return 0 ;;
             esac
             ;;
     esac
@@ -621,12 +621,40 @@ backup_existing() {
         cp -a "$bk_target" "$bk_copy" || return 1
         say "  kept a copy of $(basename "$bk_target") beside it"
     fi
+    prune_backups "$bk_target"
     return 0
+}
+
+# How many .bak copies beside one file are kept; older ones go.
+BACKUPS_KEPT=3
+
+# prune_backups <file> — tidies the .bak copies beside a file. A copy of a
+# wrapper tlstore wrote itself was never yours (an older tlstore kept one on
+# every update), so it goes; of the rest, the newest BACKUPS_KEPT stay. The
+# names carry the time, so the glob lists them oldest first.
+prune_backups() {
+    pb_target="$1"
+    pb_count=0
+    for pb_f in "$pb_target".bak-*; do
+        [ -f "$pb_f" ] || continue
+        if [ "$(head -c 200 "$pb_f" | sed -n 2p)" = "# written by termux-launcher" ]; then
+            rm -f "$pb_f"
+        else
+            pb_count=$((pb_count + 1))
+        fi
+    done
+    for pb_f in "$pb_target".bak-*; do
+        [ "$pb_count" -gt "$BACKUPS_KEPT" ] || break
+        [ -f "$pb_f" ] || continue
+        rm -f "$pb_f"
+        pb_count=$((pb_count - 1))
+    done
 }
 
 # The newest .bak beside a file, put back in its place.
 restore_backup() {
     rb_target="$1"
+    prune_backups "$rb_target"
     rb_newest=""
     for rb_f in "$rb_target".bak-*; do
         [ -e "$rb_f" ] || continue

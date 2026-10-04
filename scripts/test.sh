@@ -794,10 +794,20 @@ exec \"$TESTHOME/.local/bin/tl-priv\" run \"$TESTHOME/.local/lib/tlstore/priv/pr
     expect_out "the wrapper runs the package executable" "demo-droid 3.0.0"
     expect_out "args= come before the person's own" "args: -c demo=1 one two"
     expect_out "the extra member is reachable beside the executable" "helper beside the executable"
+    # What an older tlstore left: a copy of its own wrapper per update, and
+    # more copies of a file of yours than are worth keeping.
+    for bk in 20200101-000001 20200101-000002; do
+        printf '#!/bin/sh\n# written by termux-launcher\nexec old "$@"\n' > "$TESTHOME/.local/bin/droid.bak-$bk"
+    done
+    for bk in 20190101-000001 20190101-000002 20190101-000003; do
+        printf 'an older one of mine\n' > "$TESTHOME/.local/bin/droid.bak-$bk"
+    done
     PATCHELF_KNOB=false
     tl install droid -y
     expect_out "installing it again says it is already here" "droid 3.0.0 is already here"
-    if [ "$(ls "$TESTHOME/.local/bin/droid.bak-"* 2>/dev/null | wc -l)" -eq 1 ]; then pass; else fail "installing again keeps no copy of tlstore's own wrapper"; fi
+    if ls "$TESTHOME/.local/bin/droid.bak-2020"* >/dev/null 2>&1; then fail "copies of tlstore's own wrapper are pruned"; else pass; fi
+    if [ "$(ls "$TESTHOME/.local/bin/droid.bak-"* 2>/dev/null | wc -l)" -eq 3 ]; then pass; else fail "three copies of your own file are kept" "$(ls "$TESTHOME/.local/bin/")"; fi
+    if [ -e "$TESTHOME/.local/bin/droid.bak-20190101-000001" ]; then fail "the oldest copy is the one that goes"; else pass; fi
     tl remove droid -y
     expect_status "remove an npm-android item" 0
     expect_out "remove puts your own file back" "put your own droid back"
