@@ -10,9 +10,9 @@
 # the file itself), a binaries: source is looked up in the SHA256SUMS passed as
 # the first argument (this repository's own SHA256SUMS by default), and a
 # plain http(s) source is downloaded once and hashed here (so building needs
-# the network when one of those changes). pkg, bundle, fisher and npm-musl
-# items carry no digest — apt, fisher and the npm registry's own sha512 are the
-# check there. A source whose digest cannot be computed stops the build: an
+# the network when one of those changes). pkg, bundle, fisher, npm-musl and
+# npm-android items carry no digest — apt, fisher and the npm registry's own
+# sha512 are the check there. A source whose digest cannot be computed stops the build: an
 # unpinned payload must never reach a phone. An item's picture, pinned readme
 # and demo are each hashed the same way (always a launcher:/binaries: source,
 # or "-" when there is none) and their digests ride alongside them as their own
@@ -130,7 +130,7 @@ source_digest() {
 digest_for() {
     local kind="$1" source="$2" name="$3"
     case "$kind" in
-        pkg|bundle|fisher|npm-musl) echo "-"; return 0 ;;
+        pkg|bundle|fisher|npm-musl|npm-android) echo "-"; return 0 ;;
     esac
     source_digest "$source" "$name"
 }
@@ -166,7 +166,7 @@ while IFS=$'\t' read -r name kind version prefixes source target requires option
         *) echo "$name: a name is [a-z0-9][a-z0-9-]*" >&2; failed=1; continue ;;
     esac
     case "$kind" in
-        pkg|binary|file|file-once|fisher|npm-musl|bundle) ;;
+        pkg|binary|file|file-once|fisher|npm-musl|npm-android|bundle) ;;
         *) echo "$name: unknown kind $kind" >&2; failed=1; continue ;;
     esac
     # priv=shizuku means "a binary the launcher runs as the Shizuku shell user";
