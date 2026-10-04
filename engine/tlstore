@@ -83,6 +83,7 @@ BASE_CATALOG="$STORE_DIR/catalog.tsv"
 USER_CATALOG="$DATA_DIR/catalog.tsv"
 PUBKEY="$STORE_DIR/trusted.pub"
 STATE="$DATA_DIR/installed.tsv"
+HELD="$DATA_DIR/held"
 
 # The app writes this when it puts tlstore down (a hand install writes
 # .standalone instead, with the address it came from inside it; nothing here
@@ -567,21 +568,74 @@ installed_names() {
 }
 
 # state_record <name> <kind> <version> <files…>
+# A row is name kind version when files, then source digest and the one
+# version before this (prev_version prev_source prev_digest), which is what
+# rollback reinstalls. Rows from before those columns have none of them; the
+# readers all ask for a column by number, so a short row reads as empty ones.
+# The source and digest are the install's own (ii_source, ii_digest). A new
+# version pushes the old row's into the prev columns; the same version again
+# (a reinstall, npm's "already here") keeps what was there. A row with no
+# source recorded cannot say what it was, so nothing is kept for it.
+# SR_CLEAR_PREV=1 drops them, which a rollback does: it goes back one step only.
 state_record() {
     sr_name="$1"
     sr_kind="$2"
     sr_version="$3"
     shift 3
     sr_files="$*"
+    sr_src="${ii_source:-}"
+    sr_dig="${ii_digest:-}"
+    case "$sr_kind" in
+        npm-musl|npm-android) sr_dig="-" ;;
+    esac
+    sr_pv=""
+    sr_ps=""
+    sr_pd=""
+    sr_old=$(state_row "$sr_name" 2>/dev/null || true)
+    if [ -n "$sr_old" ] && [ "${SR_CLEAR_PREV:-0}" != 1 ]; then
+        if [ "$(field "$sr_old" 3)" != "$sr_version" ]; then
+            if [ -n "$(field "$sr_old" 6)" ]; then
+                sr_pv=$(field "$sr_old" 3)
+                sr_ps=$(field "$sr_old" 6)
+                sr_pd=$(field "$sr_old" 7)
+            fi
+        else
+            sr_pv=$(field "$sr_old" 8)
+            sr_ps=$(field "$sr_old" 9)
+            sr_pd=$(field "$sr_old" 10)
+        fi
+    fi
     mkdir -p "$DATA_DIR"
-    [ -f "$STATE" ] || printf '# tlstore installed\tname\tkind\tversion\twhen\tfiles\n' > "$STATE"
+    [ -f "$STATE" ] || printf '# tlstore installed\tname\tkind\tversion\twhen\tfiles\tsource\tdigest\tprev_version\tprev_source\tprev_digest\n' > "$STATE"
     sr_tmp="$STATE.new"
     awk -F "$TAB" -v want="$sr_name" '$1 != want' "$STATE" > "$sr_tmp" || return 1
-    printf '%s\t%s\t%s\t%s\t%s\n' "$sr_name" "$sr_kind" "$sr_version" "$(timestamp)" "$sr_files" >> "$sr_tmp"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$sr_name" "$sr_kind" "$sr_version" "$(timestamp)" "$sr_files" \
+        "$sr_src" "$sr_dig" "$sr_pv" "$sr_ps" "$sr_pd" >> "$sr_tmp"
     mv "$sr_tmp" "$STATE"
 }
 
+# Holds: names, one a line, kept apart from installed.tsv so a reinstall
+# (which rewrites the row) does not drop one.
+is_held() {
+    [ -f "$HELD" ] && grep -qx -- "$1" "$HELD" 2>/dev/null
+}
+
+hold_add() {
+    is_held "$1" && return 0
+    mkdir -p "$DATA_DIR"
+    printf '%s\n' "$1" >> "$HELD"
+}
+
+hold_drop() {
+    [ -f "$HELD" ] || return 0
+    hd_tmp="$HELD.new"
+    grep -vx -- "$1" "$HELD" > "$hd_tmp" || true
+    mv "$hd_tmp" "$HELD"
+}
+
 state_forget() {
+    # A hold goes with the item, however it leaves (remove, retirement).
+    hold_drop "$1"
     [ -f "$STATE" ] || return 0
     sf_tmp="$STATE.new"
     awk -F "$TAB" -v want="$1" '$1 != want' "$STATE" > "$sf_tmp" || return 1
@@ -1055,6 +1109,15 @@ install_item() {
     ii_digest="$it_digest"
     ii_target="$it_target"
     ii_options="$it_options"
+    # A rollback installs an earlier version in place of the list's: its
+    # version, and for a binary or file its own source and digest.
+    if [ -n "${RB_VERSION:-}" ]; then
+        ii_version="$RB_VERSION"
+        if [ -n "${RB_SOURCE:-}" ]; then
+            ii_source="$RB_SOURCE"
+            ii_digest="$RB_DIGEST"
+        fi
+    fi
 
     if [ "$ii_force" = 0 ] && already_here "$ii_name"; then
         say "$ii_name is already installed"
@@ -1639,15 +1702,15 @@ Commands:
   install [name...]     install items (alias: add); with no names, pick from a list
   remove <name...>      remove items tlstore installed (alias: uninstall)
   update [name...]      bring what you have up to date (alias: upgrade)
+  rollback <name>       go back one version, and hold the item there
+  hold <name...>        keep items at their version when you update
+  unhold <name...>      let held items update again
   refresh               update the list of items
   self-update           bring tlstore itself up to date
   doctor                check that everything is in place
   display               set up graphics for Linux apps
   version               show the tlstore and item-list versions
   help [command]        this page, or one command's own page
-EOF
-    # The commands rollback, hold and unhold go here when they are added.
-    cat <<'EOF'
 
 Options:
   -y, --yes       say yes to every question except replacing a config file of yours
@@ -1770,7 +1833,8 @@ Usage: tlstore [-y] update [options] [name...]
        tlstore upgrade ...
 
 Fetches the newest item list, brings what you have up to date, then updates
-tlstore itself. With no names it does everything you have installed.
+tlstore itself. With no names it does everything you have installed, except
+items you have held; naming a held item updates it and lets go of the hold.
 
 Options:
   --check        say what would change, and change nothing
@@ -1783,6 +1847,47 @@ Options:
 For the store app:
   --tsv          with --check, the changes as tab-separated columns
   --progress     a line per step on stdout, for a program to read (implies -y)
+EOF
+            ;;
+        rollback)
+            cat <<'EOF'
+Usage: tlstore [-y] rollback [options] <name>
+
+Puts an item back at the version it had before its last update, then holds it
+there so the next update does not undo that. It goes one step only; to move
+forward again, run 'tlstore unhold <name>' and 'tlstore update <name>'.
+
+Works for items from npm, binaries and config files. A package, a bundle or a
+fish plugin cannot go back: Termux keeps only the newest package, and the
+others have no version of their own to return to. An item installed before
+tlstore recorded versions has nothing to go back to until it updates once.
+
+Options:
+  -n, --dry-run  say what would be installed, and change nothing
+  -y, --yes      do not ask first
+  -h, --help     show this page
+EOF
+            ;;
+        hold)
+            cat <<'EOF'
+Usage: tlstore hold <name...>
+
+Keeps installed items at the version they have. A plain 'tlstore update'
+skips them and the store app does not offer them; 'tlstore update <name>'
+updates one anyway and lets go of its hold. Removing an item drops its hold.
+
+Options:
+  -h, --help  show this page
+EOF
+            ;;
+        unhold)
+            cat <<'EOF'
+Usage: tlstore unhold <name...>
+
+Lets held items update again.
+
+Options:
+  -h, --help  show this page
 EOF
             ;;
         refresh)
@@ -1802,6 +1907,7 @@ EOF
 Usage: tlstore self-update [--check]
 
 Brings tlstore itself, and the store app that goes with it, up to date.
+Exits 1 when a newer tlstore was offered and could not be taken.
 
 Options:
   --check     say whether a newer tlstore is out, and change nothing
@@ -1900,7 +2006,9 @@ emit_items() {
             continue
         fi
         if [ "$ei_style" = list ]; then
-            printf '%s %-14s %s\n' "$ei_mark" "$ei_name" "$ei_summary"
+            ei_held=""
+            ! is_held "$ei_name" || ei_held=" (held)"
+            printf '%s %-14s %s%s\n' "$ei_mark" "$ei_name" "$ei_summary" "$ei_held"
             ei_build=$(opt "$ei_options" build)
             [ -z "$ei_build" ] || printf '    needs while installing: %s\n' "$ei_build"
         else
@@ -2028,6 +2136,7 @@ cmd_info() {
     printf '  %-11s %s\n' Files "$ci_where"
     if is_installed "$it_name"; then
         printf '  %-11s %s\n' Installed "$(installed_version "$it_name")"
+        ! is_held "$it_name" || printf '  %-11s %s\n' Held "yes; 'tlstore unhold $it_name' lets it update"
     fi
     [ "$it_category" = - ] || printf '  %-11s %s\n' Category "$it_category"
     [ "$it_upstream" = - ] || printf '  %-11s %s\n' Upstream "$it_upstream"
@@ -2511,9 +2620,9 @@ readme_first_image() {
 # (by name, mtime and size), the cache's stamp, and everything rows() filters
 # on. When none of it changed, neither did the answer.
 snapshot_key() {
-    printf 'v=%s;serial=%s;catalog=%s:%s;state=%s;cache=%s;host=%s;arch=%s;pkg=%s;lver=%s;home=%s;prefix=%s' \
+    printf 'v=%s;serial=%s;catalog=%s:%s;state=%s;held=%s;cache=%s;host=%s;arch=%s;pkg=%s;lver=%s;home=%s;prefix=%s' \
         "$TLSTORE_VERSION" "$CATALOG_SERIAL" "$CATALOG" "$(file_stamp "$CATALOG")" \
-        "$(file_stamp "$STATE")" "$(file_stamp "$CACHE_DIR/.changed")" \
+        "$(file_stamp "$STATE")" "$(file_stamp "$HELD")" "$(file_stamp "$CACHE_DIR/.changed")" \
         "$HOST" "$ARCH_OK" "$APP_PACKAGE" "$LAUNCHER_VERSION" "$HOME" "$PREFIX"
 }
 
@@ -2525,7 +2634,7 @@ snapshot_key() {
 # `cached` lines, a `check` (path known) or `probe` (path keyed by the URL's
 # digest) line per picture, demo and readme.
 snapshot_rows() {
-    rows | awk -F "$TAB" -v OFS="$TAB" -v state="$STATE" -v home="$HOME" \
+    rows | awk -F "$TAB" -v OFS="$TAB" -v state="$STATE" -v heldfile="$HELD" -v home="$HOME" \
         -v bindir="$BIN_DIR" -v libdir="$LIB_DIR" -v privdir="$PRIV_DIR" \
         -v cachedir="$CACHE_DIR" -v launcher_raw="$LAUNCHER_RAW" -v binaries_raw="$BINARIES_RAW" \
         -v binaries_rel="$BINARIES_RELEASES" '
@@ -2599,6 +2708,10 @@ snapshot_rows() {
                 if (n > 0 && f[1] != "") { inst[f[1]] = 1; iver[f[1]] = f[3] }
             }
             close(state)
+            # A held item is not offered an update; a missing file just ends the loop.
+            while ((getline line < heldfile) > 0)
+                if (line != "") held[line] = 1
+            close(heldfile)
         }
         {
             name = $1; kind = $2; ver = $3; src = $5; dig = $6; target = $7
@@ -2652,7 +2765,7 @@ snapshot_rows() {
                 retired = (opts ~ /(^|;)retired=1(;|$)/)
                 # A retired row is hidden: the UI could count it but never
                 # show or run it. snapshot has already retired it anyway.
-                if (retired) {
+                if (retired || (name in held)) {
                     upd = 0
                 } else {
                     upd = 0
@@ -3192,7 +3305,12 @@ update_items() {
     [ "$cu_offline" = 1 ] || refresh_catalog 1 || true
     need_catalog
 
-    [ -n "$cu_names" ] || cu_names=$(installed_names | tr '\n' ' ')
+    # Named on the command line, an item is updated even when it is held.
+    cu_explicit=1
+    if [ -z "$cu_names" ]; then
+        cu_explicit=0
+        cu_names=$(installed_names | tr '\n' ' ')
+    fi
     if [ -z "$(printf '%s' "$cu_names" | tr -d ' ')" ]; then
         [ "$cu_tsv" = 1 ] || say "Nothing is installed yet."
         return 0
@@ -3216,6 +3334,16 @@ update_items() {
         if [ "$(opt "$(field "$cu_row" 9)" retired)" = 1 ]; then
             cu_retired="$cu_retired $cu_n"
             continue
+        fi
+        if is_held "$cu_n"; then
+            if [ "$cu_explicit" = 0 ]; then
+                [ "$cu_tsv" = 1 ] || say "$cu_n is held at $(installed_version "$cu_n"); 'tlstore unhold $cu_n' lets it update"
+                continue
+            fi
+            if [ "$cu_check" = 0 ]; then
+                hold_drop "$cu_n"
+                say "$cu_n was held; updating it lets go of the hold"
+            fi
         fi
         cu_kind=$(field "$cu_row" 2)
         cu_new=$(field "$cu_row" 3)
@@ -3355,9 +3483,141 @@ cmd_update() {
     # UI is what `self-update --progress` exists to do in plain view), and
     # not inside a --progress stream, which carries the item lines alone.
     if [ "$cu_status" != 2 ] && [ "${cu_offline:-0}" = 0 ] && [ "${cu_check:-0}" = 0 ] && [ "$PROGRESS" != 1 ]; then
-        self_update
+        # A refused or failed self-update fails the command, as a failed item does.
+        self_update || [ "$cu_status" != 0 ] || cu_status=1
     fi
     return "$cu_status"
+}
+
+# tlstore rollback <name> — one step back to the version recorded before the
+# current one, then hold the item there so the next update does not undo it.
+cmd_rollback() {
+    rb_name=""
+    for rb_a in "$@"; do
+        case "$rb_a" in
+            -y|--yes) ASSUME_YES=1 ;;
+            -n|--dry-run) DRY_RUN=1 ;;
+            -*) bad_opt rollback "$rb_a"; return 2 ;;
+            *)
+                if [ -n "$rb_name" ]; then
+                    err "rollback takes one name"
+                    return 2
+                fi
+                rb_name="$rb_a"
+                ;;
+        esac
+    done
+    [ -n "$rb_name" ] || { err "rollback needs a name"; return 2; }
+    need_catalog
+    rb_row=$(state_row "$rb_name" 2>/dev/null || true)
+    if [ -z "$rb_row" ]; then
+        err "$rb_name is not installed"
+        return 1
+    fi
+    rb_kind=$(field "$rb_row" 2)
+    rb_have=$(field "$rb_row" 3)
+    case "$rb_kind" in
+        pkg)
+            err "$rb_name is a package: Termux's repositories keep only the newest, so there is nothing to go back to"
+            return 1
+            ;;
+        bundle)
+            err "$rb_name is a bundle and has no version of its own; roll back the items in it"
+            return 1
+            ;;
+        fisher)
+            err "$rb_name is a fish plugin: fisher keeps it current, so tlstore cannot go back a version"
+            return 1
+            ;;
+    esac
+    rb_ver=$(field "$rb_row" 8)
+    rb_src=$(field "$rb_row" 9)
+    rb_dig=$(field "$rb_row" 10)
+    case "$rb_kind" in
+        binary|file|file-once)
+            # Without the old file's address and digest there is nothing to fetch.
+            if [ -z "$rb_src" ] || [ -z "$rb_dig" ]; then rb_ver=""; fi
+            ;;
+    esac
+    if [ -z "$rb_ver" ]; then
+        err "no earlier version of $rb_name is recorded"
+        return 1
+    fi
+    if ! load_item "$rb_name"; then
+        err "$rb_name is not available on this device"
+        return 1
+    fi
+    if [ "$DRY_RUN" = 1 ]; then
+        say "Would put $rb_name back from $rb_have to $rb_ver, and hold it there."
+        case "$rb_kind" in
+            binary|file|file-once) say "  from $rb_src" ;;
+        esac
+        say "Nothing was changed."
+        return 0
+    fi
+    say "Putting $rb_name back from $rb_have to $rb_ver."
+    ask_yn "Go ahead?" || { say "Nothing was changed."; return 0; }
+    RB_VERSION="$rb_ver"
+    case "$rb_kind" in
+        binary|file|file-once) RB_SOURCE="$rb_src"; RB_DIGEST="$rb_dig" ;;
+        *) RB_SOURCE=""; RB_DIGEST="" ;;
+    esac
+    SR_CLEAR_PREV=1
+    rb_rc=0
+    install_item "$rb_name" 1 || rb_rc=1
+    RB_VERSION=""
+    RB_SOURCE=""
+    RB_DIGEST=""
+    SR_CLEAR_PREV=0
+    if [ "$rb_rc" != 0 ]; then
+        err "could not put $rb_name back"
+        return 1
+    fi
+    hold_add "$rb_name"
+    say "$rb_name is back at $rb_ver and held; 'tlstore unhold $rb_name' lets it update again"
+    return 0
+}
+
+cmd_hold() {
+    ch_names=""
+    for ch_a in "$@"; do
+        case "$ch_a" in
+            -*) bad_opt hold "$ch_a"; return 2 ;;
+            *) ch_names="$ch_names $ch_a" ;;
+        esac
+    done
+    [ -n "$ch_names" ] || { err "hold needs a name"; return 2; }
+    ch_rc=0
+    for ch_n in $ch_names; do
+        if ! is_installed "$ch_n"; then
+            err "$ch_n is not installed, so there is nothing to hold"
+            ch_rc=1
+            continue
+        fi
+        hold_add "$ch_n"
+        say "$ch_n is held at $(installed_version "$ch_n"); 'tlstore unhold $ch_n' lets it update"
+    done
+    return "$ch_rc"
+}
+
+cmd_unhold() {
+    cx_names=""
+    for cx_a in "$@"; do
+        case "$cx_a" in
+            -*) bad_opt unhold "$cx_a"; return 2 ;;
+            *) cx_names="$cx_names $cx_a" ;;
+        esac
+    done
+    [ -n "$cx_names" ] || { err "unhold needs a name"; return 2; }
+    for cx_n in $cx_names; do
+        if is_held "$cx_n"; then
+            hold_drop "$cx_n"
+            say "$cx_n can update again"
+        else
+            say "$cx_n was not held"
+        fi
+    done
+    return 0
 }
 
 cmd_refresh() {
@@ -3614,7 +3874,7 @@ self_update() {
     self_update_try 0
     case $? in
         0) su_say "tlstore is now version $su_version." ;;
-        2) err "$SU_NOTE" ;;
+        2) err "$SU_NOTE"; return 1 ;;
     esac
     return 0
 }
@@ -3845,7 +4105,7 @@ main() {
     # `<command> -h` is that command's page, for every command but display,
     # which hands its arguments on to the setup script untouched.
     case "$tl_cmd" in
-        list|search|info|install|add|remove|uninstall|update|upgrade|refresh|self-update|doctor|version)
+        list|search|info|install|add|remove|uninstall|update|upgrade|rollback|hold|unhold|refresh|self-update|doctor|version)
             for tl_a in "$@"; do
                 case "$tl_a" in
                     -h|--help) help_for "$tl_cmd"; return $? ;;
@@ -3865,6 +4125,9 @@ main() {
         install|add) cmd_install "$@" ;;
         remove|uninstall) cmd_remove "$@" ;;
         update|upgrade) cmd_update "$@" ;;
+        rollback) cmd_rollback "$@" ;;
+        hold) cmd_hold "$@" ;;
+        unhold) cmd_unhold "$@" ;;
         refresh) cmd_refresh "$@" ;;
         self-update) cmd_self_update "$@" ;;
         shell)

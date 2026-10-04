@@ -18,7 +18,11 @@ Written 2026-09-06. Decisions here are settled; raise, do not silently change.
   `$PREFIX/libexec/termux-launcher/tlstore/{catalog.tsv,trusted.pub,.installed}`. Marker comment
   `# written by termux-launcher` in the script's first lines; a foreign `tlstore`/`tl`/`tls` is left
   alone and reported, never overwritten.
-- User state: `~/.local/share/tlstore/installed.tsv` (what tlstore installed, with files),
+- User state: `~/.local/share/tlstore/installed.tsv` (what tlstore installed, with files; columns
+  `name kind version when files source digest prev_version prev_source prev_digest` — the last five
+  were added for `rollback`, are appended only, and older rows without them read as empty ones, so
+  an item installed before them has no earlier version to go back to until it updates once),
+  `~/.local/share/tlstore/held` (names `hold` keeps out of `update`, one per line),
   `~/.local/share/tlstore/catalog.tsv` (verified refreshed catalog, optional),
   `~/.cache/tlstore/` (downloads). Payloads go to `~/.local/bin/<name>` and `~/.local/lib/<name>/`,
   never `$PREFIX/bin` (a bootstrap reinstall wipes it; apt owns names there). Replaced user files
@@ -90,8 +94,11 @@ tlstore info <name>           version, kind, source, digest, requires, files, su
 tlstore install [name...] [-y] [--dry-run]   no names → multi-select picker (fzf --multi, else numbered toggles)
 tlstore remove <name...> [-y] [--dry-run]
 tlstore update [name...] [--check|--dry-run] [--offline]   refresh catalog, then upgrade what is newer (--check changes nothing)
+tlstore rollback <name> [-y] [--dry-run]   one version back (npm, binary, file), then hold
+tlstore hold <name...>        skip these in update and in the store app's update list
+tlstore unhold <name...>
 tlstore refresh               catalog only
-tlstore self-update [--check] tlstore itself
+tlstore self-update [--check] tlstore itself (exit 1 when a newer one was refused or failed)
 tlstore help [command]        the command list, or one command's options (also: <command> -h)
 tlstore doctor                prefix, PATH order, tools present, catalog serial, drift, loader check
 tlstore version
