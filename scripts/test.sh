@@ -2080,9 +2080,9 @@ n
     expect_out "a binary dry run names its source" "fakebin-1"
     tl rollback fakebin -y
     expect_status "binary rollback" 0
+    expect_out "and held" "fakebin is back at 1 and held"
     OUT="$("$TESTHOME/.local/bin/fakebin" 2>&1)"
     expect_out "the old file is back" "fakebin 1"
-    expect_out "and held" "fakebin is back at 1 and held"
     tl rollback fakebin -y
     expect_out "one step only" "no earlier version of fakebin is recorded"
 
