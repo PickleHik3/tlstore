@@ -1594,12 +1594,32 @@ y
         RELEASE_KNOB="file://$FX/release-bad"; UI_KNOB="$ui"
         tl update -y
         expect_out "a tlstore whose signature does not cover it is refused" "not signed by the launcher"
+        expect_status "and the update exits 1" 1
         su_untouched "bad signature"
+
+        su_reset
+        RELEASE_KNOB="file://$FX/release-bad"; UI_KNOB="$ui"
+        tl self-update
+        expect_status "self-update exits 1 when the release is refused" 1
+        su_untouched "bad signature, self-update"
+
+        su_reset
+        RELEASE_KNOB="file://$FX/release-same"; UI_KNOB="$ui"
+        tl self-update
+        expect_status "self-update exits 0 when already current" 0
+        su_reset
+        RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"
+        tl self-update
+        expect_status "self-update exits 0 when it updated" 0
+        su_reset
+        UI_KNOB="$ui"
+        tl self-update
+        expect_status "self-update exits 0 when offline" 0
 
         su_reset
         RELEASE_KNOB="file://$FX/release-badui"; UI_KNOB="$ui"
         tl update -y
-        expect_status "a tampered store program does not fail the update" 0
+        expect_status "a tampered store program fails the update" 1
         expect_out "it is refused by the digest the signed script names" "does not match what tlstore 9.9 expects"
         expect_no_out "and nothing claims to be updated" "tlstore is now version"
         su_untouched "tampered UI"
@@ -1915,6 +1935,187 @@ n
     expect_status "update --dry-run" 0
     expect_content "the state file is untouched" "$dry_state" "$dry_before"
     if [ -s "$ROOT/pkg.log" ]; then fail "the package manager was not called" "log: $(cat "$ROOT/pkg.log")"; else pass; fi
+
+    # --- rollback, hold and unhold ---
+    # Self-contained: every item here is removed first and again at the end,
+    # and --offline keeps update from refreshing the list or touching tlstore.
+    T=$'\t'
+    held_file="$TESTHOME/.local/share/tlstore/held"
+    state_file="$TESTHOME/.local/share/tlstore/installed.tsv"
+    # A second version of demo-droid at the registry: latest moves to it,
+    # and the exact documents stay for the rollback to read.
+    mkdir -p "$FX/droidsrc31"
+    cp -R "$FX/droidsrc/package" "$FX/droidsrc31/"
+    sed 's/demo-droid 3.0.0/demo-droid 3.1.0/' "$FX/droidsrc/package/bin/droid.bin" > "$FX/droidsrc31/package/bin/droid.bin"
+    chmod +x "$FX/droidsrc31/package/bin/droid.bin"
+    tar czf "$FX/demo-droid-3.1.0.tgz" -C "$FX/droidsrc31" package
+    cp "$FX/registry/demo-droid/latest" "$FX/registry/demo-droid/3.0.0"
+    printf '{"name":"demo-droid","version":"3.1.0","dist":{"tarball":"file://%s/demo-droid-3.1.0.tgz","integrity":"sha512-%s"}}\n' \
+        "$FX" "$(sha512_b64 "$FX/demo-droid-3.1.0.tgz")" > "$FX/registry/demo-droid/3.1.0"
+
+    PATCHELF_KNOB=false
+    tl remove droid -y
+    PATCHELF_KNOB=false
+    tl install droid -y
+    expect_status "rollback: droid installs" 0
+    tl rollback droid -y
+    expect_status "rollback of an item that never updated exits 1" 1
+    expect_out "and says nothing is recorded" "no earlier version of droid is recorded"
+    cp "$FX/registry/demo-droid/3.1.0" "$FX/registry/demo-droid/latest"
+    PATCHELF_KNOB=false
+    tl update droid -y --offline
+    expect_status "rollback: droid updates to the newer version" 0
+    OUT="$("$TESTHOME/.local/bin/droid" 2>&1)"
+    expect_out "the newer droid is in place" "demo-droid 3.1.0"
+    tl rollback droid -n
+    expect_status "rollback --dry-run" 0
+    expect_out "it names the version it would install" "3.0.0"
+    expect_out "and says nothing was changed" "Nothing was changed"
+    OUT="$("$TESTHOME/.local/bin/droid" 2>&1)"
+    expect_out "the dry run left the newer droid" "demo-droid 3.1.0"
+    expect_no_file "the dry run holds nothing" "$held_file"
+    PATCHELF_KNOB=false
+    tl rollback droid -y
+    expect_status "npm rollback" 0
+    expect_out "it says the item is back and held" "droid is back at 3.0.0 and held; 'tlstore unhold droid' lets it update again"
+    OUT="$("$TESTHOME/.local/bin/droid" 2>&1)"
+    expect_out "the older droid is back" "demo-droid 3.0.0"
+    expect_content "droid's installed version is the old one" "$TESTHOME/.local/lib/droid/version" "3.0.0"
+    if grep -qx droid "$held_file"; then pass; else fail "the rolled-back item is held"; fi
+    tl rollback droid -y
+    expect_status "a second rollback exits 1" 1
+    expect_out "and says nothing is recorded" "no earlier version of droid is recorded"
+    tl list -i
+    expect_out "list -i marks the held item" "droid.*(held)"
+    tl info droid
+    expect_out "info says it is held" "Held"
+    tl list -i --tsv
+    expect_no_out "list --tsv columns carry no held marker" "held"
+    tl update --check --offline
+    expect_out "update --check says a held item is held" "droid is held at 3.0.0; 'tlstore unhold droid' lets it update"
+    PATCHELF_KNOB=false
+    tl update -y --offline
+    expect_out "a plain update skips the held item and says so" "droid is held at 3.0.0"
+    OUT="$("$TESTHOME/.local/bin/droid" 2>&1)"
+    expect_out "and it stays at the old version" "demo-droid 3.0.0"
+    tl update --check --tsv --offline
+    expect_no_out "update --check --tsv has no row for it" "^droid${T}"
+    PATCHELF_KNOB=false
+    tl update droid -y --offline
+    expect_status "naming a held item updates it" 0
+    expect_out "and says the hold is let go" "droid was held; updating it lets go of the hold"
+    OUT="$("$TESTHOME/.local/bin/droid" 2>&1)"
+    expect_out "it is at the newer version again" "demo-droid 3.1.0"
+    if grep -qx droid "$held_file" 2>/dev/null; then fail "the hold was released"; else pass; fi
+    PATCHELF_KNOB=false
+    tl rollback droid -y
+    expect_out "the update recorded the old version for a new rollback" "droid is back at 3.0.0 and held"
+
+    # hold and unhold
+    tl unhold droid
+    expect_status "unhold" 0
+    if grep -qx droid "$held_file" 2>/dev/null; then fail "unhold lets go"; else pass; fi
+    tl unhold droid
+    expect_status "unhold of what is not held is fine" 0
+    expect_out "and says so" "droid was not held"
+    tl hold droid
+    expect_status "hold" 0
+    tl hold droid
+    expect_status "holding twice is fine" 0
+    if [ "$(grep -cx droid "$held_file")" = 1 ]; then pass; else fail "a name is held once"; fi
+    tl hold nonesuch
+    expect_status "hold of something not installed exits 1" 1
+    expect_out "and says so" "nonesuch is not installed"
+    tl hold; expect_status "hold needs a name" 2
+    tl unhold; expect_status "unhold needs a name" 2
+    tl hold -x droid; expect_status "hold takes no options" 2
+    tl rollback; expect_status "rollback needs a name" 2
+    tl rollback -x droid; expect_status "rollback rejects an unknown option" 2
+    tl hold -h; expect_status "hold -h" 0; expect_out "hold -h has its page" "Usage: tlstore hold"
+    tl unhold --help; expect_out "unhold --help has its page" "Usage: tlstore unhold"
+    tl rollback -h; expect_out "rollback -h has its page" "Usage: tlstore .*rollback"
+    tl help; expect_out "help lists rollback" "rollback <name>"
+    expect_out "help lists hold" "hold <name"
+    PATCHELF_KNOB=false
+    tl remove droid -y
+    if grep -qx droid "$held_file" 2>/dev/null; then fail "remove drops the hold"; else pass; fi
+    cp "$FX/registry/demo-droid/3.0.0" "$FX/registry/demo-droid/latest"
+
+    # A binary: its old file comes back from the recorded source and digest.
+    write_catalog "$TESTHOME/.local/share/tlstore/catalog.tsv" 2026090620 1 fakebin-1
+    tl remove fakebin -y
+    tl install fakebin -y
+    OUT="$("$TESTHOME/.local/bin/fakebin" 2>&1)"
+    expect_out "fakebin 1 is in place" "fakebin 1"
+    write_catalog "$TESTHOME/.local/share/tlstore/catalog.tsv" 2026090621 2 fakebin-2
+    tl update fakebin -y --offline
+    OUT="$("$TESTHOME/.local/bin/fakebin" 2>&1)"
+    expect_out "fakebin 2 is in place" "fakebin 2"
+    write_catalog "$TESTHOME/.local/share/tlstore/catalog.tsv" 2026090622 3 fakebin-3
+    tl update --check --tsv --offline
+    expect_out "a newer fakebin is offered" "^fakebin${T}2${T}3"
+    tl hold fakebin
+    tl update --check --tsv --offline
+    expect_no_out "a held binary is not offered by update --check --tsv" "^fakebin${T}"
+    tl_stdout snapshot --tsv
+    expect_no_out "snapshot --tsv has no update line for a held item" "^update${T}fakebin${T}"
+    expect_out "but still lists it" "^item${T}fakebin${T}installed"
+    tl update -y --offline
+    expect_out "a plain update says fakebin is held" "fakebin is held at 2"
+    OUT="$("$TESTHOME/.local/bin/fakebin" 2>&1)"
+    expect_out "and leaves it" "fakebin 2"
+    tl unhold fakebin
+    tl_stdout snapshot --tsv
+    expect_out "unheld, snapshot offers the update again" "^update${T}fakebin${T}2${T}3"
+    # A recorded digest that no longer matches stops the rollback and keeps what is here.
+    cp "$state_file" "$ROOT/installed.good"
+    awk -F "$T" -v OFS="$T" '$1 == "fakebin" { $10 = "0000000000000000000000000000000000000000000000000000000000000000" } { print }' \
+        "$ROOT/installed.good" > "$state_file"
+    tl rollback fakebin -y
+    expect_status "a rollback whose digest does not match fails" 1
+    OUT="$("$TESTHOME/.local/bin/fakebin" 2>&1)"
+    expect_out "and the file that was there stays" "fakebin 2"
+    cp "$ROOT/installed.good" "$state_file"
+    tl rollback fakebin -n
+    expect_out "a binary dry run names its source" "fakebin-1"
+    tl rollback fakebin -y
+    expect_status "binary rollback" 0
+    OUT="$("$TESTHOME/.local/bin/fakebin" 2>&1)"
+    expect_out "the old file is back" "fakebin 1"
+    expect_out "and held" "fakebin is back at 1 and held"
+    tl rollback fakebin -y
+    expect_out "one step only" "no earlier version of fakebin is recorded"
+
+    # A row from before the new columns: five of them.
+    tl remove fakebin -y
+    printf 'fakebin\tbinary\t1\t20200101-000000\t%s\n' "$TESTHOME/.local/bin/fakebin" >> "$state_file"
+    printf '#!/bin/sh\necho fakebin 1\n' > "$TESTHOME/.local/bin/fakebin"
+    chmod 755 "$TESTHOME/.local/bin/fakebin"
+    tl list -i
+    expect_out "a five-column row still lists" "fakebin"
+    tl rollback fakebin -y
+    expect_status "rollback of a five-column row exits 1" 1
+    expect_out "and says nothing is recorded" "no earlier version of fakebin is recorded"
+    tl update fakebin -y --offline
+    expect_status "a five-column row still updates" 0
+    OUT="$("$TESTHOME/.local/bin/fakebin" 2>&1)"
+    expect_out "to the list's version" "fakebin 3"
+    tl rollback fakebin -y
+    expect_out "and the update has nothing earlier to offer back" "no earlier version of fakebin is recorded"
+    tl remove fakebin -y
+    expect_status "and it removes" 0
+    expect_no_file "with its file" "$TESTHOME/.local/bin/fakebin"
+
+    # Kinds that cannot go back.
+    tl install demo-pkg -y
+    tl rollback demo-pkg -y
+    expect_status "pkg rollback exits 1" 1
+    expect_out "and says why" "package"
+    tl remove demo-pkg -y
+    tl rollback nonesuch -y
+    expect_status "rollback of something not installed exits 1" 1
+    expect_out "and says so" "nonesuch is not installed"
+    write_catalog "$TESTHOME/.local/share/tlstore/catalog.tsv" 2026090603 2 fakebin-2
 
     rm -rf "$ROOT"
 }

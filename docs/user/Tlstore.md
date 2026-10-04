@@ -62,6 +62,9 @@ by name.
 | `tlstore update` | bring everything you have up to date |
 | `tlstore update --check` | see what is out of date without installing anything (`--dry-run` means the same) |
 | `tlstore update --offline` | update from the item list you already have, without fetching a newer one |
+| `tlstore rollback codex` | go back one version, and hold the item there (`--dry-run` says what it would do) |
+| `tlstore hold codex` | keep an item at its version when you update |
+| `tlstore unhold codex` | let a held item update again |
 | `tlstore refresh` | update the list of items without touching what is installed |
 | `tlstore display` | set up graphics for Linux apps |
 | `tlstore doctor` | check that everything is in place |
@@ -173,6 +176,32 @@ on. `tlstore refresh` only fetches that list, without installing or changing any
 The list of items is signed by the launcher's maintainer, and tlstore only accepts an update to it
 when the signature checks out and it is genuinely newer than the one you have — so a compromised
 mirror or a bad network cannot swap in something else under your feet.
+
+## Going back a version
+
+An update that broke something is not final. `tlstore rollback <name>` puts the item back at the
+version it had before its last update, then holds it there, so the next `tlstore update` does not
+undo it:
+
+```
+tlstore rollback codex     codex is back at 0.9.2 and held
+tlstore hold codex         keep an item where it is, without rolling back
+tlstore unhold codex       let it update again
+```
+
+A held item is skipped by `tlstore update` (it says so), and the store app does not offer an update
+for it; `tlstore list -i` and `tlstore info` mark it as held. Naming it, `tlstore update codex`,
+updates it anyway and lets go of the hold. Removing an item drops its hold too.
+
+Rollback goes one step only, and only back to a version tlstore recorded: an item you installed
+before this existed has to update once first. To go forward again, `unhold` and `update`.
+
+What cannot go back: package items (Termux's repositories keep only the newest package), bundles
+(they have no version of their own) and fish plugins (fisher keeps those). A config file goes back
+like anything else, but you are still shown the change and asked before yours is replaced.
+
+`tlstore self-update` exits 1 when a newer tlstore was offered but could not be taken (a bad
+signature, a download that does not match); `tlstore update` does too.
 
 ## Doctor
 
