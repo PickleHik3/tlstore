@@ -40,7 +40,7 @@ Columns:
 | column | meaning |
 |---|---|
 | `name` | `[a-z0-9][a-z0-9-]*`, unique per prefix set |
-| `kind` | `pkg` \| `binary` \| `file` \| `file-once` \| `script` \| `npm-musl` \| `bundle` |
+| `kind` | `pkg` \| `binary` \| `file` \| `file-once` \| `script` \| `npm-musl` \| `npm-android` \| `bundle` |
 | `version` | `-` for pkg/bundle; upstream version for binary/file/script; `latest` or pinned for npm-musl |
 | `prefixes` | `*` or comma list of app packages (`com.termux`, `io.vaj.tl`, `com.termux.launcher.nix`) |
 | `source` | `pkg`: space-separated package names. `binary`/`file`/`file-once`/`script`: a URL, or `binaries:<asset>@<tag>` (→ `https://github.com/PickleHik3/tlstore/releases/download/<tag>/<asset>-aarch64`, a release asset; with a slash in the asset, `binaries:<path>@<tag>` → `https://raw.githubusercontent.com/PickleHik3/tlstore/<tag>/<path>`, a file in the repository) or `launcher:<path>@<tag>` (→ `https://raw.githubusercontent.com/PickleHik3/termux-launcher/<tag>/<path>`). `npm-musl`: `npm:<package>#<executable inside package/>`. `bundle`: `-` |

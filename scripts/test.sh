@@ -21,7 +21,9 @@
 #                            registry document, sha512, extraction, loader,
 #                            wrapper — is exercised for real. Nothing else is
 #                            stubbed: curl, sha256sum, sha512sum, tar, base64,
-#                            od and minisign are the real tools.
+#                            od and minisign are the real tools. The npm-android
+#                            item must never reach patchelf, so its tests set
+#                            it to `false`, which would fail the install.
 #   TLSTORE_ASSUME_TTY=1   — the questions tlstore only asks a person (replace
 #                            this config file? remove the build tools?) are
 #                            skipped when stdin is not a terminal. The suite has
@@ -133,6 +135,7 @@ write_catalog() {
         printf 'claude-code\tnpm-musl\tlatest\t*\tnpm:demo-cli#claude\t-\t-\tmusl-loader,demo-pkg\tenv=DEMO_FLAG=1;tz=1;build=demo-build\tA tool that comes from npm.\t%s\n' "$R5_NONE"
         printf 'musl-cxx\tbinary\t1\t*\tfile://%s/musllib.bin\t%s\t~/.local/lib/musl/libdemo++.so.6\t-\thidden=1\tA library tools from other systems need.\t%s\n' "$FX" "$(sha "$FX/musllib.bin")" "$R5_NONE"
         printf 'agent\tnpm-musl\tlatest\t*\tnpm:demo-agent#bin/agent\t-\t-\tmusl-loader,musl-cxx\tmusl-libs=musl-cxx\tAn agent that comes from npm.\t%s\n' "$R5_NONE"
+        printf 'droid\tnpm-android\tlatest\t*\tnpm:demo-droid#bin/droid.bin\t-\t-\t-\textra=bin/droid-helper;command=droid;args=-c demo=1\tA program built for Android that comes from npm.\t%s\n' "$R5_NONE"
         printf 'kit\tbundle\t-\t*\t-\t-\t-\thello,fakebin,demo-pkg,secret\t-\tA few things at once.\t%s\n' "$R5_NONE"
         # conflicts=: a bundle and its part that refuse to install while the package termux-api is
         # (the marker file the fake pacman looks for), the way the termux-api-shims item does.
@@ -330,6 +333,26 @@ EOF
         "$FX" "$(sha512_b64 "$FX/demo-agent-2.0.0.tgz")" > "$FX/registry/demo-agent/latest"
     printf 'the musl C++ library\n' > "$FX/musllib.bin"
 
+    # The third is an Android build (codex-termux's shape): the executable is
+    # not named like the command, and it needs a helper beside it.
+    mkdir -p "$FX/registry/demo-droid" "$FX/droidsrc/package/bin"
+    cat > "$FX/droidsrc/package/bin/droid.bin" <<'EOF'
+#!/bin/sh
+echo "demo-droid 3.0.0"
+echo "args: $*"
+"$(dirname "$0")/droid-helper"
+EOF
+    cat > "$FX/droidsrc/package/bin/droid-helper" <<'EOF'
+#!/bin/sh
+echo "helper beside the executable"
+EOF
+    chmod +x "$FX/droidsrc/package/bin/droid.bin" "$FX/droidsrc/package/bin/droid-helper"
+    printf 'Apache-2.0\n' > "$FX/droidsrc/package/LICENSE"
+    printf 'notice\n' > "$FX/droidsrc/package/NOTICE"
+    tar czf "$FX/demo-droid-3.0.0.tgz" -C "$FX/droidsrc" package
+    printf '{"name":"demo-droid","version":"3.0.0","dist":{"tarball":"file://%s/demo-droid-3.0.0.tgz","integrity":"sha512-%s"}}\n' \
+        "$FX" "$(sha512_b64 "$FX/demo-droid-3.0.0.tgz")" > "$FX/registry/demo-droid/latest"
+
     # The catalog the app ships, plus three the refresh can be pointed at.
     write_catalog "$TPREFIX/libexec/termux-launcher/tlstore/catalog.tsv" 2026090601 1 fakebin-1
     write_catalog "$FX/newer.tsv" 2026090602 2 fakebin-2
@@ -372,7 +395,7 @@ tl() {
             TLSTORE_CATALOG_URL="$CATALOG_URL" \
             TLSTORE_NPM_REGISTRY="file://$FX/registry" \
             TLSTORE_ARCH=aarch64 \
-            TLSTORE_PATCHELF=true \
+            TLSTORE_PATCHELF="${PATCHELF_KNOB:-true}" \
             TLSTORE_ASSUME_TTY="${TTY_KNOB:-0}" \
             TLSTORE_HOST="${HOST_KNOB:-}" \
             TLSTORE_UI="${UI_KNOB:-}" \
@@ -390,7 +413,7 @@ tl() {
             TLSTORE_CATALOG_URL="$CATALOG_URL" \
             TLSTORE_NPM_REGISTRY="file://$FX/registry" \
             TLSTORE_ARCH=aarch64 \
-            TLSTORE_PATCHELF=true \
+            TLSTORE_PATCHELF="${PATCHELF_KNOB:-true}" \
             TLSTORE_ASSUME_TTY="${TTY_KNOB:-0}" \
             TLSTORE_HOST="${HOST_KNOB:-}" \
             TLSTORE_UI="${UI_KNOB:-}" \
@@ -406,6 +429,7 @@ tl() {
     STDIN_TEXT=""
     TTY_KNOB=0
     HOST_KNOB=""
+    PATCHELF_KNOB=""
     UI_KNOB=""
     RELEASE_KNOB=""
     TP_KNOB=""
@@ -436,6 +460,7 @@ tl_stdout() {
         "${SHCMD[@]}" "$TLSTORE" "$@" < /dev/null 2>/dev/null)"
     ST=$?
     HOST_KNOB=""
+    PATCHELF_KNOB=""
     UI_KNOB=""
     RELEASE_KNOB=""
     TP_KNOB=""
@@ -473,6 +498,7 @@ run_suite() {
     CATALOG_URL="file://$FX/newer.tsv"
     STDIN_TEXT=""
     HOST_KNOB=""
+    PATCHELF_KNOB=""
     UI_KNOB=""
     RELEASE_KNOB=""
     TP_KNOB=""
@@ -748,6 +774,29 @@ exec \"$TESTHOME/.local/bin/tl-priv\" run \"$TESTHOME/.local/lib/tlstore/priv/pr
     expect_out "the wrapper runs the package executable" "demo-agent 2.0.0"
     tl remove agent -y
     expect_status "remove it again" 0
+
+    # --- npm-android: no loader, no patchelf, an extra member, a command name and args ---
+    PATCHELF_KNOB=false
+    tl install droid -y
+    expect_status "install an npm-android item" 0
+    expect_file "the executable is in place" "$TESTHOME/.local/lib/droid/bin/droid.bin"
+    expect_file "the extra member is beside it" "$TESTHOME/.local/lib/droid/bin/droid-helper"
+    expect_file "its licence and notice come along" "$TESTHOME/.local/lib/droid/NOTICE"
+    expect_content "the installed version is recorded" "$TESTHOME/.local/lib/droid/version" "3.0.0"
+    expect_file "the wrapper is named by command=" "$TESTHOME/.local/bin/droid"
+    if [ -e "$TESTHOME/.local/lib/droid/ld-musl-aarch64.so.1" ]; then fail "no musl loader belongs in an Android package"; else pass; fi
+    if [ -e "$TESTHOME/.local/bin/droid.bin" ]; then fail "the wrapper is not named after the executable"; else pass; fi
+    OUT="$("$TESTHOME/.local/bin/droid" one two 2>&1)"; ST=$?
+    expect_status "the wrapper runs" 0
+    expect_out "the wrapper runs the package executable" "demo-droid 3.0.0"
+    expect_out "args= come before the person's own" "args: -c demo=1 one two"
+    expect_out "the extra member is reachable beside the executable" "helper beside the executable"
+    PATCHELF_KNOB=false
+    tl install droid -y
+    expect_out "installing it again says it is already here" "droid 3.0.0 is already here"
+    tl remove droid -y
+    expect_status "remove an npm-android item" 0
+    if [ -e "$TESTHOME/.local/lib/droid" ] || [ -e "$TESTHOME/.local/bin/droid" ]; then fail "remove deletes the directory and the wrapper"; else pass; fi
 
     # --- build tools, with nobody to ask and with an answer ---
     : > "$ROOT/pkg.log"
@@ -1174,6 +1223,17 @@ y
     tl update --check
     expect_out "and said in words without --tsv" "claude-code 1.1.0 is available; you have 1.0.0"
     mv "$FX/registry-demo-cli-latest.bak" "$FX/registry/demo-cli/latest"
+    # An npm-android item pinned to latest is asked about the same way.
+    PATCHELF_KNOB=false
+    tl install droid -y
+    cp "$FX/registry/demo-droid/latest" "$FX/registry-demo-droid-latest.bak"
+    sed 's/"version":"3.0.0"/"version":"3.1.0"/' "$FX/registry-demo-droid-latest.bak" > "$FX/registry/demo-droid/latest"
+    tl update --check --tsv
+    expect_out "a newer npm-android version is named with its number" $'^droid\t3.0.0\t3.1.0\tlatest$'
+    mv "$FX/registry-demo-droid-latest.bak" "$FX/registry/demo-droid/latest"
+    tl update --check --tsv
+    expect_no_out "and the same version is not an update" $'^droid\t'
+    tl remove droid -y
     rm -rf "$FX/registry-gone"
     mv "$FX/registry" "$FX/registry-gone"
     tl update --check --tsv
