@@ -505,7 +505,33 @@ run_suite() {
     TPV_KNOB=""
 
     # --- help, version, usage ---
-    tl help; expect_status "help" 0; expect_out "help lists commands" "tlstore install"
+    tl help; expect_status "help" 0; expect_out "help lists commands" "install \[name"
+    expect_out "help has a usage line" "Usage: tlstore"
+    expect_no_out "help does not list the store app's own commands" "readme-asset"
+    expect_no_out "help does not list shell" "tlstore shell"
+    tl_stdout help; expect_status "help on stdout" 0; expect_out "help goes to stdout" "Usage: tlstore"
+    tl_stdout --help; expect_status "--help" 0; expect_out "--help goes to stdout" "Exit status"
+    tl -h; expect_status "-h" 0
+    tl install --help; expect_status "install --help" 0; expect_out "install --help names --dry-run" "dry-run"
+    tl_stdout install --help; expect_out "install --help is on stdout" "Usage: tlstore .*install"
+    tl help install; expect_status "help install" 0; expect_out "help install names --configs" "configs"
+    tl update -h; expect_out "update -h documents --check" "check"
+    expect_out "update -h documents --offline" "offline"
+    tl upgrade --help; expect_status "an alias has the page too" 0
+    tl help nope; expect_status "help for an unknown command is a usage error" 2
+    tl -y list; expect_status "-y before the command works" 0
+    expect_out "and the command still runs" "hello"
+    tl -z list; expect_status "an unknown option before the command is a usage error" 2
+    tl --version; expect_status "--version" 0; expect_out "--version prints the version" "^tlstore "
+    tl doctor extra; expect_status "doctor takes no arguments" 2
+    expect_out "and says which one" "doctor: unexpected argument: extra"
+    expect_out "and where to look" "tlstore help doctor"
+    tl version extra; expect_status "version takes no arguments" 2
+    tl refresh extra; expect_status "refresh takes no names" 2
+    tl self-update extra; expect_status "self-update takes no names" 2
+    tl list -x; expect_out "an unknown option points at the help page" "tlstore help list"
+    tl shell; expect_status "shell is gone" 2
+    expect_out "and says what to run instead" "install fish-shell"
     expect_no_out "help no longer mentions browse" "browse"
     tl version; expect_status "version" 0; expect_out "version names the item list" "2026090601"
     tl nonsense; expect_status "unknown command is a usage error" 2
@@ -1862,6 +1888,33 @@ n
     tl install -y
     expect_status "picking nothing" 0
     expect_out "picking nothing installs nothing" "Nothing to install"
+
+    # --- --dry-run: the plan, and nothing else ---
+    # hello is installed here (the picker did it), so remove has something to
+    # show; the rest is fresh.
+    dry_state="$TESTHOME/.local/share/tlstore/installed.tsv"
+    dry_before="$(cat "$dry_state" 2>/dev/null)"
+    : > "$ROOT/pkg.log"
+    tl install --dry-run fakebin kit
+    expect_status "install --dry-run" 0
+    expect_out "install --dry-run names the item" "fakebin"
+    expect_out "install --dry-run names what a bundle brings" "demo-pkg"
+    expect_out "install --dry-run says nothing was changed" "Nothing was changed"
+    expect_content "install --dry-run writes no state" "$dry_state" "$dry_before"
+    tl install -n claude-code
+    expect_status "install -n" 0
+    expect_out "install --dry-run lists the parts it requires" "musl-loader"
+    expect_out "install --dry-run lists the build tools" "demo-build"
+    expect_content "install -n writes no state either" "$dry_state" "$dry_before"
+    tl install --dry-run; expect_status "install --dry-run with no name is a usage error" 2
+    tl remove --dry-run hello
+    expect_status "remove --dry-run" 0
+    expect_out "remove --dry-run names the file that would go" "hello.conf"
+    expect_file "remove --dry-run leaves the file" "$TESTHOME/.config/hello.conf"
+    tl update --dry-run
+    expect_status "update --dry-run" 0
+    expect_content "the state file is untouched" "$dry_state" "$dry_before"
+    if [ -s "$ROOT/pkg.log" ]; then fail "the package manager was not called" "log: $(cat "$ROOT/pkg.log")"; else pass; fi
 
     rm -rf "$ROOT"
 }

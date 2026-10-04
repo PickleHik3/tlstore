@@ -7,7 +7,7 @@ all three names run the same store.
 ## Quick start
 
 ```sh
-tlstore shell
+tlstore install fish-shell
 ```
 
 installs the whole fish setup in one go: fish, a prompt that follows your wallpaper colors, a nicer
@@ -56,20 +56,28 @@ by name.
 | `tlstore info fish-shell` | what an item is, its version, and where it goes |
 | `tlstore install kitten sigye` | install one or more items by name |
 | `tlstore install` | open the picker instead of naming anything |
+| `tlstore install --dry-run kitten` | show what would be installed, parts and build tools included, and change nothing |
 | `tlstore remove kitten` | remove an item tlstore installed |
+| `tlstore remove --dry-run kitten` | show what would be removed, and which files, and change nothing |
 | `tlstore update` | bring everything you have up to date |
-| `tlstore update --check` | see what is out of date without installing anything |
+| `tlstore update --check` | see what is out of date without installing anything (`--dry-run` means the same) |
+| `tlstore update --offline` | update from the item list you already have, without fetching a newer one |
 | `tlstore refresh` | update the list of items without touching what is installed |
-| `tlstore shell` | install the whole fish setup |
 | `tlstore display` | set up graphics for Linux apps |
 | `tlstore doctor` | check that everything is in place |
+| `tlstore self-update` | bring tlstore itself up to date (`--check` only says) |
+| `tlstore help` | the list of commands; `tlstore help install` or `tlstore install --help` is one command's own page |
 | `tlstore version` | show the tlstore and item-list versions |
 | `tlstore readme kitten` | print where a copy of the item's own README has been saved, fetching it when it is missing or a day old |
 | `tlstore readme-asset kitten docs/shot.png` | print where a picture that README refers to has been saved, fetching it the same way |
 | `--tsv` | on `list`, `search`, `info` and `update --check`: the same answer as tab-separated columns, for a program to read |
 
-`-y` says yes to everything except a config file of yours. `--configs` on `install` and `update`
-answers that one too, for scripts.
+`-y` says yes to everything except a config file of yours, and goes before or after the command
+(`tlstore -y install kitten`). `--configs` on `install` and `update` answers that one too, for
+scripts. `add`, `uninstall` and `upgrade` are other names for `install`, `remove` and `update`.
+
+An exit status of 0 means done, 1 means something failed and 2 means a mistake in what you typed.
+`tlstore shell` is gone; it is now `tlstore install fish-shell`.
 
 Removing a package-based item only tells tlstore to stop tracking it — the package itself stays
 installed, the way `apt`/`pacman` already manage it. Everything else tlstore put down is deleted.
@@ -116,7 +124,7 @@ ones it added and clear what it downloaded. Say no and they simply stay.
 
 ## The fish setup
 
-`tlstore shell` (or `tlstore install fish-shell`) installs fish itself, the launcher's
+`tlstore install fish-shell` installs fish itself, the launcher's
 `config.fish`, a `conf.d/personal.fish` that is yours to edit, the `oh-my-posh` package, `eza`,
 `zoxide`, and [fisher](https://github.com/jorgebucaran/fisher) with two plugins:
 

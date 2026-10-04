@@ -148,6 +148,9 @@ REPLACE_CONFIGS=0
 PROGRESS=0
 PROGRESS_NOTE=""
 
+# --dry-run: say what install, update or remove would do, and change nothing.
+DRY_RUN=0
+
 # Packages this run installed only so something else could be built.
 BUILD_ADDED=""
 
@@ -1622,24 +1625,245 @@ pick_items() {
 
 usage() {
     cat <<'EOF'
-tlstore installs the tools and configs the launcher shows off.
+tlstore installs, updates and removes the tools and configs the launcher
+shows off but does not ship.
 
-  tlstore list [-i|-a]        everything, what you have (-i), what you do not (-a)
-  tlstore search <term>       find an item by name or description
-  tlstore info <name>         what an item is and where it goes
-  tlstore install [name...]   install items; with no names, pick from a list
-  tlstore remove <name...>    remove items tlstore installed
-  tlstore update [name...]    bring what you have up to date
-  tlstore refresh             update the list of items
-  tlstore self-update         bring tlstore itself up to date (--check: only say)
-  tlstore shell               install the fish shell setup
-  tlstore display             set up graphics for Linux apps
-  tlstore doctor              check that everything is in place
-  tlstore version
+Usage: tlstore [-y] <command> [options] [name...]
 
-  -y          say yes to everything except a config file of yours
-  --configs   take the new version of every config file too
+With no command it opens the store in the launcher, or lists what there is.
+
+Commands:
+  list [-i|-a]          show every item; -i only yours, -a only what you lack
+  search <term>         find an item by name or description
+  info <name>           what an item is and where it goes
+  install [name...]     install items (alias: add); with no names, pick from a list
+  remove <name...>      remove items tlstore installed (alias: uninstall)
+  update [name...]      bring what you have up to date (alias: upgrade)
+  refresh               update the list of items
+  self-update           bring tlstore itself up to date
+  doctor                check that everything is in place
+  display               set up graphics for Linux apps
+  version               show the tlstore and item-list versions
+  help [command]        this page, or one command's own page
 EOF
+    # The commands rollback, hold and unhold go here when they are added.
+    cat <<'EOF'
+
+Options:
+  -y, --yes       say yes to every question except replacing a config file of yours
+  -h, --help      show this page; after a command, that command's page
+  -v, --version   show the version
+
+  Run 'tlstore help <command>' for the options a command takes of its own,
+  such as --dry-run on install, update and remove.
+
+Exit status:
+  0  done
+  1  something failed
+  2  you used it wrongly: an unknown command or option, a missing name
+
+Environment:
+  TLSTORE_ASSUME_YES=1      the same as -y
+  TLSTORE_HOST              launcher or termux, when the store should not guess
+  TLSTORE_CATALOG_URL       where 'refresh' reads the item list (file:// works)
+  TLSTORE_NPM_REGISTRY      the npm registry the npm items read from
+  TLSTORE_MOTION=0          no transitions in the store app
+EOF
+}
+
+# bad_opt <command> <option> — an option the command does not take.
+bad_opt() {
+    err "unknown option: $2"
+    err "run 'tlstore help $1' to see what it takes"
+}
+
+# bad_arg <command> <argument> — a word where the command wants nothing.
+bad_arg() {
+    err "$1: unexpected argument: $2"
+    err "run 'tlstore help $1' to see what it takes"
+}
+
+# help_for <command> — one command's page: its usage line, what it does and
+# every option it takes. The ones for the store app come last, in their own
+# group. Aliases get the page of the command they stand for.
+help_for() {
+    case "$1" in
+        list)
+            cat <<'EOF'
+Usage: tlstore list [-i|-a]
+
+Shows every item in the store. A * marks the ones you have.
+
+Options:
+  -i          only what you have installed
+  -a          only what you do not have yet
+  -h, --help  show this page
+
+For the store app:
+  --tsv       the same answer as tab-separated columns
+EOF
+            ;;
+        search)
+            cat <<'EOF'
+Usage: tlstore search <term>
+
+Finds items whose name or description contains the term.
+
+Options:
+  -h, --help  show this page
+
+For the store app:
+  --tsv       the same answer as tab-separated columns
+EOF
+            ;;
+        info)
+            cat <<'EOF'
+Usage: tlstore info <name>
+
+Says what an item is, its version, and where it goes.
+
+Options:
+  -h, --help  show this page
+
+For the store app:
+  --tsv       the same answer as tab-separated columns
+EOF
+            ;;
+        install|add)
+            cat <<'EOF'
+Usage: tlstore [-y] install [options] [name...]
+       tlstore add ...
+
+Installs items, and the parts they need, in the order they need them.
+With no names it shows a list to pick from.
+
+Options:
+  -n, --dry-run  say what would be installed, and change nothing
+  -y, --yes      say yes to every question except replacing a config file of yours
+  --configs      also replace a config file of yours with the new one
+  -h, --help     show this page
+
+For the store app:
+  --progress     a line per step on stdout, for a program to read (implies -y)
+EOF
+            ;;
+        remove|uninstall)
+            cat <<'EOF'
+Usage: tlstore [-y] remove [options] <name...>
+       tlstore uninstall ...
+
+Removes items tlstore installed, and puts back any file of yours it kept.
+A package item is only forgotten: the package stays with your package manager.
+
+Options:
+  -n, --dry-run  say what would be removed, and change nothing
+  -y, --yes      do not ask first
+  -h, --help     show this page
+
+For the store app:
+  --progress     a line per step on stdout, for a program to read (implies -y)
+EOF
+            ;;
+        update|upgrade)
+            cat <<'EOF'
+Usage: tlstore [-y] update [options] [name...]
+       tlstore upgrade ...
+
+Fetches the newest item list, brings what you have up to date, then updates
+tlstore itself. With no names it does everything you have installed.
+
+Options:
+  --check        say what would change, and change nothing
+  -n, --dry-run  the same as --check
+  --offline      do not fetch the item list or ask the registry; use what you have
+  -y, --yes      say yes to every question except replacing a config file of yours
+  --configs      also replace a config file of yours with the new one
+  -h, --help     show this page
+
+For the store app:
+  --tsv          with --check, the changes as tab-separated columns
+  --progress     a line per step on stdout, for a program to read (implies -y)
+EOF
+            ;;
+        refresh)
+            cat <<'EOF'
+Usage: tlstore [-y] refresh
+
+Fetches the newest item list and checks its signature. Nothing you have
+installed is touched.
+
+Options:
+  -y, --yes   do not ask first
+  -h, --help  show this page
+EOF
+            ;;
+        self-update)
+            cat <<'EOF'
+Usage: tlstore self-update [--check]
+
+Brings tlstore itself, and the store app that goes with it, up to date.
+
+Options:
+  --check     say whether a newer tlstore is out, and change nothing
+  -h, --help  show this page
+
+For the store app:
+  --tsv       with --check, one line of tab-separated columns
+  --progress  a line per step on stdout, for a program to read
+EOF
+            ;;
+        doctor)
+            cat <<'EOF'
+Usage: tlstore doctor
+
+Checks where things are installed, whether your shell finds them, which tools
+are present and whether anything tlstore put down has gone missing.
+Exits 1 when something needs fixing.
+
+Options:
+  -h, --help  show this page
+EOF
+            ;;
+        display)
+            cat <<'EOF'
+Usage: tlstore display [options]
+
+Sets up graphics for Linux apps. Everything after 'display' is handed to the
+setup script as it is.
+EOF
+            ;;
+        version)
+            cat <<'EOF'
+Usage: tlstore version
+
+Shows the tlstore version and the serial of the item list it is using.
+Also: tlstore --version, tlstore -v.
+
+Options:
+  -h, --help  show this page
+EOF
+            ;;
+        help)
+            cat <<'EOF'
+Usage: tlstore help [command]
+
+Shows the list of commands, or one command's own page.
+EOF
+            ;;
+        *)
+            err "no help for '$1': it is not a command"
+            err "run 'tlstore help' to see the commands"
+            return 2
+            ;;
+    esac
+}
+
+cmd_help() {
+    case $# in
+        0) usage ;;
+        1) help_for "$1" ;;
+        *) bad_arg help "$2"; return 2 ;;
+    esac
 }
 
 # emit_items <style list|search> <all|installed|available> <tsv 0|1> [term]
@@ -1694,7 +1918,8 @@ cmd_list() {
             -i) cl_mode=installed ;;
             -a) cl_mode=available ;;
             --tsv) cl_tsv=1 ;;
-            *) err "unknown option: $cl_a"; return 2 ;;
+            -*) bad_opt list "$cl_a"; return 2 ;;
+            *) bad_arg list "$cl_a"; return 2 ;;
         esac
     done
     need_catalog
@@ -1707,7 +1932,7 @@ cmd_search() {
     for cs_a in "$@"; do
         case "$cs_a" in
             --tsv) cs_tsv=1 ;;
-            -*) err "unknown option: $cs_a"; return 2 ;;
+            -*) bad_opt search "$cs_a"; return 2 ;;
             *)
                 if [ -n "$cs_term" ]; then
                     err "search takes one thing to look for"
@@ -1728,7 +1953,7 @@ cmd_info() {
     for ci_a in "$@"; do
         case "$ci_a" in
             --tsv) ci_tsv=1 ;;
-            -*) err "unknown option: $ci_a"; return 2 ;;
+            -*) bad_opt info "$ci_a"; return 2 ;;
             *)
                 if [ -n "$ci_want" ]; then
                     err "info needs one name"
@@ -2746,6 +2971,56 @@ cmd_prefetch() {
     return 0
 }
 
+# dry_install <plan> — what install would do with this plan, in order, from the
+# same plan_for list it would use. Nothing is fetched, written or asked of the
+# package manager, so the build tools are named, not checked for.
+dry_install() {
+    di_tools=$(build_tools_for "$1" 0)
+    say "Would install, in this order:"
+    for di_n in $1; do
+        di_row=$(row "$di_n")
+        if [ -z "$di_row" ]; then
+            say "  $di_n  (not available on this device, skipped)"
+        elif already_here "$di_n"; then
+            say "  $di_n  (already installed, skipped)"
+        else
+            di_ver=$(field "$di_row" 3)
+            case "$(field "$di_row" 2)" in
+                pkg) say "  $di_n  (packages: $(words_list "$(field "$di_row" 5)"))" ;;
+                bundle|fisher) say "  $di_n" ;;
+                *) say "  $di_n  $di_ver" ;;
+            esac
+        fi
+    done
+    if [ -n "$di_tools" ]; then
+        say "Needed only while installing: $(words_list "$di_tools")"
+        say "  (any that are missing are added first, and you are asked about taking them back)"
+    fi
+    say "Nothing was changed."
+}
+
+# dry_remove <names> — what remove would take away: each item and the files
+# the state records for it.
+dry_remove() {
+    say "Would remove:"
+    for dr_n in $1; do
+        dr_row=$(state_row "$dr_n" 2>/dev/null || true)
+        if [ -z "$dr_row" ]; then
+            say "  $dr_n  (not installed, nothing to do)"
+            continue
+        fi
+        if [ "$(field "$dr_row" 2)" = pkg ]; then
+            say "  $dr_n  (only forgotten; the package stays installed)"
+            continue
+        fi
+        say "  $dr_n"
+        for dr_f in $(field "$dr_row" 5); do
+            say "    $dr_f"
+        done
+    done
+    say "Nothing was changed."
+}
+
 cmd_install() {
     ci_names=""
     for ci_a in "$@"; do
@@ -2753,12 +3028,17 @@ cmd_install() {
             -y|--yes) ASSUME_YES=1 ;;
             --configs) REPLACE_CONFIGS=1 ;;
             --progress) PROGRESS=1; ASSUME_YES=1 ;;
-            -*) err "unknown option: $ci_a"; return 2 ;;
+            -n|--dry-run) DRY_RUN=1 ;;
+            -*) bad_opt install "$ci_a"; return 2 ;;
             *) ci_names="$ci_names $ci_a" ;;
         esac
     done
     need_catalog
 
+    if [ -z "$ci_names" ] && [ "$DRY_RUN" = 1 ]; then
+        err "install --dry-run needs a name; there is nothing to pick from without asking"
+        return 2
+    fi
     if [ -z "$ci_names" ]; then
         mkdir -p "$CACHE_DIR"
         ci_cand="$CACHE_DIR/choices"
@@ -2798,6 +3078,10 @@ cmd_install() {
     for ci_n in $ci_plan; do
         is_installed "$ci_n" || conflict_check "$ci_n" || return 1
     done
+    if [ "$DRY_RUN" = 1 ]; then
+        dry_install "$ci_plan"
+        return 0
+    fi
     say "Installing: $(words_list "$ci_plan")"
     ask_yn "Go ahead?" || { say "Nothing was installed."; return 0; }
     add_build_tools "$ci_plan" 0 || return 1
@@ -2832,7 +3116,8 @@ cmd_remove() {
         case "$cr_a" in
             -y|--yes) ASSUME_YES=1 ;;
             --progress) PROGRESS=1; ASSUME_YES=1 ;;
-            -*) err "unknown option: $cr_a"; return 2 ;;
+            -n|--dry-run) DRY_RUN=1 ;;
+            -*) bad_opt remove "$cr_a"; return 2 ;;
             *) cr_names="$cr_names $cr_a" ;;
         esac
     done
@@ -2856,6 +3141,10 @@ cmd_remove() {
         done
     done
 
+    if [ "$DRY_RUN" = 1 ]; then
+        dry_remove "$cr_all"
+        return 0
+    fi
     say "Removing: $(words_list "$cr_all")"
     ask_yn "Go ahead?" || { say "Nothing was removed."; return 0; }
     for cr_n in $cr_all; do
@@ -2884,6 +3173,7 @@ update_items() {
     cu_check=0
     cu_offline=0
     cu_tsv=0
+    cu_dry=0
     cu_names=""
     for cu_a in "$@"; do
         case "$cu_a" in
@@ -2893,7 +3183,8 @@ update_items() {
             --configs) REPLACE_CONFIGS=1 ;;
             --progress) PROGRESS=1; ASSUME_YES=1 ;;
             -y|--yes) ASSUME_YES=1 ;;
-            -*) err "unknown option: $cu_a"; return 2 ;;
+            -n|--dry-run) cu_check=1; cu_dry=1 ;;
+            -*) bad_opt update "$cu_a"; return 2 ;;
             *) cu_names="$cu_names $cu_a" ;;
         esac
     done
@@ -2991,6 +3282,7 @@ update_items() {
             done
         fi
         [ -z "$(printf '%s' "$cu_pkgs" | tr -d ' ')" ] || say "Packages are checked by the package manager when you update."
+        [ "$cu_dry" = 0 ] || say "Nothing was changed."
         if [ "$cu_offline" = 1 ]; then
             for cu_n in $cu_latest; do
                 say "$cu_n is checked against its source when you update."
@@ -3072,7 +3364,8 @@ cmd_refresh() {
     for cf_a in "$@"; do
         case "$cf_a" in
             -y|--yes) ASSUME_YES=1 ;;
-            *) err "unknown option: $cf_a"; return 2 ;;
+            -*) bad_opt refresh "$cf_a"; return 2 ;;
+            *) bad_arg refresh "$cf_a"; return 2 ;;
         esac
     done
     pick_catalog || true
@@ -3403,7 +3696,8 @@ cmd_self_update() {
             --check) cs_check=1 ;;
             --tsv) cs_tsv=1 ;;
             --progress) cs_progress=1 ;;
-            *) err "unknown option: $cs_a"; return 2 ;;
+            -*) bad_opt self-update "$cs_a"; return 2 ;;
+            *) bad_arg self-update "$cs_a"; return 2 ;;
         esac
     done
     if [ "$cs_check" = 1 ]; then
@@ -3418,6 +3712,7 @@ cmd_self_update() {
 cd_line() { printf '%-13s %s\n' "$1" "$2"; }
 
 cmd_doctor() {
+    [ $# -eq 0 ] || { bad_arg doctor "$1"; return 2; }
     pick_catalog || true
     cd_bad=0
     cd_line Prefix "$PREFIX"
@@ -3506,6 +3801,7 @@ cmd_display() {
 }
 
 cmd_version() {
+    [ $# -eq 0 ] || { bad_arg version "$1"; return 2; }
     pick_catalog || true
     say "tlstore $TLSTORE_VERSION"
     [ -z "$CATALOG_SERIAL" ] || say "Item list $CATALOG_SERIAL"
@@ -3529,8 +3825,34 @@ main() {
         say "Run 'tlstore install' to add what you want."
         return 0
     fi
+    # Options that come before the command.
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -y|--yes) ASSUME_YES=1; shift ;;
+            -h|--help) usage; return 0 ;;
+            -v|--version) cmd_version; return $? ;;
+            -*) err "unknown option: $1"; err "run 'tlstore help' to see what there is"; return 2 ;;
+            *) break ;;
+        esac
+    done
+    if [ $# -eq 0 ]; then
+        err "-y needs a command after it"
+        err "run 'tlstore help' to see the commands"
+        return 2
+    fi
     tl_cmd="$1"
     shift
+    # `<command> -h` is that command's page, for every command but display,
+    # which hands its arguments on to the setup script untouched.
+    case "$tl_cmd" in
+        list|search|info|install|add|remove|uninstall|update|upgrade|refresh|self-update|doctor|version)
+            for tl_a in "$@"; do
+                case "$tl_a" in
+                    -h|--help) help_for "$tl_cmd"; return $? ;;
+                esac
+            done
+            ;;
+    esac
     case "$tl_cmd" in
         list) cmd_list "$@" ;;
         search) cmd_search "$@" ;;
@@ -3545,12 +3867,16 @@ main() {
         update|upgrade) cmd_update "$@" ;;
         refresh) cmd_refresh "$@" ;;
         self-update) cmd_self_update "$@" ;;
-        shell) cmd_install fish-shell "$@" ;;
+        shell)
+            # Gone as a command; the launcher's own docs still say it.
+            err "tlstore shell is now: tlstore install fish-shell"
+            return 2
+            ;;
         display) cmd_display "$@" ;;
         doctor) cmd_doctor "$@" ;;
-        version|--version|-v) cmd_version ;;
-        help|--help|-h) usage ;;
-        *) err "unknown command: $tl_cmd"; usage >&2; return 2 ;;
+        version) cmd_version "$@" ;;
+        help) cmd_help "$@" ;;
+        *) err "unknown command: $tl_cmd"; err "run 'tlstore help' to see the commands"; return 2 ;;
     esac
 }
 
