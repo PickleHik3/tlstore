@@ -777,8 +777,11 @@ exec \"$TESTHOME/.local/bin/tl-priv\" run \"$TESTHOME/.local/lib/tlstore/priv/pr
 
     # --- npm-android: no loader, no patchelf, an extra member, a command name and args ---
     PATCHELF_KNOB=false
+    mkdir -p "$TESTHOME/.local/bin"
+    printf 'my own droid\n' > "$TESTHOME/.local/bin/droid"
     tl install droid -y
     expect_status "install an npm-android item" 0
+    expect_out "a file of yours where the wrapper goes is kept" "kept a copy of droid beside it"
     expect_file "the executable is in place" "$TESTHOME/.local/lib/droid/bin/droid.bin"
     expect_file "the extra member is beside it" "$TESTHOME/.local/lib/droid/bin/droid-helper"
     expect_file "its licence and notice come along" "$TESTHOME/.local/lib/droid/NOTICE"
@@ -794,9 +797,13 @@ exec \"$TESTHOME/.local/bin/tl-priv\" run \"$TESTHOME/.local/lib/tlstore/priv/pr
     PATCHELF_KNOB=false
     tl install droid -y
     expect_out "installing it again says it is already here" "droid 3.0.0 is already here"
+    if [ "$(ls "$TESTHOME/.local/bin/droid.bak-"* 2>/dev/null | wc -l)" -eq 1 ]; then pass; else fail "installing again keeps no copy of tlstore's own wrapper"; fi
     tl remove droid -y
     expect_status "remove an npm-android item" 0
-    if [ -e "$TESTHOME/.local/lib/droid" ] || [ -e "$TESTHOME/.local/bin/droid" ]; then fail "remove deletes the directory and the wrapper"; else pass; fi
+    expect_out "remove puts your own file back" "put your own droid back"
+    if [ -e "$TESTHOME/.local/lib/droid" ]; then fail "remove deletes the directory"; else pass; fi
+    expect_content "what is back is yours, not the wrapper" "$TESTHOME/.local/bin/droid" "my own droid"
+    rm -f "$TESTHOME/.local/bin/droid"
 
     # --- build tools, with nobody to ask and with an answer ---
     : > "$ROOT/pkg.log"

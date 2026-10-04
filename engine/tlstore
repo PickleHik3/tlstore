@@ -603,6 +603,19 @@ file_digest() {
 
 backup_existing() {
     bk_target="$1"
+    # What this item itself put here last time — its program, or the wrapper
+    # tlstore wrote — is simply replaced. Keeping a copy would add one on every
+    # update, and remove would then put the stale one back. A config file is
+    # different: it may hold your edits, so it is always kept.
+    case "${ii_kind:-}" in
+        file|file-once) ;;
+        *)
+            bk_row=$(state_row "${ii_name:-}" 2>/dev/null || true)
+            case " $(field "$bk_row" 5) " in
+                *" $bk_target "*) return 0 ;;
+            esac
+            ;;
+    esac
     if [ -e "$bk_target" ]; then
         bk_copy="$bk_target.bak-$(timestamp)"
         cp -a "$bk_target" "$bk_copy" || return 1
