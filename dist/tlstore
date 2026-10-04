@@ -46,7 +46,7 @@
 
 set -u
 
-TLSTORE_VERSION=0.7
+TLSTORE_VERSION=0.8
 
 # The store program that pairs with this script, one digest per processor.
 # Empty in the source tree: scripts/release.sh --prepare fills them in from
@@ -55,9 +55,9 @@ TLSTORE_VERSION=0.7
 # self_update, which reads them out of the downloaded copy, not this one).
 # Keep these two lines exactly in this shape.
 # shellcheck disable=SC2034
-TLSTORE_UI_SHA256_arm64_v8a=d8f33f58112c0f192b797b571e300385dd7fcb6003b0d9f8233f168ed2b8d712
+TLSTORE_UI_SHA256_arm64_v8a=b73d2af2b2e2da25a96a9aa8bf2065f00e79a3573d5decf4b53ec7e7ad2b9f6d
 # shellcheck disable=SC2034
-TLSTORE_UI_SHA256_x86_64=fd1120fcd8563298c63044fdc04c9bb69f2b80f8d028a212f9076b7f81c54f09
+TLSTORE_UI_SHA256_x86_64=b69bb3b700f81006efbf9b7fc3e311355744e2bf1430364b6dcae49dafaa26c2
 
 PREFIX="${TLSTORE_PREFIX:-${PREFIX:-${HOME%/files/home}/files/usr}}"
 HOME="${HOME:?tlstore needs HOME}"
@@ -83,6 +83,7 @@ BASE_CATALOG="$STORE_DIR/catalog.tsv"
 USER_CATALOG="$DATA_DIR/catalog.tsv"
 PUBKEY="$STORE_DIR/trusted.pub"
 STATE="$DATA_DIR/installed.tsv"
+HELD="$DATA_DIR/held"
 
 # The app writes this when it puts tlstore down (a hand install writes
 # .standalone instead, with the address it came from inside it; nothing here
@@ -148,6 +149,9 @@ REPLACE_CONFIGS=0
 PROGRESS=0
 PROGRESS_NOTE=""
 
+# --dry-run: say what install, update or remove would do, and change nothing.
+DRY_RUN=0
+
 # Packages this run installed only so something else could be built.
 BUILD_ADDED=""
 
@@ -168,7 +172,7 @@ TAB=$(printf '\t')
 # the person backs out of a running --progress job) has to clean up: the temp
 # file the current download is writing (download() keeps this current),
 # anywhere else an install leaves a half-built scratch copy before it moves it
-# into place (npm-musl's unpack directory), and which item was in flight, so
+# into place (the npm kinds' unpack directory), and which item was in flight, so
 # the UI still gets a done line for it instead of waiting forever.
 CANCEL_TMP=""
 CANCEL_EXTRA=""
@@ -306,7 +310,7 @@ rows() {
         }
         function arch_ok(kind) {
             if (archok == "1") return 1
-            return (kind != "binary" && kind != "npm-musl")
+            return (kind != "binary" && kind != "npm-musl" && kind != "npm-android")
         }
         function optval(list, key,   n, i, parts) {
             n = split(list, parts, ";")
@@ -498,11 +502,11 @@ source_url() {
 }
 
 # item_targets <name> <kind> <target> [source] [options] — where an item's
-# payload lands, space separated; empty for pkg and bundles. An npm-musl item
-# lands twice: the directory, then the wrapper, which is named after the
-# executable inside the package (claude-code installs the command `claude`). A
-# package that keeps its executable in a subdirectory (npm:x#bin/y) still gets
-# the bare name. A binary with priv=shizuku lands twice as well: the program
+# payload lands, space separated; empty for pkg and bundles. An npm-musl or
+# npm-android item lands twice: the directory, then the wrapper, which is named
+# after the executable inside the package (claude-code installs the command
+# `claude`) unless command=<name> says otherwise. A package that keeps its
+# executable in a subdirectory (npm:x#bin/y) still gets the bare name. A binary with priv=shizuku lands twice as well: the program
 # under PRIV_DIR, off PATH, then the wrapper on PATH that runs it through
 # tl-priv.
 item_targets() {
@@ -521,13 +525,15 @@ item_targets() {
                 expand_path "$3"
             fi
             ;;
-        npm-musl)
+        npm-musl|npm-android)
             it_exe="${4:-}"
             case "$it_exe" in
                 *"#"*) it_exe="${it_exe##*#}" ;;
                 *) it_exe="$1" ;;
             esac
             it_exe="${it_exe##*/}"
+            it_cmd=$(opt "${5:-}" command)
+            [ -z "$it_cmd" ] || it_exe="$it_cmd"
             if [ "$3" = "-" ] || [ -z "$3" ]; then
                 printf '%s %s' "$LIB_DIR/$1" "$BIN_DIR/$it_exe"
             else
@@ -562,21 +568,74 @@ installed_names() {
 }
 
 # state_record <name> <kind> <version> <files…>
+# A row is name kind version when files, then source digest and the one
+# version before this (prev_version prev_source prev_digest), which is what
+# rollback reinstalls. Rows from before those columns have none of them; the
+# readers all ask for a column by number, so a short row reads as empty ones.
+# The source and digest are the install's own (ii_source, ii_digest). A new
+# version pushes the old row's into the prev columns; the same version again
+# (a reinstall, npm's "already here") keeps what was there. A row with no
+# source recorded cannot say what it was, so nothing is kept for it.
+# SR_CLEAR_PREV=1 drops them, which a rollback does: it goes back one step only.
 state_record() {
     sr_name="$1"
     sr_kind="$2"
     sr_version="$3"
     shift 3
     sr_files="$*"
+    sr_src="${ii_source:-}"
+    sr_dig="${ii_digest:-}"
+    case "$sr_kind" in
+        npm-musl|npm-android) sr_dig="-" ;;
+    esac
+    sr_pv=""
+    sr_ps=""
+    sr_pd=""
+    sr_old=$(state_row "$sr_name" 2>/dev/null || true)
+    if [ -n "$sr_old" ] && [ "${SR_CLEAR_PREV:-0}" != 1 ]; then
+        if [ "$(field "$sr_old" 3)" != "$sr_version" ]; then
+            if [ -n "$(field "$sr_old" 6)" ]; then
+                sr_pv=$(field "$sr_old" 3)
+                sr_ps=$(field "$sr_old" 6)
+                sr_pd=$(field "$sr_old" 7)
+            fi
+        else
+            sr_pv=$(field "$sr_old" 8)
+            sr_ps=$(field "$sr_old" 9)
+            sr_pd=$(field "$sr_old" 10)
+        fi
+    fi
     mkdir -p "$DATA_DIR"
-    [ -f "$STATE" ] || printf '# tlstore installed\tname\tkind\tversion\twhen\tfiles\n' > "$STATE"
+    [ -f "$STATE" ] || printf '# tlstore installed\tname\tkind\tversion\twhen\tfiles\tsource\tdigest\tprev_version\tprev_source\tprev_digest\n' > "$STATE"
     sr_tmp="$STATE.new"
     awk -F "$TAB" -v want="$sr_name" '$1 != want' "$STATE" > "$sr_tmp" || return 1
-    printf '%s\t%s\t%s\t%s\t%s\n' "$sr_name" "$sr_kind" "$sr_version" "$(timestamp)" "$sr_files" >> "$sr_tmp"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$sr_name" "$sr_kind" "$sr_version" "$(timestamp)" "$sr_files" \
+        "$sr_src" "$sr_dig" "$sr_pv" "$sr_ps" "$sr_pd" >> "$sr_tmp"
     mv "$sr_tmp" "$STATE"
 }
 
+# Holds: names, one a line, kept apart from installed.tsv so a reinstall
+# (which rewrites the row) does not drop one.
+is_held() {
+    [ -f "$HELD" ] && grep -qx -- "$1" "$HELD" 2>/dev/null
+}
+
+hold_add() {
+    is_held "$1" && return 0
+    mkdir -p "$DATA_DIR"
+    printf '%s\n' "$1" >> "$HELD"
+}
+
+hold_drop() {
+    [ -f "$HELD" ] || return 0
+    hd_tmp="$HELD.new"
+    grep -vx -- "$1" "$HELD" > "$hd_tmp" || true
+    mv "$hd_tmp" "$HELD"
+}
+
 state_forget() {
+    # A hold goes with the item, however it leaves (remove, retirement).
+    hold_drop "$1"
     [ -f "$STATE" ] || return 0
     sf_tmp="$STATE.new"
     awk -F "$TAB" -v want="$1" '$1 != want' "$STATE" > "$sf_tmp" || return 1
@@ -601,17 +660,58 @@ file_digest() {
 
 backup_existing() {
     bk_target="$1"
+    # What this item itself put here last time — its program, or the wrapper
+    # tlstore wrote — is simply replaced. Keeping a copy would add one on every
+    # update, and remove would then put the stale one back. A config file is
+    # different: it may hold your edits, so it is always kept.
+    case "${ii_kind:-}" in
+        file|file-once) ;;
+        *)
+            bk_row=$(state_row "${ii_name:-}" 2>/dev/null || true)
+            case " $(field "$bk_row" 5) " in
+                *" $bk_target "*) prune_backups "$bk_target"; return 0 ;;
+            esac
+            ;;
+    esac
     if [ -e "$bk_target" ]; then
         bk_copy="$bk_target.bak-$(timestamp)"
         cp -a "$bk_target" "$bk_copy" || return 1
         say "  kept a copy of $(basename "$bk_target") beside it"
     fi
+    prune_backups "$bk_target"
     return 0
+}
+
+# How many .bak copies beside one file are kept; older ones go.
+BACKUPS_KEPT=3
+
+# prune_backups <file> — tidies the .bak copies beside a file. A copy of a
+# wrapper tlstore wrote itself was never yours (an older tlstore kept one on
+# every update), so it goes; of the rest, the newest BACKUPS_KEPT stay. The
+# names carry the time, so the glob lists them oldest first.
+prune_backups() {
+    pb_target="$1"
+    pb_count=0
+    for pb_f in "$pb_target".bak-*; do
+        [ -f "$pb_f" ] || continue
+        if [ "$(head -c 200 "$pb_f" | sed -n 2p)" = "# written by termux-launcher" ]; then
+            rm -f "$pb_f"
+        else
+            pb_count=$((pb_count + 1))
+        fi
+    done
+    for pb_f in "$pb_target".bak-*; do
+        [ "$pb_count" -gt "$BACKUPS_KEPT" ] || break
+        [ -f "$pb_f" ] || continue
+        rm -f "$pb_f"
+        pb_count=$((pb_count - 1))
+    done
 }
 
 # The newest .bak beside a file, put back in its place.
 restore_backup() {
     rb_target="$1"
+    prune_backups "$rb_target"
     rb_newest=""
     for rb_f in "$rb_target".bak-*; do
         [ -e "$rb_f" ] || continue
@@ -820,6 +920,33 @@ pkg_present() {
     fi
 }
 
+# Is this package really installed? Like pkg_present, but on a dpkg host a package that was
+# removed and left only its config files behind ("rc") does not count — apt's own view of it.
+conflict_present() {
+    if have pacman || ! have dpkg-query; then
+        pkg_present "$1"
+    else
+        # shellcheck disable=SC2016  # dpkg-query's format, not a shell expansion
+        [ "$(dpkg-query -W -f='${db:Status-Status}' "$1" 2>/dev/null)" = installed ]
+    fi
+}
+
+# conflict_check <name> — an item with conflicts=<packages> owns commands a package also owns,
+# so it is refused (return 1, saying which package to remove) while one of them is installed,
+# rather than shadowing or overwriting what that package put there.
+conflict_check() {
+    cc_list=$(opt "$(field "$(row "$1")" 9)" conflicts)
+    [ -n "$cc_list" ] || return 0
+    for cc_p in $(commas "$cc_list"); do
+        if conflict_present "$cc_p"; then
+            err "$1 cannot be installed while the $cc_p package is: both provide the same commands. Remove it first (pkg uninstall $cc_p), then install $1 again."
+            PROGRESS_NOTE="remove the $cc_p package first"
+            return 1
+        fi
+    done
+    return 0
+}
+
 # ---------------------------------------------------------------------------
 # Lists of names (space separated; names are [a-z0-9-]+ so words are safe)
 # ---------------------------------------------------------------------------
@@ -982,12 +1109,22 @@ install_item() {
     ii_digest="$it_digest"
     ii_target="$it_target"
     ii_options="$it_options"
+    # A rollback installs an earlier version in place of the list's: its
+    # version, and for a binary or file its own source and digest.
+    if [ -n "${RB_VERSION:-}" ]; then
+        ii_version="$RB_VERSION"
+        if [ -n "${RB_SOURCE:-}" ]; then
+            ii_source="$RB_SOURCE"
+            ii_digest="$RB_DIGEST"
+        fi
+    fi
 
     if [ "$ii_force" = 0 ] && already_here "$ii_name"; then
         say "$ii_name is already installed"
         PROGRESS_NOTE="already installed"
         return 0
     fi
+    conflict_check "$ii_name" || return 1
 
     case "$ii_kind" in
         pkg) do_pkg ;;
@@ -996,6 +1133,7 @@ install_item() {
         file-once) do_file 1 ;;
         fisher) do_fisher ;;
         npm-musl) do_npm_musl ;;
+        npm-android) do_npm_musl ;;
         bundle) do_bundle ;;
         *) err "$ii_name cannot be installed here"; return 1 ;;
     esac
@@ -1162,23 +1300,28 @@ npm_latest_version() {
     curl -fsSL --connect-timeout 5 --max-time 60 "$NPM_REGISTRY/$nl_package/latest" 2>/dev/null | json_field version
 }
 
+# do_npm_musl installs both npm kinds. npm-musl is a musl binary that needs
+# our loader and a patchelf pass; npm-android is a Bionic executable that runs
+# as it is, so it skips the loader, the musl libraries and patchelf.
 do_npm_musl() {
     np_package="${ii_source#npm:}"
     np_exe="${np_package##*#}"
     np_package="${np_package%#*}"
-    np_dir=$(item_targets "$ii_name" npm-musl "$ii_target" "$ii_source")
+    np_dir=$(item_targets "$ii_name" "$ii_kind" "$ii_target" "$ii_source" "$ii_options")
     np_wrapper="${np_dir##* }"
     np_dir="${np_dir%% *}"
 
     for np_tool in curl tar sha512sum base64 od; do
         have "$np_tool" || { err "$np_tool is missing — install coreutils and tar"; return 1; }
     done
-    have "$PATCHELF" || { err "patchelf is missing — install it and try again"; return 1; }
-
-    np_loader_row=$(row musl-loader)
-    if [ -z "$np_loader_row" ]; then
-        err "$ii_name has no loader for this device"
-        return 1
+    np_loader_row=""
+    if [ "$ii_kind" = npm-musl ]; then
+        have "$PATCHELF" || { err "patchelf is missing — install it and try again"; return 1; }
+        np_loader_row=$(row musl-loader)
+        if [ -z "$np_loader_row" ]; then
+            err "$ii_name has no loader for this device"
+            return 1
+        fi
     fi
 
     say "installing $ii_name"
@@ -1223,49 +1366,67 @@ do_npm_musl() {
             err "the $ii_name download is not what was expected"
             return 1
         fi
-        tar xzf "$np_tmp" -C "$np_dir.new" --strip-components=1 package/LICENSE.md 2>/dev/null || true
-        rm -f "$np_tmp"
-
-        np_loader="$np_dir.new/ld-musl-aarch64.so.1"
-        np_have_loader=$(item_targets musl-loader binary "$(field "$np_loader_row" 7)")
-        if [ -f "$np_have_loader" ]; then
-            cp -f "$np_have_loader" "$np_loader"
-        elif ! download "$(source_url "$(field "$np_loader_row" 5)")" "$np_loader" "$(field "$np_loader_row" 6)"; then
-            rm -rf "$np_dir.new"
-            CANCEL_EXTRA=""
-            return 1
-        fi
-        chmod 755 "$np_loader" "$np_dir.new/$np_exe"
-
-        # Some of these binaries need more of the musl world than its libc —
-        # opencode links libstdc++ and libgcc_s, and Termux's own are Bionic
-        # ones the musl loader cannot use. They go in beside the loader,
-        # because the rpath set below is this directory and nothing else.
-        for np_lib in $(commas "$(opt "$ii_options" musl-libs)"); do
-            np_lib_row=$(row "$np_lib")
-            if [ -z "$np_lib_row" ]; then
+        # extra=<path,path>: more members of the package, unpacked beside the
+        # executable under their package paths. A missing one fails the
+        # install just as a missing executable does.
+        for np_more in $(commas "$(opt "$ii_options" extra)"); do
+            if ! tar xzf "$np_tmp" -C "$np_dir.new" --strip-components=1 "package/$np_more"; then
+                rm -f "$np_tmp"
                 rm -rf "$np_dir.new"
                 CANCEL_EXTRA=""
-                err "$ii_name has no $np_lib for this device"
+                err "the $ii_name download is not what was expected"
                 return 1
             fi
-            np_lib_have=$(item_targets "$np_lib" binary "$(field "$np_lib_row" 7)")
-            np_lib_dest="$np_dir.new/${np_lib_have##*/}"
-            if [ -f "$np_lib_have" ]; then
-                cp -f "$np_lib_have" "$np_lib_dest"
-            elif ! download "$(source_url "$(field "$np_lib_row" 5)")" "$np_lib_dest" "$(field "$np_lib_row" 6)"; then
-                rm -rf "$np_dir.new"
-                CANCEL_EXTRA=""
-                return 1
-            fi
-            chmod 644 "$np_lib_dest"
+            chmod 755 "$np_dir.new/$np_more"
         done
+        for np_licence in LICENSE.md LICENSE NOTICE; do
+            tar xzf "$np_tmp" -C "$np_dir.new" --strip-components=1 "package/$np_licence" 2>/dev/null || true
+        done
+        rm -f "$np_tmp"
+        chmod 755 "$np_dir.new/$np_exe"
 
-        if ! "$PATCHELF" --set-interpreter "$np_dir/ld-musl-aarch64.so.1" --set-rpath "$np_dir" "$np_dir.new/$np_exe"; then
-            rm -rf "$np_dir.new"
-            CANCEL_EXTRA=""
-            err "could not prepare $ii_name for this device"
-            return 1
+        if [ "$ii_kind" = npm-musl ]; then
+            np_loader="$np_dir.new/ld-musl-aarch64.so.1"
+            np_have_loader=$(item_targets musl-loader binary "$(field "$np_loader_row" 7)")
+            if [ -f "$np_have_loader" ]; then
+                cp -f "$np_have_loader" "$np_loader"
+            elif ! download "$(source_url "$(field "$np_loader_row" 5)")" "$np_loader" "$(field "$np_loader_row" 6)"; then
+                rm -rf "$np_dir.new"
+                CANCEL_EXTRA=""
+                return 1
+            fi
+            chmod 755 "$np_loader"
+
+            # Some of these binaries need more of the musl world than its libc —
+            # opencode links libstdc++ and libgcc_s, and Termux's own are Bionic
+            # ones the musl loader cannot use. They go in beside the loader,
+            # because the rpath set below is this directory and nothing else.
+            for np_lib in $(commas "$(opt "$ii_options" musl-libs)"); do
+                np_lib_row=$(row "$np_lib")
+                if [ -z "$np_lib_row" ]; then
+                    rm -rf "$np_dir.new"
+                    CANCEL_EXTRA=""
+                    err "$ii_name has no $np_lib for this device"
+                    return 1
+                fi
+                np_lib_have=$(item_targets "$np_lib" binary "$(field "$np_lib_row" 7)")
+                np_lib_dest="$np_dir.new/${np_lib_have##*/}"
+                if [ -f "$np_lib_have" ]; then
+                    cp -f "$np_lib_have" "$np_lib_dest"
+                elif ! download "$(source_url "$(field "$np_lib_row" 5)")" "$np_lib_dest" "$(field "$np_lib_row" 6)"; then
+                    rm -rf "$np_dir.new"
+                    CANCEL_EXTRA=""
+                    return 1
+                fi
+                chmod 644 "$np_lib_dest"
+            done
+
+            if ! "$PATCHELF" --set-interpreter "$np_dir/ld-musl-aarch64.so.1" --set-rpath "$np_dir" "$np_dir.new/$np_exe"; then
+                rm -rf "$np_dir.new"
+                CANCEL_EXTRA=""
+                err "could not prepare $ii_name for this device"
+                return 1
+            fi
         fi
         printf '%s\n' "$np_version" > "$np_dir.new/version"
         CANCEL_EXTRA=""
@@ -1288,10 +1449,16 @@ do_npm_musl() {
             # shellcheck disable=SC2016  # written into the wrapper, expanded there
             printf '%s\n' '[ -n "${TZ:-}" ] || TZ=$(getprop persist.sys.timezone 2>/dev/null) && export TZ'
         fi
-        printf 'exec "%s" "$@"\n' "$np_dir/$np_exe"
+        # args=<words> go in unquoted, before the person's own arguments.
+        np_args=$(opt "$ii_options" args)
+        if [ -n "$np_args" ]; then
+            printf 'exec "%s" %s "$@"\n' "$np_dir/$np_exe" "$np_args"
+        else
+            printf 'exec "%s" "$@"\n' "$np_dir/$np_exe"
+        fi
     } > "$np_wrapper"
     chmod 755 "$np_wrapper"
-    state_record "$ii_name" npm-musl "$np_version" "$np_dir" "$np_wrapper"
+    state_record "$ii_name" "$ii_kind" "$np_version" "$np_dir" "$np_wrapper"
     say "  $np_wrapper"
     return 0
 }
@@ -1521,24 +1688,288 @@ pick_items() {
 
 usage() {
     cat <<'EOF'
-tlstore installs the tools and configs the launcher shows off.
+tlstore installs, updates and removes the tools and configs the launcher
+shows off but does not ship.
 
-  tlstore list [-i|-a]        everything, what you have (-i), what you do not (-a)
-  tlstore search <term>       find an item by name or description
-  tlstore info <name>         what an item is and where it goes
-  tlstore install [name...]   install items; with no names, pick from a list
-  tlstore remove <name...>    remove items tlstore installed
-  tlstore update [name...]    bring what you have up to date
-  tlstore refresh             update the list of items
-  tlstore self-update         bring tlstore itself up to date (--check: only say)
-  tlstore shell               install the fish shell setup
-  tlstore display             set up graphics for Linux apps
-  tlstore doctor              check that everything is in place
-  tlstore version
+Usage: tlstore [-y] <command> [options] [name...]
 
-  -y          say yes to everything except a config file of yours
-  --configs   take the new version of every config file too
+With no command it opens the store in the launcher, or lists what there is.
+
+Commands:
+  list [-i|-a]          show every item; -i only yours, -a only what you lack
+  search <term>         find an item by name or description
+  info <name>           what an item is and where it goes
+  install [name...]     install items (alias: add); with no names, pick from a list
+  remove <name...>      remove items tlstore installed (alias: uninstall)
+  update [name...]      bring what you have up to date (alias: upgrade)
+  rollback <name>       go back one version, and hold the item there
+  hold <name...>        keep items at their version when you update
+  unhold <name...>      let held items update again
+  refresh               update the list of items
+  self-update           bring tlstore itself up to date
+  doctor                check that everything is in place
+  display               set up graphics for Linux apps
+  version               show the tlstore and item-list versions
+  help [command]        this page, or one command's own page
+
+Options:
+  -y, --yes       say yes to every question except replacing a config file of yours
+  -h, --help      show this page; after a command, that command's page
+  -v, --version   show the version
+
+  Run 'tlstore help <command>' for the options a command takes of its own,
+  such as --dry-run on install, update and remove.
+
+Exit status:
+  0  done
+  1  something failed
+  2  you used it wrongly: an unknown command or option, a missing name
+
+Environment:
+  TLSTORE_ASSUME_YES=1      the same as -y
+  TLSTORE_HOST              launcher or termux, when the store should not guess
+  TLSTORE_CATALOG_URL       where 'refresh' reads the item list (file:// works)
+  TLSTORE_NPM_REGISTRY      the npm registry the npm items read from
+  TLSTORE_MOTION=0          no transitions in the store app
 EOF
+}
+
+# bad_opt <command> <option> — an option the command does not take.
+bad_opt() {
+    err "unknown option: $2"
+    err "run 'tlstore help $1' to see what it takes"
+}
+
+# bad_arg <command> <argument> — a word where the command wants nothing.
+bad_arg() {
+    err "$1: unexpected argument: $2"
+    err "run 'tlstore help $1' to see what it takes"
+}
+
+# help_for <command> — one command's page: its usage line, what it does and
+# every option it takes. The ones for the store app come last, in their own
+# group. Aliases get the page of the command they stand for.
+help_for() {
+    case "$1" in
+        list)
+            cat <<'EOF'
+Usage: tlstore list [-i|-a]
+
+Shows every item in the store. A * marks the ones you have.
+
+Options:
+  -i          only what you have installed
+  -a          only what you do not have yet
+  -h, --help  show this page
+
+For the store app:
+  --tsv       the same answer as tab-separated columns
+EOF
+            ;;
+        search)
+            cat <<'EOF'
+Usage: tlstore search <term>
+
+Finds items whose name or description contains the term.
+
+Options:
+  -h, --help  show this page
+
+For the store app:
+  --tsv       the same answer as tab-separated columns
+EOF
+            ;;
+        info)
+            cat <<'EOF'
+Usage: tlstore info <name>
+
+Says what an item is, its version, and where it goes.
+
+Options:
+  -h, --help  show this page
+
+For the store app:
+  --tsv       the same answer as tab-separated columns
+EOF
+            ;;
+        install|add)
+            cat <<'EOF'
+Usage: tlstore [-y] install [options] [name...]
+       tlstore add ...
+
+Installs items, and the parts they need, in the order they need them.
+With no names it shows a list to pick from.
+
+Options:
+  -n, --dry-run  say what would be installed, and change nothing
+  -y, --yes      say yes to every question except replacing a config file of yours
+  --configs      also replace a config file of yours with the new one
+  -h, --help     show this page
+
+For the store app:
+  --progress     a line per step on stdout, for a program to read (implies -y)
+EOF
+            ;;
+        remove|uninstall)
+            cat <<'EOF'
+Usage: tlstore [-y] remove [options] <name...>
+       tlstore uninstall ...
+
+Removes items tlstore installed, and puts back any file of yours it kept.
+A package item is only forgotten: the package stays with your package manager.
+
+Options:
+  -n, --dry-run  say what would be removed, and change nothing
+  -y, --yes      do not ask first
+  -h, --help     show this page
+
+For the store app:
+  --progress     a line per step on stdout, for a program to read (implies -y)
+EOF
+            ;;
+        update|upgrade)
+            cat <<'EOF'
+Usage: tlstore [-y] update [options] [name...]
+       tlstore upgrade ...
+
+Fetches the newest item list, brings what you have up to date, then updates
+tlstore itself. With no names it does everything you have installed, except
+items you have held; naming a held item updates it and lets go of the hold.
+
+Options:
+  --check        say what would change, and change nothing
+  -n, --dry-run  the same as --check
+  --offline      do not fetch the item list or ask the registry; use what you have
+  -y, --yes      say yes to every question except replacing a config file of yours
+  --configs      also replace a config file of yours with the new one
+  -h, --help     show this page
+
+For the store app:
+  --tsv          with --check, the changes as tab-separated columns
+  --progress     a line per step on stdout, for a program to read (implies -y)
+EOF
+            ;;
+        rollback)
+            cat <<'EOF'
+Usage: tlstore [-y] rollback [options] <name>
+
+Puts an item back at the version it had before its last update, then holds it
+there so the next update does not undo that. It goes one step only; to move
+forward again, run 'tlstore unhold <name>' and 'tlstore update <name>'.
+
+Works for items from npm, binaries and config files. A package, a bundle or a
+fish plugin cannot go back: Termux keeps only the newest package, and the
+others have no version of their own to return to. An item installed before
+tlstore recorded versions has nothing to go back to until it updates once.
+
+Options:
+  -n, --dry-run  say what would be installed, and change nothing
+  -y, --yes      do not ask first
+  -h, --help     show this page
+EOF
+            ;;
+        hold)
+            cat <<'EOF'
+Usage: tlstore hold <name...>
+
+Keeps installed items at the version they have. A plain 'tlstore update'
+skips them and the store app does not offer them; 'tlstore update <name>'
+updates one anyway and lets go of its hold. Removing an item drops its hold.
+
+Options:
+  -h, --help  show this page
+EOF
+            ;;
+        unhold)
+            cat <<'EOF'
+Usage: tlstore unhold <name...>
+
+Lets held items update again.
+
+Options:
+  -h, --help  show this page
+EOF
+            ;;
+        refresh)
+            cat <<'EOF'
+Usage: tlstore [-y] refresh
+
+Fetches the newest item list and checks its signature. Nothing you have
+installed is touched.
+
+Options:
+  -y, --yes   do not ask first
+  -h, --help  show this page
+EOF
+            ;;
+        self-update)
+            cat <<'EOF'
+Usage: tlstore self-update [--check]
+
+Brings tlstore itself, and the store app that goes with it, up to date.
+Exits 1 when a newer tlstore was offered and could not be taken.
+
+Options:
+  --check     say whether a newer tlstore is out, and change nothing
+  -h, --help  show this page
+
+For the store app:
+  --tsv       with --check, one line of tab-separated columns
+  --progress  a line per step on stdout, for a program to read
+EOF
+            ;;
+        doctor)
+            cat <<'EOF'
+Usage: tlstore doctor
+
+Checks where things are installed, whether your shell finds them, which tools
+are present and whether anything tlstore put down has gone missing.
+Exits 1 when something needs fixing.
+
+Options:
+  -h, --help  show this page
+EOF
+            ;;
+        display)
+            cat <<'EOF'
+Usage: tlstore display [options]
+
+Sets up graphics for Linux apps. Everything after 'display' is handed to the
+setup script as it is.
+EOF
+            ;;
+        version)
+            cat <<'EOF'
+Usage: tlstore version
+
+Shows the tlstore version and the serial of the item list it is using.
+Also: tlstore --version, tlstore -v.
+
+Options:
+  -h, --help  show this page
+EOF
+            ;;
+        help)
+            cat <<'EOF'
+Usage: tlstore help [command]
+
+Shows the list of commands, or one command's own page.
+EOF
+            ;;
+        *)
+            err "no help for '$1': it is not a command"
+            err "run 'tlstore help' to see the commands"
+            return 2
+            ;;
+    esac
+}
+
+cmd_help() {
+    case $# in
+        0) usage ;;
+        1) help_for "$1" ;;
+        *) bad_arg help "$2"; return 2 ;;
+    esac
 }
 
 # emit_items <style list|search> <all|installed|available> <tsv 0|1> [term]
@@ -1575,7 +2006,9 @@ emit_items() {
             continue
         fi
         if [ "$ei_style" = list ]; then
-            printf '%s %-14s %s\n' "$ei_mark" "$ei_name" "$ei_summary"
+            ei_held=""
+            ! is_held "$ei_name" || ei_held=" (held)"
+            printf '%s %-14s %s%s\n' "$ei_mark" "$ei_name" "$ei_summary" "$ei_held"
             ei_build=$(opt "$ei_options" build)
             [ -z "$ei_build" ] || printf '    needs while installing: %s\n' "$ei_build"
         else
@@ -1593,7 +2026,8 @@ cmd_list() {
             -i) cl_mode=installed ;;
             -a) cl_mode=available ;;
             --tsv) cl_tsv=1 ;;
-            *) err "unknown option: $cl_a"; return 2 ;;
+            -*) bad_opt list "$cl_a"; return 2 ;;
+            *) bad_arg list "$cl_a"; return 2 ;;
         esac
     done
     need_catalog
@@ -1606,7 +2040,7 @@ cmd_search() {
     for cs_a in "$@"; do
         case "$cs_a" in
             --tsv) cs_tsv=1 ;;
-            -*) err "unknown option: $cs_a"; return 2 ;;
+            -*) bad_opt search "$cs_a"; return 2 ;;
             *)
                 if [ -n "$cs_term" ]; then
                     err "search takes one thing to look for"
@@ -1627,7 +2061,7 @@ cmd_info() {
     for ci_a in "$@"; do
         case "$ci_a" in
             --tsv) ci_tsv=1 ;;
-            -*) err "unknown option: $ci_a"; return 2 ;;
+            -*) bad_opt info "$ci_a"; return 2 ;;
             *)
                 if [ -n "$ci_want" ]; then
                     err "info needs one name"
@@ -1702,6 +2136,7 @@ cmd_info() {
     printf '  %-11s %s\n' Files "$ci_where"
     if is_installed "$it_name"; then
         printf '  %-11s %s\n' Installed "$(installed_version "$it_name")"
+        ! is_held "$it_name" || printf '  %-11s %s\n' Held "yes; 'tlstore unhold $it_name' lets it update"
     fi
     [ "$it_category" = - ] || printf '  %-11s %s\n' Category "$it_category"
     [ "$it_upstream" = - ] || printf '  %-11s %s\n' Upstream "$it_upstream"
@@ -2185,9 +2620,9 @@ readme_first_image() {
 # (by name, mtime and size), the cache's stamp, and everything rows() filters
 # on. When none of it changed, neither did the answer.
 snapshot_key() {
-    printf 'v=%s;serial=%s;catalog=%s:%s;state=%s;cache=%s;host=%s;arch=%s;pkg=%s;lver=%s;home=%s;prefix=%s' \
+    printf 'v=%s;serial=%s;catalog=%s:%s;state=%s;held=%s;cache=%s;host=%s;arch=%s;pkg=%s;lver=%s;home=%s;prefix=%s' \
         "$TLSTORE_VERSION" "$CATALOG_SERIAL" "$CATALOG" "$(file_stamp "$CATALOG")" \
-        "$(file_stamp "$STATE")" "$(file_stamp "$CACHE_DIR/.changed")" \
+        "$(file_stamp "$STATE")" "$(file_stamp "$HELD")" "$(file_stamp "$CACHE_DIR/.changed")" \
         "$HOST" "$ARCH_OK" "$APP_PACKAGE" "$LAUNCHER_VERSION" "$HOME" "$PREFIX"
 }
 
@@ -2199,7 +2634,7 @@ snapshot_key() {
 # `cached` lines, a `check` (path known) or `probe` (path keyed by the URL's
 # digest) line per picture, demo and readme.
 snapshot_rows() {
-    rows | awk -F "$TAB" -v OFS="$TAB" -v state="$STATE" -v home="$HOME" \
+    rows | awk -F "$TAB" -v OFS="$TAB" -v state="$STATE" -v heldfile="$HELD" -v home="$HOME" \
         -v bindir="$BIN_DIR" -v libdir="$LIB_DIR" -v privdir="$PRIV_DIR" \
         -v cachedir="$CACHE_DIR" -v launcher_raw="$LAUNCHER_RAW" -v binaries_raw="$BINARIES_RAW" \
         -v binaries_rel="$BINARIES_RELEASES" '
@@ -2226,10 +2661,11 @@ snapshot_rows() {
                 if (target == "-" || target == "") return (kind == "binary") ? bindir "/" name : ""
                 return expand(target)
             }
-            if (kind == "npm-musl") {
+            if (kind == "npm-musl" || kind == "npm-android") {
                 n = split(source, parts, "#")
                 exe = (n > 1) ? parts[n] : name
                 sub(/.*\//, "", exe)
+                if (optval(opts, "command") != "") exe = optval(opts, "command")
                 if (target == "-" || target == "") return libdir "/" name " " bindir "/" exe
                 return expand(target) " " bindir "/" exe
             }
@@ -2272,6 +2708,10 @@ snapshot_rows() {
                 if (n > 0 && f[1] != "") { inst[f[1]] = 1; iver[f[1]] = f[3] }
             }
             close(state)
+            # A held item is not offered an update; a missing file just ends the loop.
+            while ((getline line < heldfile) > 0)
+                if (line != "") held[line] = 1
+            close(heldfile)
         }
         {
             name = $1; kind = $2; ver = $3; src = $5; dig = $6; target = $7
@@ -2325,13 +2765,13 @@ snapshot_rows() {
                 retired = (opts ~ /(^|;)retired=1(;|$)/)
                 # A retired row is hidden: the UI could count it but never
                 # show or run it. snapshot has already retired it anyway.
-                if (retired) {
+                if (retired || (name in held)) {
                     upd = 0
                 } else {
                     upd = 0
                     note = (kind == "file") ? "config-asks" : ""
                     if (kind == "pkg" || kind == "bundle" || kind == "fisher") upd = 0
-                    else if (kind == "npm-musl") upd = (ver != "latest" && ver != have)
+                    else if (kind == "npm-musl" || kind == "npm-android") upd = (ver != "latest" && ver != have)
                     else upd = (ver != have)
                 }
                 if (upd) print "update", name, have, ver, note
@@ -2644,6 +3084,56 @@ cmd_prefetch() {
     return 0
 }
 
+# dry_install <plan> — what install would do with this plan, in order, from the
+# same plan_for list it would use. Nothing is fetched, written or asked of the
+# package manager, so the build tools are named, not checked for.
+dry_install() {
+    di_tools=$(build_tools_for "$1" 0)
+    say "Would install, in this order:"
+    for di_n in $1; do
+        di_row=$(row "$di_n")
+        if [ -z "$di_row" ]; then
+            say "  $di_n  (not available on this device, skipped)"
+        elif already_here "$di_n"; then
+            say "  $di_n  (already installed, skipped)"
+        else
+            di_ver=$(field "$di_row" 3)
+            case "$(field "$di_row" 2)" in
+                pkg) say "  $di_n  (packages: $(words_list "$(field "$di_row" 5)"))" ;;
+                bundle|fisher) say "  $di_n" ;;
+                *) say "  $di_n  $di_ver" ;;
+            esac
+        fi
+    done
+    if [ -n "$di_tools" ]; then
+        say "Needed only while installing: $(words_list "$di_tools")"
+        say "  (any that are missing are added first, and you are asked about taking them back)"
+    fi
+    say "Nothing was changed."
+}
+
+# dry_remove <names> — what remove would take away: each item and the files
+# the state records for it.
+dry_remove() {
+    say "Would remove:"
+    for dr_n in $1; do
+        dr_row=$(state_row "$dr_n" 2>/dev/null || true)
+        if [ -z "$dr_row" ]; then
+            say "  $dr_n  (not installed, nothing to do)"
+            continue
+        fi
+        if [ "$(field "$dr_row" 2)" = pkg ]; then
+            say "  $dr_n  (only forgotten; the package stays installed)"
+            continue
+        fi
+        say "  $dr_n"
+        for dr_f in $(field "$dr_row" 5); do
+            say "    $dr_f"
+        done
+    done
+    say "Nothing was changed."
+}
+
 cmd_install() {
     ci_names=""
     for ci_a in "$@"; do
@@ -2651,12 +3141,17 @@ cmd_install() {
             -y|--yes) ASSUME_YES=1 ;;
             --configs) REPLACE_CONFIGS=1 ;;
             --progress) PROGRESS=1; ASSUME_YES=1 ;;
-            -*) err "unknown option: $ci_a"; return 2 ;;
+            -n|--dry-run) DRY_RUN=1 ;;
+            -*) bad_opt install "$ci_a"; return 2 ;;
             *) ci_names="$ci_names $ci_a" ;;
         esac
     done
     need_catalog
 
+    if [ -z "$ci_names" ] && [ "$DRY_RUN" = 1 ]; then
+        err "install --dry-run needs a name; there is nothing to pick from without asking"
+        return 2
+    fi
     if [ -z "$ci_names" ]; then
         mkdir -p "$CACHE_DIR"
         ci_cand="$CACHE_DIR/choices"
@@ -2692,6 +3187,14 @@ cmd_install() {
     if ! ci_plan=$(plan_for $ci_names); then
         return 1
     fi
+    # A package that owns the same commands is reported before anything is asked or fetched.
+    for ci_n in $ci_plan; do
+        is_installed "$ci_n" || conflict_check "$ci_n" || return 1
+    done
+    if [ "$DRY_RUN" = 1 ]; then
+        dry_install "$ci_plan"
+        return 0
+    fi
     say "Installing: $(words_list "$ci_plan")"
     ask_yn "Go ahead?" || { say "Nothing was installed."; return 0; }
     add_build_tools "$ci_plan" 0 || return 1
@@ -2726,7 +3229,8 @@ cmd_remove() {
         case "$cr_a" in
             -y|--yes) ASSUME_YES=1 ;;
             --progress) PROGRESS=1; ASSUME_YES=1 ;;
-            -*) err "unknown option: $cr_a"; return 2 ;;
+            -n|--dry-run) DRY_RUN=1 ;;
+            -*) bad_opt remove "$cr_a"; return 2 ;;
             *) cr_names="$cr_names $cr_a" ;;
         esac
     done
@@ -2750,6 +3254,10 @@ cmd_remove() {
         done
     done
 
+    if [ "$DRY_RUN" = 1 ]; then
+        dry_remove "$cr_all"
+        return 0
+    fi
     say "Removing: $(words_list "$cr_all")"
     ask_yn "Go ahead?" || { say "Nothing was removed."; return 0; }
     for cr_n in $cr_all; do
@@ -2778,6 +3286,7 @@ update_items() {
     cu_check=0
     cu_offline=0
     cu_tsv=0
+    cu_dry=0
     cu_names=""
     for cu_a in "$@"; do
         case "$cu_a" in
@@ -2787,7 +3296,8 @@ update_items() {
             --configs) REPLACE_CONFIGS=1 ;;
             --progress) PROGRESS=1; ASSUME_YES=1 ;;
             -y|--yes) ASSUME_YES=1 ;;
-            -*) err "unknown option: $cu_a"; return 2 ;;
+            -n|--dry-run) cu_check=1; cu_dry=1 ;;
+            -*) bad_opt update "$cu_a"; return 2 ;;
             *) cu_names="$cu_names $cu_a" ;;
         esac
     done
@@ -2795,7 +3305,12 @@ update_items() {
     [ "$cu_offline" = 1 ] || refresh_catalog 1 || true
     need_catalog
 
-    [ -n "$cu_names" ] || cu_names=$(installed_names | tr '\n' ' ')
+    # Named on the command line, an item is updated even when it is held.
+    cu_explicit=1
+    if [ -z "$cu_names" ]; then
+        cu_explicit=0
+        cu_names=$(installed_names | tr '\n' ' ')
+    fi
     if [ -z "$(printf '%s' "$cu_names" | tr -d ' ')" ]; then
         [ "$cu_tsv" = 1 ] || say "Nothing is installed yet."
         return 0
@@ -2820,13 +3335,23 @@ update_items() {
             cu_retired="$cu_retired $cu_n"
             continue
         fi
+        if is_held "$cu_n"; then
+            if [ "$cu_explicit" = 0 ]; then
+                [ "$cu_tsv" = 1 ] || say "$cu_n is held at $(installed_version "$cu_n"); 'tlstore unhold $cu_n' lets it update"
+                continue
+            fi
+            if [ "$cu_check" = 0 ]; then
+                hold_drop "$cu_n"
+                say "$cu_n was held; updating it lets go of the hold"
+            fi
+        fi
         cu_kind=$(field "$cu_row" 2)
         cu_new=$(field "$cu_row" 3)
         cu_have=$(installed_version "$cu_n")
         case "$cu_kind" in
             pkg) cu_pkgs="$cu_pkgs $(field "$cu_row" 5)" ;;
             bundle|fisher) ;;
-            npm-musl)
+            npm-musl|npm-android)
                 # An item pinned to latest is whatever its source says today.
                 # --check asks the registry which version that is and names the
                 # item only when it differs from what is here; offline, or when
@@ -2885,6 +3410,7 @@ update_items() {
             done
         fi
         [ -z "$(printf '%s' "$cu_pkgs" | tr -d ' ')" ] || say "Packages are checked by the package manager when you update."
+        [ "$cu_dry" = 0 ] || say "Nothing was changed."
         if [ "$cu_offline" = 1 ]; then
             for cu_n in $cu_latest; do
                 say "$cu_n is checked against its source when you update."
@@ -2957,16 +3483,149 @@ cmd_update() {
     # UI is what `self-update --progress` exists to do in plain view), and
     # not inside a --progress stream, which carries the item lines alone.
     if [ "$cu_status" != 2 ] && [ "${cu_offline:-0}" = 0 ] && [ "${cu_check:-0}" = 0 ] && [ "$PROGRESS" != 1 ]; then
-        self_update
+        # A refused or failed self-update fails the command, as a failed item does.
+        self_update || [ "$cu_status" != 0 ] || cu_status=1
     fi
     return "$cu_status"
+}
+
+# tlstore rollback <name> — one step back to the version recorded before the
+# current one, then hold the item there so the next update does not undo it.
+cmd_rollback() {
+    rb_name=""
+    for rb_a in "$@"; do
+        case "$rb_a" in
+            -y|--yes) ASSUME_YES=1 ;;
+            -n|--dry-run) DRY_RUN=1 ;;
+            -*) bad_opt rollback "$rb_a"; return 2 ;;
+            *)
+                if [ -n "$rb_name" ]; then
+                    err "rollback takes one name"
+                    return 2
+                fi
+                rb_name="$rb_a"
+                ;;
+        esac
+    done
+    [ -n "$rb_name" ] || { err "rollback needs a name"; return 2; }
+    need_catalog
+    rb_row=$(state_row "$rb_name" 2>/dev/null || true)
+    if [ -z "$rb_row" ]; then
+        err "$rb_name is not installed"
+        return 1
+    fi
+    rb_kind=$(field "$rb_row" 2)
+    rb_have=$(field "$rb_row" 3)
+    case "$rb_kind" in
+        pkg)
+            err "$rb_name is a package: Termux's repositories keep only the newest, so there is nothing to go back to"
+            return 1
+            ;;
+        bundle)
+            err "$rb_name is a bundle and has no version of its own; roll back the items in it"
+            return 1
+            ;;
+        fisher)
+            err "$rb_name is a fish plugin: fisher keeps it current, so tlstore cannot go back a version"
+            return 1
+            ;;
+    esac
+    rb_ver=$(field "$rb_row" 8)
+    rb_src=$(field "$rb_row" 9)
+    rb_dig=$(field "$rb_row" 10)
+    case "$rb_kind" in
+        binary|file|file-once)
+            # Without the old file's address and digest there is nothing to fetch.
+            if [ -z "$rb_src" ] || [ -z "$rb_dig" ]; then rb_ver=""; fi
+            ;;
+    esac
+    if [ -z "$rb_ver" ]; then
+        err "no earlier version of $rb_name is recorded"
+        return 1
+    fi
+    if ! load_item "$rb_name"; then
+        err "$rb_name is not available on this device"
+        return 1
+    fi
+    if [ "$DRY_RUN" = 1 ]; then
+        say "Would put $rb_name back from $rb_have to $rb_ver, and hold it there."
+        case "$rb_kind" in
+            binary|file|file-once) say "  from $rb_src" ;;
+        esac
+        say "Nothing was changed."
+        return 0
+    fi
+    say "Putting $rb_name back from $rb_have to $rb_ver."
+    ask_yn "Go ahead?" || { say "Nothing was changed."; return 0; }
+    RB_VERSION="$rb_ver"
+    case "$rb_kind" in
+        binary|file|file-once) RB_SOURCE="$rb_src"; RB_DIGEST="$rb_dig" ;;
+        *) RB_SOURCE=""; RB_DIGEST="" ;;
+    esac
+    SR_CLEAR_PREV=1
+    rb_rc=0
+    install_item "$rb_name" 1 || rb_rc=1
+    RB_VERSION=""
+    RB_SOURCE=""
+    RB_DIGEST=""
+    SR_CLEAR_PREV=0
+    if [ "$rb_rc" != 0 ]; then
+        err "could not put $rb_name back"
+        return 1
+    fi
+    hold_add "$rb_name"
+    say "$rb_name is back at $rb_ver and held; 'tlstore unhold $rb_name' lets it update again"
+    return 0
+}
+
+cmd_hold() {
+    ch_names=""
+    for ch_a in "$@"; do
+        case "$ch_a" in
+            -*) bad_opt hold "$ch_a"; return 2 ;;
+            *) ch_names="$ch_names $ch_a" ;;
+        esac
+    done
+    [ -n "$ch_names" ] || { err "hold needs a name"; return 2; }
+    ch_rc=0
+    for ch_n in $ch_names; do
+        if ! is_installed "$ch_n"; then
+            err "$ch_n is not installed, so there is nothing to hold"
+            ch_rc=1
+            continue
+        fi
+        hold_add "$ch_n"
+        say "$ch_n is held at $(installed_version "$ch_n"); 'tlstore unhold $ch_n' lets it update"
+    done
+    return "$ch_rc"
+}
+
+cmd_unhold() {
+    cx_names=""
+    for cx_a in "$@"; do
+        case "$cx_a" in
+            -*) bad_opt unhold "$cx_a"; return 2 ;;
+            *) cx_names="$cx_names $cx_a" ;;
+        esac
+    done
+    [ -n "$cx_names" ] || { err "unhold needs a name"; return 2; }
+    for cx_n in $cx_names; do
+        if is_held "$cx_n"; then
+            hold_drop "$cx_n"
+            say "$cx_n can update again"
+        else
+            say "$cx_n was not held"
+        fi
+    done
+    return 0
 }
 
 cmd_refresh() {
     for cf_a in "$@"; do
         case "$cf_a" in
             -y|--yes) ASSUME_YES=1 ;;
-            *) err "unknown option: $cf_a"; return 2 ;;
+            -*) bad_opt refresh "$cf_a"; return 2 ;;
+            *) bad_arg refresh "$cf_a"; return 2 ;;
         esac
     done
     pick_catalog || true
@@ -3215,7 +3874,7 @@ self_update() {
     self_update_try 0
     case $? in
         0) su_say "tlstore is now version $su_version." ;;
-        2) err "$SU_NOTE" ;;
+        2) err "$SU_NOTE"; return 1 ;;
     esac
     return 0
 }
@@ -3297,7 +3956,8 @@ cmd_self_update() {
             --check) cs_check=1 ;;
             --tsv) cs_tsv=1 ;;
             --progress) cs_progress=1 ;;
-            *) err "unknown option: $cs_a"; return 2 ;;
+            -*) bad_opt self-update "$cs_a"; return 2 ;;
+            *) bad_arg self-update "$cs_a"; return 2 ;;
         esac
     done
     if [ "$cs_check" = 1 ]; then
@@ -3312,6 +3972,7 @@ cmd_self_update() {
 cd_line() { printf '%-13s %s\n' "$1" "$2"; }
 
 cmd_doctor() {
+    [ $# -eq 0 ] || { bad_arg doctor "$1"; return 2; }
     pick_catalog || true
     cd_bad=0
     cd_line Prefix "$PREFIX"
@@ -3400,6 +4061,7 @@ cmd_display() {
 }
 
 cmd_version() {
+    [ $# -eq 0 ] || { bad_arg version "$1"; return 2; }
     pick_catalog || true
     say "tlstore $TLSTORE_VERSION"
     [ -z "$CATALOG_SERIAL" ] || say "Item list $CATALOG_SERIAL"
@@ -3423,8 +4085,34 @@ main() {
         say "Run 'tlstore install' to add what you want."
         return 0
     fi
+    # Options that come before the command.
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -y|--yes) ASSUME_YES=1; shift ;;
+            -h|--help) usage; return 0 ;;
+            -v|--version) cmd_version; return $? ;;
+            -*) err "unknown option: $1"; err "run 'tlstore help' to see what there is"; return 2 ;;
+            *) break ;;
+        esac
+    done
+    if [ $# -eq 0 ]; then
+        err "-y needs a command after it"
+        err "run 'tlstore help' to see the commands"
+        return 2
+    fi
     tl_cmd="$1"
     shift
+    # `<command> -h` is that command's page, for every command but display,
+    # which hands its arguments on to the setup script untouched.
+    case "$tl_cmd" in
+        list|search|info|install|add|remove|uninstall|update|upgrade|rollback|hold|unhold|refresh|self-update|doctor|version)
+            for tl_a in "$@"; do
+                case "$tl_a" in
+                    -h|--help) help_for "$tl_cmd"; return $? ;;
+                esac
+            done
+            ;;
+    esac
     case "$tl_cmd" in
         list) cmd_list "$@" ;;
         search) cmd_search "$@" ;;
@@ -3437,14 +4125,21 @@ main() {
         install|add) cmd_install "$@" ;;
         remove|uninstall) cmd_remove "$@" ;;
         update|upgrade) cmd_update "$@" ;;
+        rollback) cmd_rollback "$@" ;;
+        hold) cmd_hold "$@" ;;
+        unhold) cmd_unhold "$@" ;;
         refresh) cmd_refresh "$@" ;;
         self-update) cmd_self_update "$@" ;;
-        shell) cmd_install fish-shell "$@" ;;
+        shell)
+            # Gone as a command; the launcher's own docs still say it.
+            err "tlstore shell is now: tlstore install fish-shell"
+            return 2
+            ;;
         display) cmd_display "$@" ;;
         doctor) cmd_doctor "$@" ;;
-        version|--version|-v) cmd_version ;;
-        help|--help|-h) usage ;;
-        *) err "unknown command: $tl_cmd"; usage >&2; return 2 ;;
+        version) cmd_version "$@" ;;
+        help) cmd_help "$@" ;;
+        *) err "unknown command: $tl_cmd"; err "run 'tlstore help' to see the commands"; return 2 ;;
     esac
 }
 
