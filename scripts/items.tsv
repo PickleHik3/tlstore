@@ -7,13 +7,15 @@
 #   category  upstream  setup  standfirst  does1  does2  does3  try  notes
 #   author  licence  size  picture  demo  featured  readme-skip  readme
 #
-# kind      pkg 	 binary 	 file 	 file-once 	 fisher 	 npm-musl 	 bundle
+# kind      pkg 	 binary 	 file 	 file-once 	 fisher 	 npm-musl 	 npm-android 	 bundle
 # version   - for pkg, bundle and fisher; the upstream version for a binary; the
-#           launcher tag or commit for a template; latest or a pin for npm-musl
+#           launcher tag or commit for a template; latest or a pin for npm-musl and
+#           npm-android
 # prefixes  * or a comma list of app packages; one row per (name, prefix set),
 #           so the per-edition builds are two rows sharing a name
 # source    pkg: package names. binary/file: launcher:<path>@<tag or commit>,
-#           binaries:<asset>@<tag>, or a URL. npm-musl: npm:<package>#<exe>.
+#           binaries:<asset>@<tag>, or a URL. npm-musl/npm-android:
+#           npm:<package>#<exe>.
 #           fisher: the plugin list, space separated
 # target    where it lands, ~ allowed; - means the default
 # requires  comma list installed first; a bundle's members live here
@@ -27,6 +29,14 @@
 #           still tell a shipped file from an edited one),
 #           musl-libs=<hidden binary items copied in beside the musl loader,
 #           for an npm-musl binary that needs more of musl than its libc>,
+#           extra=<path,path> (npm-musl and npm-android: more members of the
+#           package, paths inside package/, unpacked beside the executable
+#           under their package paths and made executable; one missing fails
+#           the install like a missing executable),
+#           command=<name> (npm-musl and npm-android: the wrapper's name,
+#           instead of the executable's basename),
+#           args=<words> (npm-musl and npm-android: written into the wrapper's
+#           exec line before "$@", unquoted, so plain words only),
 #           host=launcher|termux (comma list; absent means both),
 #           min-launcher=X.Y.Z (the oldest launcher that may have it),
 #           priv=shizuku (binary only: the launcher runs it as the Shizuku
@@ -65,8 +75,8 @@
 #               digest for `readme` and for `demo`) alongside it the same way
 #               it already computes picture-digest for `picture`.
 #
-# Nine items are visible, in the order they appear here: btop, claude-code,
-# dawn, fastfetch, fish-shell, kitten, opencode, sigye, termux-api-shims.
+# Ten items are visible, in the order they appear here: btop, claude-code,
+# codex, dawn, fastfetch, fish-shell, kitten, opencode, sigye, termux-api-shims.
 # Everything else is
 # hidden=1 — a part another item pulls in, never listed and never installed by
 # name.
@@ -76,6 +86,7 @@
 # nobody reads.
 btop	binary	1.4.7	*	binaries:btop@bins-2026.09.25	-	tl-priv	priv=shizuku;host=launcher;min-launcher=0.2.40	A resource monitor with the whole phone in view, run as the shell user through Shizuku.	Tools	aristocratos/btop	0	a resource monitor for the whole phone	Graphs cpu, memory, disks and network	Lists every process on the phone	Shows one process in close detail	btop	needs Shizuku running and permission granted to Termux:Launcher|processes can be viewed but not killed, and network stats come from /proc/net/dev	aristocratos	Apache-2.0	~2.5 MB	binaries:scripts/pictures/btop.jpg@2026.09.25-2	binaries:hero/btop.png@2026.09.25-2	0	Index|News|Documents|Themes|Support and funding|Prerequisites|Screenshots|Compilation Linux|Compilation macOS OSX|Compilation FreeBSD|Compilation NetBSD|Compilation OpenBSD|Testing|Installing the snap|Configurability	binaries:readme/btop.md@2026.09.25-2
 claude-code	npm-musl	latest	com.termux,io.vaj.tl	npm:@anthropic-ai/claude-code-linux-arm64-musl#claude	-	musl-loader,launcher-skill	env=DISABLE_AUTOUPDATER=1;tz=1;build=patchelf	Anthropic's Claude Code, about 200 MB.	AI	anthropics/claude-code	0	a coding agent that lives in your terminal	Reads your codebase and explains it	Writes code from plain language requests	Handles git commits, branches and diffs	claude	about 200 mb|needs a claude.ai account to sign in	Anthropic	Proprietary	~200 MB	launcher:scripts/tlstore/pictures/claude-code.jpg@5253e29ae8e128aad09b08fd57eb115ba66140d8	binaries:hero/claude-code.png@2026.09.24	0	-	binaries:readme/claude-code.md@2026.09.24
+codex	npm-android	latest	com.termux,io.vaj.tl	npm:@mmmbuto/codex-cli-termux#bin/codex.bin	-	ripgrep	command=codex;extra=bin/codex-code-mode-host;args=-c check_for_update_on_startup=false	OpenAI's Codex, as built for Android by the codex-termux port (DioNanos), about 275 MB.	AI	DioNanos/codex-termux	0	a coding agent built to run on android	-	-	-	-	-	DioNanos, porting OpenAI's Codex	Apache-2.0	~275 MB	-	-	0	-	-
 dawn	binary	0.1.3+0e958747.4	com.termux	binaries:dawn@bins-2026.09.25-3	-	dawn-libs	-	A quiet place to write, with your markdown taking shape as you type.	Note taking	andrewmd5/dawn	0	a quiet place to write, headings and all	Shows headings and quotes as you type	Keeps your file plain markdown on disk	Displays a linked picture in place	dawn notes.md	looks best in this launcher's terminal	andrewmd5	MIT	-	launcher:scripts/tlstore/pictures/dawn.jpg@5253e29ae8e128aad09b08fd57eb115ba66140d8	binaries:hero/dawn.png@2026.09.24	1	Portability	binaries:readme/dawn.md@2026.09.24
 dawn	binary	0.1.3+0e958747.4	io.vaj.tl	binaries:dawn-io.vaj.tl@bins-2026.09.25-3	-	dawn-libs	-	A quiet place to write, with your markdown taking shape as you type.	Note taking	andrewmd5/dawn	0	a quiet place to write, headings and all	Shows headings and quotes as you type	Keeps your file plain markdown on disk	Displays a linked picture in place	dawn notes.md	looks best in this launcher's terminal	andrewmd5	MIT	-	launcher:scripts/tlstore/pictures/dawn.jpg@5253e29ae8e128aad09b08fd57eb115ba66140d8	binaries:hero/dawn.png@2026.09.24	1	Portability	binaries:readme/dawn.md@2026.09.24
 fastfetch	binary	2.67.0	com.termux	binaries:fastfetch@bins-2026.09.25-3	-	fastfetch-libs,fastfetch-config	host=launcher	System information beside an animated logo — drop any GIF at ~/Pictures/gif/skel.gif.	Tools	fastfetch-cli/fastfetch	0	system info beside an animated logo	Shows system info in a tidy list	Plays a gif you drop in as the logo	Reads your device, shell and battery	fastfetch	only runs in this launcher's terminal	fastfetch-cli	MIT	-	launcher:scripts/tlstore/pictures/fastfetch.jpg@5253e29ae8e128aad09b08fd57eb115ba66140d8	-	0	-	binaries:readme/fastfetch.md@2026.09.24
@@ -100,7 +111,7 @@ musl-loader	binary	1.2.5	io.vaj.tl	binaries:musl-loader-io.vaj.tl@bins-2026.09.2
 tl-priv	binary	0.1.0	*	binaries:tl-priv@bins-2026.09.25-3	-	-	hidden=1;host=launcher	The client that runs a privileged item through the launcher.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
 oh-my-posh	pkg	-	*	oh-my-posh	-	-	hidden=1	The prompt oh-my-posh draws.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
 personal-fish	file-once	v0.2.39	*	launcher:docs/en/examples/conf.d-personal.fish@v0.2.39	~/.config/fish/conf.d/personal.fish	fish	hidden=1	A place for your own fish settings, left alone once it is there.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
-ripgrep	pkg	-	*	ripgrep	-	-	hidden=1	The fast code search opencode uses to find text in files.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
+ripgrep	pkg	-	*	ripgrep	-	-	hidden=1	The fast code search opencode and codex use to find text in files.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
 zoxide	pkg	-	*	zoxide	-	-	hidden=1	Jump to the directories you use most by name.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
 launcher-skill-md	file	b3d9334e	*	launcher:resources/agent-skills/termux-launcher/SKILL.md@b3d9334e4e1994d5a2ab666e8d9179d9fc67494b	~/.claude/skills/termux-launcher/SKILL.md	-	hidden=1;mode=644	How the agent learns what Termux Launcher can do.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
 launcher-skill-launcherctl	file	b3d9334e	*	launcher:resources/agent-skills/termux-launcher/launcherctl.md@b3d9334e4e1994d5a2ab666e8d9179d9fc67494b	~/.claude/skills/termux-launcher/launcherctl.md	-	hidden=1;mode=644	The agent skill's guide to launcherctl.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-

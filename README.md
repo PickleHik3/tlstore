@@ -203,6 +203,23 @@ updater (an updated binary would arrive unpatched and fail to start). Verified 2
 the com.termux app process on a Nothing A065 running Android 16: startup, DNS, TLS to
 api.anthropic.com, and the interactive UI.
 
+## Codex
+
+OpenAI's own `@openai/codex` on npm is a static musl binary that reads a hard-coded
+`/etc/resolv.conf`, which Android does not have, and it cannot use our patched musl loader. So the
+store installs the Android build from [DioNanos/codex-termux](https://github.com/DioNanos/codex-termux)
+instead (`@mmmbuto/codex-cli-termux` on npm), through the `npm-android` kind: the registry's latest
+version, checked against its sha512, with no loader and no `patchelf`, because the binaries are
+Bionic ones that run as they are. Two files are kept from the package: `codex.bin` and
+`codex-code-mode-host`, which has to sit in the same directory because Codex's code mode, on by
+default, needs it for shell commands. The `~/.local/bin/codex` wrapper starts `codex.bin` with
+`-c check_for_update_on_startup=false`, since Codex's own update check cannot be turned off any
+other way and `tlstore update` is how it is updated. About 275 MB on disk.
+
+Credit for making Codex run on Android goes to DioNanos (Davide A. Guglielmi) and
+[codex-termux](https://github.com/DioNanos/codex-termux), Apache-2.0, a port of
+[openai/codex](https://github.com/openai/codex). See `docs/adr/0004-codex-from-codex-termux-via-npm-android.md`.
+
 ## Known limits
 
 - **`kitten update-self` fails.** These are `android/arm64` builds and upstream publishes no Android
@@ -257,6 +274,9 @@ If any source here becomes hard to obtain, open an issue and it will be provided
   source is GCC 14.2.0 as Alpine builds it:
   [aports `main/gcc`](https://gitlab.alpinelinux.org/alpine/aports/-/tree/v3.22-stable/main/gcc)
   over [gcc-14.2.0.tar.xz](https://ftp.gnu.org/gnu/gcc/gcc-14.2.0/gcc-14.2.0.tar.xz)
+
+Codex is fetched on the phone from its author's npm release (codex-termux, Apache-2.0) and is not
+redistributed by this repository.
 
 Fastfetch loads Chafa (LGPL-3.0-or-later) and ImageMagick (`ImageMagick` licence) through `dlopen`
 at runtime; neither is linked into or redistributed with the binary here.

@@ -21,12 +21,13 @@ which opens a picker over every item you do not have yet.
 
 ## What's in the store
 
-Nine items, and each one brings whatever it needs along with it.
+Ten items, and each one brings whatever it needs along with it.
 
 | item | what you get |
 | --- | --- |
 | `btop` | A resource monitor with the whole phone in view — every process, disk and network interface — run as the shell user through Shizuku. Launcher only. |
 | `claude-code` | [Claude Code](https://claude.com/claude-code), Anthropic's coding agent for the terminal. About 200 MB. |
+| `codex` | [Codex](https://github.com/openai/codex), OpenAI's coding agent for the terminal, as built for Android by [codex-termux](https://github.com/DioNanos/codex-termux). About 275 MB. |
 | `dawn` | A writing pad for the terminal: your markdown takes shape as you type, headings and all. |
 | `fastfetch` | System information beside an animated logo. It brings the layout; drop any GIF of yours at `~/Pictures/gif/skel.gif` and it plays there, otherwise you get text. |
 | `fish-shell` | The fish shell with the launcher's setup: the wallpaper prompt, `eza`, `zoxide`, and the plugins below. |
@@ -181,6 +182,18 @@ off — `tlstore update` is how it gets new versions. Once it is installed, sign
 claude
 ```
 
+## Codex
+
+`tlstore install codex` installs Codex, OpenAI's coding agent for the terminal. OpenAI's own Linux
+build cannot reach the network on Android, so this is the Android build from
+[codex-termux](https://github.com/DioNanos/codex-termux), Davide A. Guglielmi's port; the credit for
+making it run on a phone is theirs. It is about 275 MB, downloaded from npm. Its own update check is
+switched off — `tlstore update` is how it gets new versions. Once it is installed, sign in with:
+
+```sh
+codex
+```
+
 ## opencode
 
 `tlstore install opencode` installs [opencode](https://opencode.ai), another coding agent for the
@@ -259,8 +272,8 @@ and the phone gets a notice when it is done. Set `TLSTORE_MOTION=0` to turn the 
 
 The store runs in the launcher and in plain Termux, and a few items only make sense in one of
 them. `fastfetch` is a launcher item: its animated logo needs the launcher's terminal. So is
-`btop`: it runs through the launcher's Shizuku lane. Everything else — `claude-code`, `dawn`,
-`opencode`, `sigye`, `kitten`, `fish-shell` — is offered in both.
+`btop`: it runs through the launcher's Shizuku lane. Everything else — `claude-code`, `codex`,
+`dawn`, `opencode`, `sigye`, `kitten`, `fish-shell` — is offered in both.
 
 An item that belongs to one of them is filtered out completely everywhere else: it is not listed,
 not found by a search, and `tlstore info` says it is not in the list. `tlstore doctor` prints an
@@ -284,7 +297,7 @@ build them from upstream source — with whatever patches are applied — live i
 under `recipes/cross` and `recipes/termux`; run one
 yourself to reproduce a binary and compare it against what tlstore installed.
 
-Everything else in the store is unmodified: `claude-code` and `opencode` come straight from npm,
+Everything else in the store is unmodified: `claude-code`, `opencode` and `codex` (the codex-termux package) come straight from npm,
 and the packages behind `fish-shell` (`fish`, `eza`, `zoxide`, `oh-my-posh`) come straight from Termux's
 own package repository.
 

@@ -35,7 +35,8 @@ in `setup`/`featured`.
    launcher-owned template, fetched from `PickleHik3/termux-launcher`), `binaries:<asset>@<tag>`
    (a release asset of this repository, `<asset>-aarch64` on the `bins-…` prerelease `<tag>`),
    `binaries:<path/with/slash>@<tag>` (a file in this repository at that tag) or an immutable
-   URL; `npm-musl` is `npm:<package>#<exe>`; `pkg` names Termux packages. Never a branch. For a
+   URL; `npm-musl` and `npm-android` are `npm:<package>#<exe>` (npm-android is for a package that ships
+   an Android executable, which runs as it is: no loader, no patchelf); `pkg` names Termux packages. Never a branch. For a
    new binary, add its recipe to `recipes/cross` and a line for it in `scripts/bins-plan.sh` and
    `recipes/cross/build-asset.sh`, run `build.yml` for it ("Rebuilding a binary" below), and
    point the row at the `bins-…` tag it printed; its digest is then the `<asset>-aarch64` line of

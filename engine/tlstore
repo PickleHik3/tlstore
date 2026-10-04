@@ -168,7 +168,7 @@ TAB=$(printf '\t')
 # the person backs out of a running --progress job) has to clean up: the temp
 # file the current download is writing (download() keeps this current),
 # anywhere else an install leaves a half-built scratch copy before it moves it
-# into place (npm-musl's unpack directory), and which item was in flight, so
+# into place (the npm kinds' unpack directory), and which item was in flight, so
 # the UI still gets a done line for it instead of waiting forever.
 CANCEL_TMP=""
 CANCEL_EXTRA=""
@@ -306,7 +306,7 @@ rows() {
         }
         function arch_ok(kind) {
             if (archok == "1") return 1
-            return (kind != "binary" && kind != "npm-musl")
+            return (kind != "binary" && kind != "npm-musl" && kind != "npm-android")
         }
         function optval(list, key,   n, i, parts) {
             n = split(list, parts, ";")
@@ -498,11 +498,11 @@ source_url() {
 }
 
 # item_targets <name> <kind> <target> [source] [options] — where an item's
-# payload lands, space separated; empty for pkg and bundles. An npm-musl item
-# lands twice: the directory, then the wrapper, which is named after the
-# executable inside the package (claude-code installs the command `claude`). A
-# package that keeps its executable in a subdirectory (npm:x#bin/y) still gets
-# the bare name. A binary with priv=shizuku lands twice as well: the program
+# payload lands, space separated; empty for pkg and bundles. An npm-musl or
+# npm-android item lands twice: the directory, then the wrapper, which is named
+# after the executable inside the package (claude-code installs the command
+# `claude`) unless command=<name> says otherwise. A package that keeps its
+# executable in a subdirectory (npm:x#bin/y) still gets the bare name. A binary with priv=shizuku lands twice as well: the program
 # under PRIV_DIR, off PATH, then the wrapper on PATH that runs it through
 # tl-priv.
 item_targets() {
@@ -521,13 +521,15 @@ item_targets() {
                 expand_path "$3"
             fi
             ;;
-        npm-musl)
+        npm-musl|npm-android)
             it_exe="${4:-}"
             case "$it_exe" in
                 *"#"*) it_exe="${it_exe##*#}" ;;
                 *) it_exe="$1" ;;
             esac
             it_exe="${it_exe##*/}"
+            it_cmd=$(opt "${5:-}" command)
+            [ -z "$it_cmd" ] || it_exe="$it_cmd"
             if [ "$3" = "-" ] || [ -z "$3" ]; then
                 printf '%s %s' "$LIB_DIR/$1" "$BIN_DIR/$it_exe"
             else
@@ -1024,6 +1026,7 @@ install_item() {
         file-once) do_file 1 ;;
         fisher) do_fisher ;;
         npm-musl) do_npm_musl ;;
+        npm-android) do_npm_musl ;;
         bundle) do_bundle ;;
         *) err "$ii_name cannot be installed here"; return 1 ;;
     esac
@@ -1190,23 +1193,28 @@ npm_latest_version() {
     curl -fsSL --connect-timeout 5 --max-time 60 "$NPM_REGISTRY/$nl_package/latest" 2>/dev/null | json_field version
 }
 
+# do_npm_musl installs both npm kinds. npm-musl is a musl binary that needs
+# our loader and a patchelf pass; npm-android is a Bionic executable that runs
+# as it is, so it skips the loader, the musl libraries and patchelf.
 do_npm_musl() {
     np_package="${ii_source#npm:}"
     np_exe="${np_package##*#}"
     np_package="${np_package%#*}"
-    np_dir=$(item_targets "$ii_name" npm-musl "$ii_target" "$ii_source")
+    np_dir=$(item_targets "$ii_name" "$ii_kind" "$ii_target" "$ii_source" "$ii_options")
     np_wrapper="${np_dir##* }"
     np_dir="${np_dir%% *}"
 
     for np_tool in curl tar sha512sum base64 od; do
         have "$np_tool" || { err "$np_tool is missing — install coreutils and tar"; return 1; }
     done
-    have "$PATCHELF" || { err "patchelf is missing — install it and try again"; return 1; }
-
-    np_loader_row=$(row musl-loader)
-    if [ -z "$np_loader_row" ]; then
-        err "$ii_name has no loader for this device"
-        return 1
+    np_loader_row=""
+    if [ "$ii_kind" = npm-musl ]; then
+        have "$PATCHELF" || { err "patchelf is missing — install it and try again"; return 1; }
+        np_loader_row=$(row musl-loader)
+        if [ -z "$np_loader_row" ]; then
+            err "$ii_name has no loader for this device"
+            return 1
+        fi
     fi
 
     say "installing $ii_name"
@@ -1251,49 +1259,67 @@ do_npm_musl() {
             err "the $ii_name download is not what was expected"
             return 1
         fi
-        tar xzf "$np_tmp" -C "$np_dir.new" --strip-components=1 package/LICENSE.md 2>/dev/null || true
-        rm -f "$np_tmp"
-
-        np_loader="$np_dir.new/ld-musl-aarch64.so.1"
-        np_have_loader=$(item_targets musl-loader binary "$(field "$np_loader_row" 7)")
-        if [ -f "$np_have_loader" ]; then
-            cp -f "$np_have_loader" "$np_loader"
-        elif ! download "$(source_url "$(field "$np_loader_row" 5)")" "$np_loader" "$(field "$np_loader_row" 6)"; then
-            rm -rf "$np_dir.new"
-            CANCEL_EXTRA=""
-            return 1
-        fi
-        chmod 755 "$np_loader" "$np_dir.new/$np_exe"
-
-        # Some of these binaries need more of the musl world than its libc —
-        # opencode links libstdc++ and libgcc_s, and Termux's own are Bionic
-        # ones the musl loader cannot use. They go in beside the loader,
-        # because the rpath set below is this directory and nothing else.
-        for np_lib in $(commas "$(opt "$ii_options" musl-libs)"); do
-            np_lib_row=$(row "$np_lib")
-            if [ -z "$np_lib_row" ]; then
+        # extra=<path,path>: more members of the package, unpacked beside the
+        # executable under their package paths. A missing one fails the
+        # install just as a missing executable does.
+        for np_more in $(commas "$(opt "$ii_options" extra)"); do
+            if ! tar xzf "$np_tmp" -C "$np_dir.new" --strip-components=1 "package/$np_more"; then
+                rm -f "$np_tmp"
                 rm -rf "$np_dir.new"
                 CANCEL_EXTRA=""
-                err "$ii_name has no $np_lib for this device"
+                err "the $ii_name download is not what was expected"
                 return 1
             fi
-            np_lib_have=$(item_targets "$np_lib" binary "$(field "$np_lib_row" 7)")
-            np_lib_dest="$np_dir.new/${np_lib_have##*/}"
-            if [ -f "$np_lib_have" ]; then
-                cp -f "$np_lib_have" "$np_lib_dest"
-            elif ! download "$(source_url "$(field "$np_lib_row" 5)")" "$np_lib_dest" "$(field "$np_lib_row" 6)"; then
-                rm -rf "$np_dir.new"
-                CANCEL_EXTRA=""
-                return 1
-            fi
-            chmod 644 "$np_lib_dest"
+            chmod 755 "$np_dir.new/$np_more"
         done
+        for np_licence in LICENSE.md LICENSE NOTICE; do
+            tar xzf "$np_tmp" -C "$np_dir.new" --strip-components=1 "package/$np_licence" 2>/dev/null || true
+        done
+        rm -f "$np_tmp"
+        chmod 755 "$np_dir.new/$np_exe"
 
-        if ! "$PATCHELF" --set-interpreter "$np_dir/ld-musl-aarch64.so.1" --set-rpath "$np_dir" "$np_dir.new/$np_exe"; then
-            rm -rf "$np_dir.new"
-            CANCEL_EXTRA=""
-            err "could not prepare $ii_name for this device"
-            return 1
+        if [ "$ii_kind" = npm-musl ]; then
+            np_loader="$np_dir.new/ld-musl-aarch64.so.1"
+            np_have_loader=$(item_targets musl-loader binary "$(field "$np_loader_row" 7)")
+            if [ -f "$np_have_loader" ]; then
+                cp -f "$np_have_loader" "$np_loader"
+            elif ! download "$(source_url "$(field "$np_loader_row" 5)")" "$np_loader" "$(field "$np_loader_row" 6)"; then
+                rm -rf "$np_dir.new"
+                CANCEL_EXTRA=""
+                return 1
+            fi
+            chmod 755 "$np_loader"
+
+            # Some of these binaries need more of the musl world than its libc —
+            # opencode links libstdc++ and libgcc_s, and Termux's own are Bionic
+            # ones the musl loader cannot use. They go in beside the loader,
+            # because the rpath set below is this directory and nothing else.
+            for np_lib in $(commas "$(opt "$ii_options" musl-libs)"); do
+                np_lib_row=$(row "$np_lib")
+                if [ -z "$np_lib_row" ]; then
+                    rm -rf "$np_dir.new"
+                    CANCEL_EXTRA=""
+                    err "$ii_name has no $np_lib for this device"
+                    return 1
+                fi
+                np_lib_have=$(item_targets "$np_lib" binary "$(field "$np_lib_row" 7)")
+                np_lib_dest="$np_dir.new/${np_lib_have##*/}"
+                if [ -f "$np_lib_have" ]; then
+                    cp -f "$np_lib_have" "$np_lib_dest"
+                elif ! download "$(source_url "$(field "$np_lib_row" 5)")" "$np_lib_dest" "$(field "$np_lib_row" 6)"; then
+                    rm -rf "$np_dir.new"
+                    CANCEL_EXTRA=""
+                    return 1
+                fi
+                chmod 644 "$np_lib_dest"
+            done
+
+            if ! "$PATCHELF" --set-interpreter "$np_dir/ld-musl-aarch64.so.1" --set-rpath "$np_dir" "$np_dir.new/$np_exe"; then
+                rm -rf "$np_dir.new"
+                CANCEL_EXTRA=""
+                err "could not prepare $ii_name for this device"
+                return 1
+            fi
         fi
         printf '%s\n' "$np_version" > "$np_dir.new/version"
         CANCEL_EXTRA=""
@@ -1316,10 +1342,16 @@ do_npm_musl() {
             # shellcheck disable=SC2016  # written into the wrapper, expanded there
             printf '%s\n' '[ -n "${TZ:-}" ] || TZ=$(getprop persist.sys.timezone 2>/dev/null) && export TZ'
         fi
-        printf 'exec "%s" "$@"\n' "$np_dir/$np_exe"
+        # args=<words> go in unquoted, before the person's own arguments.
+        np_args=$(opt "$ii_options" args)
+        if [ -n "$np_args" ]; then
+            printf 'exec "%s" %s "$@"\n' "$np_dir/$np_exe" "$np_args"
+        else
+            printf 'exec "%s" "$@"\n' "$np_dir/$np_exe"
+        fi
     } > "$np_wrapper"
     chmod 755 "$np_wrapper"
-    state_record "$ii_name" npm-musl "$np_version" "$np_dir" "$np_wrapper"
+    state_record "$ii_name" "$ii_kind" "$np_version" "$np_dir" "$np_wrapper"
     say "  $np_wrapper"
     return 0
 }
@@ -2254,10 +2286,11 @@ snapshot_rows() {
                 if (target == "-" || target == "") return (kind == "binary") ? bindir "/" name : ""
                 return expand(target)
             }
-            if (kind == "npm-musl") {
+            if (kind == "npm-musl" || kind == "npm-android") {
                 n = split(source, parts, "#")
                 exe = (n > 1) ? parts[n] : name
                 sub(/.*\//, "", exe)
+                if (optval(opts, "command") != "") exe = optval(opts, "command")
                 if (target == "-" || target == "") return libdir "/" name " " bindir "/" exe
                 return expand(target) " " bindir "/" exe
             }
@@ -2359,7 +2392,7 @@ snapshot_rows() {
                     upd = 0
                     note = (kind == "file") ? "config-asks" : ""
                     if (kind == "pkg" || kind == "bundle" || kind == "fisher") upd = 0
-                    else if (kind == "npm-musl") upd = (ver != "latest" && ver != have)
+                    else if (kind == "npm-musl" || kind == "npm-android") upd = (ver != "latest" && ver != have)
                     else upd = (ver != have)
                 }
                 if (upd) print "update", name, have, ver, note
@@ -2858,7 +2891,7 @@ update_items() {
         case "$cu_kind" in
             pkg) cu_pkgs="$cu_pkgs $(field "$cu_row" 5)" ;;
             bundle|fisher) ;;
-            npm-musl)
+            npm-musl|npm-android)
                 # An item pinned to latest is whatever its source says today.
                 # --check asks the registry which version that is and names the
                 # item only when it differs from what is here; offline, or when
