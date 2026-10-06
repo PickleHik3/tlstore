@@ -19,7 +19,11 @@ set -euo pipefail
 
 DAWN_URL="https://github.com/PickleHik3/dawn.git"
 DAWN_COMMIT="6790831a55fde1035af36cfe2894b34a3b4102ad"   # tl: upstream 0e958747 (v0.1.3 plus fixes) + touch, data safety, P1, Material surfaces, bottom-sheet chat, scroll pill, warm session, voice, meaning index, the 2026-10-06 fixes, Nerd Font task boxes
-DAWN_VERSION_STRING="0.1.3+0e958747"
+# The version the binary reports (dawn -v): upstream's release plus the short fork commit, so the
+# build names what it is made from. The catalog rows in scripts/items.tsv carry the same base with
+# a build number (0.1.3+<commit>.N) that bins-record.sh bumps; when DAWN_COMMIT moves, move the
+# base in items.tsv by hand too.
+DAWN_VERSION_STRING="0.1.3+${DAWN_COMMIT:0:7}"
 
 TL_NDK=${TL_NDK:-"$HOME/android-sdk/ndk/27.2.12479018"}
 TL_SYSROOT=${TL_SYSROOT:-"$PWD/sysroot"}
