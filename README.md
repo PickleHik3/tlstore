@@ -265,9 +265,19 @@ If any source here becomes hard to obtain, open an issue and it will be provided
 
 ## Licences
 
+tlstore's own code — the `engine/tlstore` script, the `tlstore-ui` crate under `ui/`, and the
+scripts and recipes in this repository — is GPL-3.0-only, `LICENSE`. The launcher bundles the
+engine and the `dist/tlstore-ui-<abi>` binaries in its APK. Those binaries statically link the
+Rust standard library and the crates in `ui/Cargo.lock` (MIT, Apache-2.0, Zlib or similar
+permissive terms), whose notices are reproduced in `licenses/tlstore-ui-crates.txt`, and they
+embed the Pinyon Script font (SIL OFL 1.1, `ui/assets/fonts/pinyonscript/OFL.txt`). JetBrains Mono
+under `ui/assets/fonts/jetbrainsmono/` (SIL OFL 1.1) is only compiled into the dev-only `shot`
+feature, never into a released binary.
+
 - kitty / `kitten` — GPL-3.0-only, `licenses/kitty-GPL-3.0-only.txt`
 - Fastfetch — MIT, `licenses/fastfetch-MIT.txt`, modified by `recipes/termux/fastfetch/0001-kitty-animation.patch`
 - Sigye — MIT, `licenses/sigye-MIT.txt`, modified by `recipes/termux/sigye/0001-termux-clipboard.patch`
+- musl (the loader) — MIT, `licenses/musl-MIT.txt`
 - dawn — MIT, `licenses/dawn-MIT.txt`, modified in the fork [PickleHik3/dawn](https://github.com/PickleHik3/dawn) (branch `tl`)
 - `libstdc++.so.6` and `libgcc_s.so.1` — GCC 14.2.0, GPL-3.0-or-later with the GCC Runtime Library
   Exception, `licenses/gcc-runtime-GPL-3.0-with-exception.txt`, unmodified. The corresponding
