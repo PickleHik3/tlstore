@@ -17,7 +17,8 @@
 #   TLSTORE_CATALOG_URL where refresh reads the catalog (file:// works)
 #   TLSTORE_ASSUME_YES  1 = same as -y
 #   TLSTORE_NPM_REGISTRY npm registry base (default https://registry.npmjs.org)
-#   TLSTORE_ARCH        override uname -m (tests exercise aarch64 items on a host)
+#   TLSTORE_ARCH        override uname -m (tests exercise aarch64 and x86_64
+#                       items on a host)
 #   TLSTORE_PATCHELF    the patchelf command (tests pass a no-op)
 #   TLSTORE_ASSUME_TTY  1 = answer questions from stdin even when it is not a
 #                       terminal (the test suite pipes them in)
@@ -38,7 +39,7 @@
 #                       repository's releases/latest/download; tests point it
 #                       at a file:// directory)
 #   TLSTORE_BINARIES_RELEASES  where a bare `binaries:<asset>@<tag>` source
-#                       is: <base>/<tag>/<asset>-aarch64 (default this
+#                       is: <base>/<tag>/<asset>-<arch> (default this
 #                       repository's releases/download; tests use file://)
 #   TLSTORE_BINARIES_RAW  where a `binaries:<path/with/slash>@<tag>` source
 #                       is: <base>/<tag>/<path>, a file in this repository at
@@ -46,7 +47,7 @@
 
 set -u
 
-TLSTORE_VERSION=0.9
+TLSTORE_VERSION=0.10
 
 # The store program that pairs with this script, one digest per processor.
 # Empty in the source tree: scripts/release.sh --prepare fills them in from
@@ -157,9 +158,14 @@ DRY_RUN=0
 # Packages this run installed only so something else could be built.
 BUILD_ADDED=""
 
+# The processor, as the catalog names it: aarch64 or x86_64. A row's own
+# columns are the aarch64 build; on x86_64 its x86_64:source, x86_64:digest and
+# x86_64:target options stand in for them (rows). Any other processor has no
+# prebuilt tools at all.
 ARCH="${TLSTORE_ARCH:-$(uname -m 2>/dev/null || echo unknown)}"
 case "$ARCH" in
-    aarch64|arm64) ARCH_OK=1 ;;
+    aarch64|arm64) ARCH=aarch64; ARCH_OK=1 ;;
+    x86_64|amd64) ARCH=x86_64; ARCH_OK=1 ;;
     *) ARCH_OK=0 ;;
 esac
 
@@ -300,19 +306,34 @@ need_catalog() {
 }
 
 # Every row that applies here: this edition's prefix, this processor, this app,
-# a new enough launcher; first row per name wins.
+# a new enough launcher; first row per name wins. Off aarch64 a row comes out
+# with its <arch>:source, <arch>:digest and <arch>:target options already in
+# place of columns 5, 6 and 7, so nothing downstream needs to know the
+# processor. A binary is here only with its own <arch>:digest (build-catalog.sh
+# writes it once that build is published); an npm-musl or npm-android item only
+# with its own <arch>:source (the npm package built for it), and an npm-musl
+# item only while its musl loader and libraries are here as well.
 rows() {
-    awk -F "$TAB" -v pkgname="$APP_PACKAGE" -v archok="$ARCH_OK" \
-        -v host="$HOST" -v lver="$LAUNCHER_VERSION" '
+    awk -F "$TAB" -v OFS="$TAB" -v pkgname="$APP_PACKAGE" -v archok="$ARCH_OK" \
+        -v arch="$ARCH" -v host="$HOST" -v lver="$LAUNCHER_VERSION" '
         function prefix_ok(list,   n, i, parts) {
             if (list == "*" || list == "") return 1
             n = split(list, parts, ",")
             for (i = 1; i <= n; i++) if (parts[i] == pkgname) return 1
             return 0
         }
-        function arch_ok(kind) {
-            if (archok == "1") return 1
-            return (kind != "binary" && kind != "npm-musl" && kind != "npm-android")
+        function arch_ok(kind, opts) {
+            if (kind != "binary" && kind != "npm-musl" && kind != "npm-android") return 1
+            if (archok != "1") return 0
+            if (arch == "aarch64") return 1
+            if (kind == "binary") return optval(opts, arch ":digest") != ""
+            return optval(opts, arch ":source") != ""
+        }
+        function for_arch(   v) {
+            if (archok != "1" || arch == "aarch64") return
+            v = optval($9, arch ":source"); if (v != "") $5 = v
+            v = optval($9, arch ":digest"); if (v != "") $6 = v
+            v = optval($9, arch ":target"); if (v != "") $7 = v
         }
         function optval(list, key,   n, i, parts) {
             n = split(list, parts, ";")
@@ -346,16 +367,27 @@ rows() {
             if (lver == "") return 1
             return vercmp(lver, want) >= 0
         }
-        /^[ \t]*#/ { next }
-        /^[ \t]*$/ { next }
-        NF < 10 { next }
-        !prefix_ok($4) { next }
-        !arch_ok($2) { next }
-        !host_ok($9) { next }
-        !launcher_ok($9) { next }
+        function applies() {
+            if ($0 ~ /^[ \t]*#/ || $0 ~ /^[ \t]*$/ || NF < 10) return 0
+            return prefix_ok($4) && arch_ok($2, $9) && host_ok($9) && launcher_ok($9)
+        }
+        # An npm-musl item cannot start without the musl loader and the
+        # libraries its musl-libs names, so it is here only when they are:
+        # on x86_64 the npm package exists before our own builds do.
+        function musl_ready(opts,   n, i, parts) {
+            if (!("musl-loader" in here)) return 0
+            n = split(optval(opts, "musl-libs"), parts, ",")
+            for (i = 1; i <= n; i++) if (!(parts[i] in here)) return 0
+            return 1
+        }
+        # The catalog is read twice: once for the names that apply here, then
+        # for the rows themselves.
+        NR == FNR { if (applies()) here[$1] = 1; next }
+        !applies() { next }
+        $2 == "npm-musl" && !musl_ready($9) { next }
         seen[$1]++ { next }
-        { print }
-    ' "$CATALOG"
+        { for_arch(); print }
+    ' "$CATALOG" "$CATALOG"
 }
 
 # The rows a user picks from. The rest are plumbing: parts other items pull in,
@@ -494,9 +526,9 @@ source_url() {
                 # A path (a readme or a hero picture kept in the repository)
                 # resolves straight to that file at the tag; a bare asset name
                 # is the per-processor binary, published as a release asset
-                # under the tag.
+                # under the tag as <asset>-aarch64 or <asset>-x86_64.
                 */*) printf '%s/%s/%s' "$BINARIES_RAW" "$su_tag" "$su_asset" ;;
-                *) printf '%s/%s/%s-aarch64' "$BINARIES_RELEASES" "$su_tag" "$su_asset" ;;
+                *) printf '%s/%s/%s-%s' "$BINARIES_RELEASES" "$su_tag" "$su_asset" "$ARCH" ;;
             esac
             ;;
         *) printf '%s' "$1" ;;
@@ -1109,7 +1141,7 @@ install_item() {
     ii_name="$1"
     ii_force="${2:-0}"
     # Something a bundle asks for that has no row here — another edition's
-    # build, or an aarch64 tool on a different processor — is skipped, not an
+    # build, or a tool not built for this processor — is skipped, not an
     # error. A name typed on the command line is checked before we get here.
     load_item "$ii_name" || {
         say "$ii_name is not available on this device"
@@ -1399,7 +1431,7 @@ do_npm_musl() {
         chmod 755 "$np_dir.new/$np_exe"
 
         if [ "$ii_kind" = npm-musl ]; then
-            np_loader="$np_dir.new/ld-musl-aarch64.so.1"
+            np_loader="$np_dir.new/ld-musl-$ARCH.so.1"
             np_have_loader=$(item_targets musl-loader binary "$(field "$np_loader_row" 7)")
             if [ -f "$np_have_loader" ]; then
                 cp -f "$np_have_loader" "$np_loader"
@@ -1434,7 +1466,7 @@ do_npm_musl() {
                 chmod 644 "$np_lib_dest"
             done
 
-            if ! "$PATCHELF" --set-interpreter "$np_dir/ld-musl-aarch64.so.1" --set-rpath "$np_dir" "$np_dir.new/$np_exe"; then
+            if ! "$PATCHELF" --set-interpreter "$np_dir/ld-musl-$ARCH.so.1" --set-rpath "$np_dir" "$np_dir.new/$np_exe"; then
                 rm -rf "$np_dir.new"
                 CANCEL_EXTRA=""
                 err "could not prepare $ii_name for this device"
@@ -2638,7 +2670,7 @@ snapshot_key() {
     printf 'v=%s;serial=%s;catalog=%s:%s;state=%s;held=%s;cache=%s;host=%s;arch=%s;pkg=%s;lver=%s;home=%s;prefix=%s' \
         "$TLSTORE_VERSION" "$CATALOG_SERIAL" "$CATALOG" "$(file_stamp "$CATALOG")" \
         "$(file_stamp "$STATE")" "$(file_stamp "$HELD")" "$(file_stamp "$CACHE_DIR/.changed")" \
-        "$HOST" "$ARCH_OK" "$APP_PACKAGE" "$LAUNCHER_VERSION" "$HOME" "$PREFIX"
+        "$HOST" "$ARCH" "$APP_PACKAGE" "$LAUNCHER_VERSION" "$HOME" "$PREFIX"
 }
 
 # snapshot_rows — one awk pass over every row that applies here and the
@@ -2652,7 +2684,7 @@ snapshot_rows() {
     rows | awk -F "$TAB" -v OFS="$TAB" -v state="$STATE" -v heldfile="$HELD" -v home="$HOME" \
         -v bindir="$BIN_DIR" -v libdir="$LIB_DIR" -v privdir="$PRIV_DIR" \
         -v cachedir="$CACHE_DIR" -v launcher_raw="$LAUNCHER_RAW" -v binaries_raw="$BINARIES_RAW" \
-        -v binaries_rel="$BINARIES_RELEASES" '
+        -v binaries_rel="$BINARIES_RELEASES" -v arch="$ARCH" '
         function optval(list, key,   n, i, parts) {
             n = split(list, parts, ";")
             for (i = 1; i <= n; i++)
@@ -2699,7 +2731,7 @@ snapshot_rows() {
                 tag = rest; sub(/.*@/, "", tag)
                 path = rest; sub(/@[^@]*$/, "", path)
                 if (index(path, "/") > 0) return binaries_raw "/" tag "/" path
-                return binaries_rel "/" tag "/" path "-aarch64"
+                return binaries_rel "/" tag "/" path "-" arch
             }
             return src
         }
@@ -2940,7 +2972,7 @@ prefetch_gc() {
     gc_changed=0
     gc_list=$(rows | awk -F "$TAB" -v OFS="$TAB" -v cachedir="$CACHE_DIR" \
         -v launcher_raw="$LAUNCHER_RAW" -v binaries_raw="$BINARIES_RAW" \
-        -v binaries_rel="$BINARIES_RELEASES" '
+        -v binaries_rel="$BINARIES_RELEASES" -v arch="$ARCH" '
         function dash(v) { return (v == "") ? "-" : v }
         function url_of(src,   rest, path, tag) {
             if (index(src, "launcher:") == 1) {
@@ -2954,7 +2986,7 @@ prefetch_gc() {
                 tag = rest; sub(/.*@/, "", tag)
                 path = rest; sub(/@[^@]*$/, "", path)
                 if (index(path, "/") > 0) return binaries_raw "/" tag "/" path
-                return binaries_rel "/" tag "/" path "-aarch64"
+                return binaries_rel "/" tag "/" path "-" arch
             }
             return src
         }

@@ -24,6 +24,14 @@
 # as "<asset>-aarch64", the release asset .github/workflows/build.yml publishes
 # under that tag (scripts/bins-record.sh writes its SHA256SUMS line).
 #
+# x86_64 (docs/SPEC.md, Revision 12): a binary row's own columns are its aarch64
+# build. When SHA256SUMS also has "<asset>-x86_64" for its bare binaries: source
+# (or the row names an x86_64:source= of its own), the row gets
+# `x86_64:digest=<sha256>` appended to its options, and tlstore shows it on
+# x86_64. Without that line it gets nothing and stays hidden there, so the
+# catalog is right both before and after the x86_64 build is published. Like
+# every digest, x86_64:digest is never hand-written in items.tsv.
+#
 # A plain URL must name an immutable revision — a tag or a commit — for the same
 # reason a launcher: source does.
 #
@@ -66,10 +74,11 @@ fi
 fetched="$(mktemp -d)"
 trap 'rm -rf "$fetched"' EXIT
 
-# source_digest <source> <name> — the digest of any launcher:/binaries:/http(s)
-# source, whatever column it lives in. "-" (no source) passes straight through.
+# source_digest <source> <name> [arch] — the digest of any launcher:/binaries:/http(s)
+# source, whatever column it lives in. "-" (no source) passes straight through. A
+# bare binaries: asset is the build for [arch], aarch64 unless told otherwise.
 source_digest() {
-    local source="$1" name="$2" path tag asset key
+    local source="$1" name="$2" arch="${3:-aarch64}" path tag asset key
     case "$source" in
         -) echo "-"; return 0 ;;
         launcher:*)
@@ -101,7 +110,7 @@ source_digest() {
             fi
             case "$asset" in
                 */*) key="$asset" ;;
-                *) key="$asset-aarch64" ;;
+                *) key="$asset-$arch" ;;
             esac
             if [ -z "${binary_digest["$key"]:-}" ]; then
                 echo "$key is not in $sums (for $name)" >&2
@@ -133,6 +142,36 @@ digest_for() {
         pkg|bundle|fisher|npm-musl|npm-android) echo "-"; return 0 ;;
     esac
     source_digest "$source" "$name"
+}
+
+# optval <options> <key> — one ;-separated option's value, empty when unset.
+optval() {
+    local part parts
+    IFS=';' read -ra parts <<<"$1"
+    for part in "${parts[@]}"; do
+        case "$part" in "$2="*) printf '%s' "${part#"$2="}"; return 0 ;; esac
+    done
+}
+
+# x86_64_digest <kind> <source> <options> <name> — the digest of a binary's x86_64
+# build, or nothing when there is none to offer. An x86_64:source= the row names
+# itself must resolve (a failure stops the build, like any other pinned source);
+# the row's own bare binaries: asset counts only once SHA256SUMS has its
+# <asset>-x86_64 line, which bins-record.sh writes when that build is published.
+x86_64_digest() {
+    local kind="$1" source="$2" options="$3" name="$4" own asset
+    [ "$kind" = binary ] || return 0
+    own="$(optval "$options" x86_64:source)"
+    if [ -n "$own" ]; then
+        source_digest "$own" "$name (x86_64)" x86_64
+        return
+    fi
+    case "$source" in
+        binaries:*) asset="${source#binaries:}"; asset="${asset%@*}" ;;
+        *) return 0 ;;
+    esac
+    case "$asset" in */*) return 0 ;; esac
+    printf '%s' "${binary_digest["$asset-x86_64"]:-}"
 }
 
 # --- rows -----------------------------------------------------------------
@@ -225,6 +264,24 @@ while IFS=$'\t' read -r name kind version prefixes source target requires option
     if ! demo_digest="$(source_digest "$demo" "$name (demo)")"; then
         failed=1
         continue
+    fi
+    case ";$options;" in
+        *";x86_64:digest="*)
+            echo "$name: x86_64:digest is written by build-catalog.sh, never by hand" >&2
+            failed=1
+            continue
+            ;;
+    esac
+    if ! x86_digest="$(x86_64_digest "$kind" "$source" "$options" "$name")"; then
+        failed=1
+        continue
+    fi
+    if [ -n "$x86_digest" ]; then
+        if [ "$options" = "-" ]; then
+            options="x86_64:digest=$x86_digest"
+        else
+            options="$options;x86_64:digest=$x86_digest"
+        fi
     fi
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t' \
         "$name" "$kind" "$version" "$prefixes" "$source" "$digest" \
