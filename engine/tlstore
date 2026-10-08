@@ -46,7 +46,7 @@
 
 set -u
 
-TLSTORE_VERSION=0.8
+TLSTORE_VERSION=0.9
 
 # The store program that pairs with this script, one digest per processor.
 # Empty in the source tree: scripts/release.sh --prepare fills them in from
@@ -84,6 +84,8 @@ USER_CATALOG="$DATA_DIR/catalog.tsv"
 PUBKEY="$STORE_DIR/trusted.pub"
 STATE="$DATA_DIR/installed.tsv"
 HELD="$DATA_DIR/held"
+# Present when the user answered "never" to update's offer of a newer tlstore.
+SU_QUIET="$DATA_DIR/self-update-quiet"
 
 # The app writes this when it puts tlstore down (a hand install writes
 # .standalone instead, with the address it came from inside it; nothing here
@@ -631,6 +633,17 @@ hold_drop() {
     hd_tmp="$HELD.new"
     grep -vx -- "$1" "$HELD" > "$hd_tmp" || true
     mv "$hd_tmp" "$HELD"
+}
+
+# The "never" answer to update's offer of a newer tlstore: an empty file that
+# only a successful `tlstore self-update` takes away.
+su_quiet_on() {
+    mkdir -p "$DATA_DIR"
+    : > "$SU_QUIET"
+}
+
+su_quiet_off() {
+    rm -f "$SU_QUIET"
 }
 
 state_forget() {
@@ -1832,9 +1845,10 @@ EOF
 Usage: tlstore [-y] update [options] [name...]
        tlstore upgrade ...
 
-Fetches the newest item list, brings what you have up to date, then updates
-tlstore itself. With no names it does everything you have installed, except
-items you have held; naming a held item updates it and lets go of the hold.
+Fetches the newest item list and brings what you have up to date, then offers
+a newer tlstore when there is one: answer yes, no, or never. With no names it
+does everything you have installed, except items you have held; naming a held
+item updates it and lets go of the hold.
 
 Options:
   --check        say what would change, and change nothing
@@ -1906,7 +1920,8 @@ EOF
             cat <<'EOF'
 Usage: tlstore self-update [--check]
 
-Brings tlstore itself, and the store app that goes with it, up to date.
+Brings tlstore itself, and the store app that goes with it, up to date. This
+also turns the offer on update back on after you said never.
 Exits 1 when a newer tlstore was offered and could not be taken.
 
 Options:
@@ -3477,14 +3492,14 @@ update_items() {
 cmd_update() {
     update_items "$@"
     cu_status=$?
-    # tlstore keeps itself, and the store program that pairs with it, current
-    # on a plain `update` — never offline, never on `--check` (the refresh
+    # A plain `update` offers the newer tlstore, and the store program that
+    # pairs with it, when there is one — never offline, never on `--check` (the refresh
     # tlstore-ui runs in the background; swapping the files under a running
     # UI is what `self-update --progress` exists to do in plain view), and
     # not inside a --progress stream, which carries the item lines alone.
     if [ "$cu_status" != 2 ] && [ "${cu_offline:-0}" = 0 ] && [ "${cu_check:-0}" = 0 ] && [ "$PROGRESS" != 1 ]; then
         # A refused or failed self-update fails the command, as a failed item does.
-        self_update || [ "$cu_status" != 0 ] || cu_status=1
+        self_update_offer || [ "$cu_status" != 0 ] || cu_status=1
     fi
     return "$cu_status"
 }
@@ -3868,14 +3883,76 @@ self_update_try() {
     return "$su_rc"
 }
 
-# The self-update `update` runs: one line when something moved, the reason
-# when something was refused, nothing otherwise.
+# The self-update `self-update` runs: one line when something moved, the
+# reason when something was refused, nothing otherwise. su_moved says it did.
+# With 1 a script the offer already fetched and verified is taken from the cache.
 self_update() {
-    self_update_try 0
+    su_moved=0
+    self_update_try "${1:-0}"
     case $? in
-        0) su_say "tlstore is now version $su_version." ;;
+        0) su_moved=1; su_say "tlstore is now version $su_version." ;;
         2) err "$SU_NOTE"; return 1 ;;
     esac
+    return 0
+}
+
+# su_reply — the answer to the offer, read from stdin like ask_yn: y (also
+# empty), n, or never; anything else counts as n. Sets su_answer.
+su_reply() {
+    read -r su_answer || su_answer=""
+    case "$su_answer" in
+        ''|y|Y|yes|YES|Yes) su_answer=y ;;
+        never|NEVER|Never) su_answer=never ;;
+        *) su_answer=n ;;
+    esac
+}
+
+# The self-update `update` runs: ask before taking a newer tlstore. Nothing
+# newer, offline, or the user said never: silence. -y takes it unasked; with
+# nobody to ask it says so on one line and leaves it. The script is fetched
+# and verified first, so a bad signature is refused the same way as ever.
+self_update_offer() {
+    SU_NOTE=""
+    su_ready || return 0
+    CANCEL_EXTRA="$su_new $su_sig $su_ui_new"
+    su_fetch_script 0
+    su_rc=$?
+    CANCEL_EXTRA=""
+    case "$su_rc" in
+        0) ;;
+        2) err "$SU_NOTE"; return 1 ;;
+        *) return 0 ;;
+    esac
+    if [ -f "$SU_QUIET" ]; then
+        rm -f "$su_new" "$su_sig"
+        return 0
+    fi
+    if [ "$ASSUME_YES" = 1 ]; then
+        self_update 1
+        return $?
+    fi
+    if ! interactive; then
+        rm -f "$su_new" "$su_sig"
+        su_say "tlstore $su_version is available. Run tlstore self-update to get it."
+        return 0
+    fi
+    if [ "${cu_tsv:-0}" = 1 ]; then
+        printf 'tlstore %s is available; you have %s. Update now? [Y/n/never] ' "$su_version" "$TLSTORE_VERSION" >&2
+    else
+        printf 'tlstore %s is available; you have %s. Update now? [Y/n/never] ' "$su_version" "$TLSTORE_VERSION"
+    fi
+    su_reply
+    case "$su_answer" in
+        y)
+            self_update 1
+            return $?
+            ;;
+        never)
+            su_quiet_on
+            su_say "Okay. tlstore self-update still gets it whenever you want."
+            ;;
+    esac
+    rm -f "$su_new" "$su_sig"
     return 0
 }
 
@@ -3965,7 +4042,9 @@ cmd_self_update() {
     elif [ "$cs_progress" = 1 ]; then
         self_update_progress
     else
-        self_update
+        self_update || return 1
+        # Asking for it by hand is the way back from "never".
+        [ "$su_moved" = 0 ] || su_quiet_off
     fi
 }
 

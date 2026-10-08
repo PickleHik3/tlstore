@@ -625,3 +625,28 @@ The shims themselves are `file` items, one per command, each `mode=755` at
 `~/.local/bin/<command>`, sourced as `binaries:shims/termux-api/<command>@<ref>` — a path in this
 repository, digest-checked from `SHA256SUMS` like a pinned readme. The visible item is a
 `bundle`. See `docs/maintainer/termux-api-shims.md`.
+
+## Revision 11 — update asks before updating tlstore (tlstore 0.9)
+
+Until 0.8 a plain `tlstore update` replaced tlstore itself whenever a newer signed release was out.
+It now asks first. The release is fetched and verified exactly as before (`su_fetch_script`, the
+same cache, a bad signature refused the same way); only the decision changed.
+
+| situation | what `update` does |
+|---|---|
+| nothing newer, or offline | nothing, silently; exit status unchanged |
+| newer, and `$DATA_DIR/self-update-quiet` exists | nothing, silently |
+| newer, with `-y` | updates, no question, as before |
+| newer, not interactive, no `-y` | one line, `tlstore <new> is available. Run tlstore self-update to get it.`, exit status unchanged |
+| newer, interactive | `tlstore <new> is available; you have <old>. Update now? [Y/n/never] ` |
+
+The answer is read from stdin like `ask_yn`. Empty, `y` or `yes` updates (the same completion line
+as before). `n`, `no`, `later` or anything unrecognised does nothing more, and the question comes
+back next run. `never` creates the empty file `self-update-quiet` in `$DATA_DIR` and prints one line
+saying `tlstore self-update` still gets it. Under `--tsv` the question and the lines around it go to
+stderr, stdout stays the machine output.
+
+A plain `tlstore self-update` that actually updates removes the file, so "never" is undone by the
+documented command. `self-update --check` and `self-update --progress` are unchanged and ignore the
+file, which is what keeps tlstore-ui (it runs those two itself) untouched. `TLSTORE_VERSION` moves to
+0.9 so a phone takes the engine with the release that carries the change.
