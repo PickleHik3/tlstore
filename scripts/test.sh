@@ -801,6 +801,12 @@ exec \"$TESTHOME/.local/bin/tl-priv\" run \"$TESTHOME/.local/lib/tlstore/priv/pr
     if grep -q -- "-R --noconfirm demo-build" "$ROOT/pkg.log"; then pass; else fail "the build tool was removed again"; fi
     tl info claude-code
     expect_out "info names the build tools" "Builds with demo-build"
+    tl install claude-code -y
+    expect_out "installing it again says it is already here" "claude-code 1.0.0 is already here"
+    rm "$TESTHOME/.local/lib/claude-code/rpath-first"
+    tl install claude-code -y
+    expect_out "a copy patched before rpath-first is fetched and patched again" "downloading claude-code 1.0.0"
+    expect_file "and is marked" "$TESTHOME/.local/lib/claude-code/rpath-first"
 
     # --- npm-musl with extra musl libraries, and an executable in a subdirectory ---
     tl install agent -y
@@ -1523,6 +1529,7 @@ EOF
     expect_content "and is copied in as ld-musl-x86_64.so.1" "$TESTHOME/.local/lib/claude-code/ld-musl-x86_64.so.1" "$(cat "$FX/loader-x86.bin")"
     expect_no_file "with no aarch64 loader beside it" "$TESTHOME/.local/lib/claude-code/ld-musl-aarch64.so.1"
     if grep -q -- "--set-interpreter $TESTHOME/.local/lib/claude-code/ld-musl-x86_64.so.1" "$ROOT/patchelf.log"; then pass; else fail "patchelf points the executable at ld-musl-x86_64.so.1" "$(cat "$ROOT/patchelf.log")"; fi
+    if [ "$(cut -d' ' -f1 "$ROOT/patchelf.log" | tr '\n' ' ')" = "--set-rpath --set-interpreter " ]; then pass; else fail "the rpath and the interpreter are set in two calls, the rpath first (patchelf 0.19.2 otherwise overlaps LOADs)" "$(cat "$ROOT/patchelf.log")"; fi
     if "$TESTHOME/.local/bin/claude" 2>/dev/null | grep -q 'demo-cli x64'; then pass; else fail "the wrapper runs the x86_64 package"; fi
     ARCH_KNOB=x86_64
     tl remove claude-code musl-loader -y
