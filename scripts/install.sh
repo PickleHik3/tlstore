@@ -109,8 +109,8 @@ fi
 
 ARCH="${TLSTORE_ARCH:-$(uname -m 2>/dev/null || echo unknown)}"
 case "$ARCH" in
-    aarch64|arm64) ;;
-    *) say "This phone's processor is not the one tlstore's prebuilt tools are built for, so a few items will be missing." ;;
+    aarch64|arm64|x86_64|amd64) ;;
+    *) say "tlstore's prebuilt tools are made for ARM64 and x86_64 phones, so a few items will be missing on this one." ;;
 esac
 
 have curl || { err "curl is required to install tlstore — install it first"; exit 1; }

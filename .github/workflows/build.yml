@@ -2,11 +2,13 @@
 # built is ever committed into the repository. Run it from the Actions tab or
 # `gh workflow run build.yml -f tools=dawn,btop` (or `tools=all`). What it does:
 #
-#   plan     scripts/bins-plan.sh turns the tools input into a matrix: one job per tool, and
-#            per launcher edition for the tools whose binary carries an edition's prefix
+#   plan     scripts/bins-plan.sh turns the tools input into a matrix: one job per tool and
+#            processor (aarch64, x86_64), and per launcher edition for the tools whose binary
+#            carries an edition's prefix
 #   build    recipes/cross/build-asset.sh runs the tool's recipe on ubuntu-24.04 (the NDK from
 #            sdkmanager, Go and Rust as the runner has them, the edition's Termux sysroot from
-#            its own .deb repository, cached) and uploads the asset under its catalog name
+#            its own .deb repository, cached) with TL_ARCH set to the job's processor, and
+#            uploads the asset under its catalog name, <tool>-<arch>
 #   publish  one GitHub Release for the whole build, tag bins-YYYY.MM.DD[-N], marked prerelease
 #            so releases/latest keeps meaning the signed store release (release.yml); every
 #            asset is attached under its catalog name, plus a SHA256SUMS of them. Then
@@ -70,8 +72,9 @@ jobs:
             libxinerama-dev libxcursor-dev libxkbcommon-x11-dev libx11-xcb-dev libwayland-dev \
             wayland-protocols libdbus-1-dev libfontconfig-dev
 
+      # kitten needs the NDK only on x86_64, where its link goes through the NDK's clang.
       - name: NDK
-        if: matrix.tool != 'kitten' && matrix.tool != 'musl-runtime'
+        if: matrix.tool != 'musl-runtime' && (matrix.tool != 'kitten' || matrix.arch == 'x86_64')
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" >/dev/null
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
@@ -87,7 +90,7 @@ jobs:
         if: matrix.tool == 'sigye'
         run: |
           rustup update stable
-          rustup target add aarch64-linux-android
+          rustup target add ${{ matrix.arch }}-linux-android
 
       - name: Month
         id: month
@@ -101,9 +104,9 @@ jobs:
         uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: |
-            work/sysroot-${{ matrix.edition }}
-            work/debs-${{ matrix.edition }}
-          key: sysroot-${{ matrix.tool }}-${{ matrix.edition }}-${{ hashFiles('recipes/cross/termux-sysroot.sh') }}-${{ steps.month.outputs.month }}
+            work/sysroot-${{ matrix.edition }}-${{ matrix.arch }}
+            work/debs-${{ matrix.edition }}-${{ matrix.arch }}
+          key: sysroot-${{ matrix.tool }}-${{ matrix.edition }}-${{ matrix.arch }}-${{ hashFiles('recipes/cross/termux-sysroot.sh') }}-${{ steps.month.outputs.month }}
 
       # kitty's dependency bundle and its generated Go sources: a built kitty is what the
       # generator needs, and that is the slow part of the recipe.
@@ -111,19 +114,19 @@ jobs:
         if: matrix.tool == 'kitten'
         uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
-          path: work/build-kitten-com.termux/source
-          key: kitten-${{ hashFiles('recipes/cross/build-kitten.sh') }}
+          path: work/build-kitten-com.termux-${{ matrix.arch }}/source
+          key: kitten-${{ matrix.arch }}-${{ hashFiles('recipes/cross/build-kitten.sh') }}
 
-      - name: Build ${{ matrix.tool }} (${{ matrix.edition }})
+      - name: Build ${{ matrix.tool }} (${{ matrix.edition }}, ${{ matrix.arch }})
         run: |
           mkdir -p work assets
-          TL_WORK="$PWD/work" TL_ASSETS="$PWD/assets" \
+          TL_WORK="$PWD/work" TL_ASSETS="$PWD/assets" TL_ARCH="${{ matrix.arch }}" \
             recipes/cross/build-asset.sh "${{ matrix.tool }}" "${{ matrix.edition }}"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: bins-${{ matrix.tool }}-${{ matrix.edition }}
-          path: assets/*-aarch64
+          name: bins-${{ matrix.tool }}-${{ matrix.edition }}-${{ matrix.arch }}
+          path: assets/*-${{ matrix.arch }}
           if-no-files-found: error
           retention-days: 7
 
@@ -163,11 +166,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="${{ steps.tag.outputs.tag }}"
-          (cd assets && sha256sum -- *-aarch64 > SHA256SUMS)
+          (cd assets && sha256sum -- *-aarch64 *-x86_64 > SHA256SUMS)
           {
             echo "Binaries for the tlstore catalog, built by \`.github/workflows/build.yml\` from \`recipes/cross\` at ${GITHUB_SHA} (tools: ${{ inputs.tools }})."
             echo
-            echo "Not a store release — \`tlstore\` installs these by the digest its signed catalog pins; the signed script, catalog and store UI are on the latest non-prerelease. To reproduce a file, run \`recipes/cross/build-asset.sh <tool> [edition]\` at that commit."
+            echo "Not a store release — \`tlstore\` installs these by the digest its signed catalog pins; the signed script, catalog and store UI are on the latest non-prerelease. To reproduce a file, run \`TL_ARCH=<arch> recipes/cross/build-asset.sh <tool> [edition]\` at that commit."
             echo
             echo '```'
             cat assets/SHA256SUMS
@@ -175,7 +178,7 @@ jobs:
           } > notes.md
           gh release create "$tag" --prerelease --target "$GITHUB_SHA" \
             --title "Binaries $tag" --notes-file notes.md \
-            assets/*-aarch64 assets/SHA256SUMS
+            assets/*-aarch64 assets/*-x86_64 assets/SHA256SUMS
 
       - name: Record in SHA256SUMS and items.tsv, push
         run: |

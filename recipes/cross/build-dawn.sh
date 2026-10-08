@@ -64,7 +64,7 @@ PKG_CONFIG_SYSROOT_DIR="$TL_SYSROOT" \
 PKG_CONFIG_LIBDIR="$PREFIX_IN_SYSROOT/lib/pkgconfig" \
 cmake -S "$source_dir" -B "$TL_BUILD_DIR/build" \
     -DCMAKE_TOOLCHAIN_FILE="$TL_NDK/build/cmake/android.toolchain.cmake" \
-    -DANDROID_ABI=arm64-v8a \
+    -DANDROID_ABI="${TL_ANDROID_ABI:-arm64-v8a}" \
     -DANDROID_PLATFORM="android-$TL_ANDROID_API" \
     -DCMAKE_BUILD_TYPE=Release \
     -DDAWN_VERSION="$DAWN_VERSION_STRING"     -DUSE_LIBAI=ON \

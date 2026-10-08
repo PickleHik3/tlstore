@@ -33,14 +33,15 @@ in `setup`/`featured`.
 
 1. **Pin the payload.** A `binary`/`file` source is `launcher:<path>@<tag or commit>` (a
    launcher-owned template, fetched from `PickleHik3/termux-launcher`), `binaries:<asset>@<tag>`
-   (a release asset of this repository, `<asset>-aarch64` on the `bins-…` prerelease `<tag>`),
+   (a release asset of this repository, `<asset>-aarch64` or `<asset>-x86_64` on the `bins-…`
+   prerelease `<tag>`, whichever the phone's processor is),
    `binaries:<path/with/slash>@<tag>` (a file in this repository at that tag) or an immutable
    URL; `npm-musl` and `npm-android` are `npm:<package>#<exe>` (npm-android is for a package that ships
    an Android executable, which runs as it is: no loader, no patchelf); `pkg` names Termux packages. Never a branch. For a
    new binary, add its recipe to `recipes/cross` and a line for it in `scripts/bins-plan.sh` and
    `recipes/cross/build-asset.sh`, run `build.yml` for it ("Rebuilding a binary" below), and
    point the row at the `bins-…` tag it printed; its digest is then the `<asset>-aarch64` line of
-   `SHA256SUMS` on `main`.
+   `SHA256SUMS` on `main`, and its x86_64 digest the `<asset>-x86_64` line ("x86_64" below).
 2. **Edit `items.tsv`.** The header comment defines every column and its rule (length limits,
    allowed values). Revision 6 reads: `category`, `upstream`, `setup`, `standfirst`, `author`,
    `licence`, `size`, `picture`, `featured`, `readme-skip`, `readme` (the pinned-content addendum).
@@ -174,15 +175,18 @@ them as GitHub Release assets:
 gh workflow run build.yml -f tools=dawn,btop     # or tools=all
 ```
 
-For each tool (and for each launcher edition, for `fastfetch`, `dawn` and `musl-loader`, whose
-binary carries the edition's prefix) a job runs `recipes/cross/build-asset.sh <tool> [edition]`
-— the NDK from `sdkmanager`, the edition's Termux sysroot from its own `.deb` repository (cached
-by month), the recipe as it is — and uploads `<tool>-aarch64` or `<tool>-<package>-aarch64`. A
-last job creates one release for the run, tagged `bins-YYYY.MM.DD` (`-2`, `-3`… on the same day),
-marked prerelease, with every asset under its catalog name plus a `SHA256SUMS` of them, and then
-commits to `main` as `github-actions[bot]`, through `scripts/bins-record.sh`:
+For each tool and each processor (`aarch64`, `x86_64`), and for each launcher edition for
+`fastfetch`, `dawn` and `musl-loader`, whose binary carries the edition's prefix, a job runs
+`TL_ARCH=<arch> recipes/cross/build-asset.sh <tool> [edition]` — the NDK from `sdkmanager`, the
+edition's Termux sysroot from its own `.deb` repository (cached by month), the recipe as it is —
+and uploads `<tool>-<arch>` or `<tool>-<package>-<arch>`. The io.vaj.tl edition is built for
+aarch64 only: its APK, bootstrap and package repository are. A last job creates one release for
+the run, tagged `bins-YYYY.MM.DD` (`-2`, `-3`… on the same day), marked prerelease, with every
+asset under its catalog name plus a `SHA256SUMS` of them, and then commits to `main` as
+`github-actions[bot]`, through `scripts/bins-record.sh`:
 
-- the `<asset>-aarch64` lines of `SHA256SUMS` replaced (or added), every other line untouched;
+- the `<asset>-aarch64` and `<asset>-x86_64` lines of `SHA256SUMS` replaced (or added), every
+  other line untouched;
 - every `items.tsv` row with a bare `binaries:<asset>@<old tag>` source for a rebuilt asset moved
   to the new tag. Rows for tools the run did not build keep their tag and digest — tags differ
   per tool, and that is fine.
@@ -205,7 +209,29 @@ assets exist: run `scripts/bins-record.sh <bins-tag> <dir with the assets>` loca
 To add a tool: write its `recipes/cross/build-<tool>.sh`, add it to the table in
 `scripts/bins-plan.sh` (edition-agnostic, or one build per edition) and to the `case` in
 `recipes/cross/build-asset.sh`, and run `build.yml` for it. `scripts/test.sh` checks both
-scripts' behaviour on fixtures; the recipe itself is exercised only by the workflow.
+scripts' behaviour on fixtures; the recipe itself is exercised only by the workflow. The recipe
+reads the processor from what `build-asset.sh` derives (`TL_ARCH`, `TL_TRIPLE`, `TL_ANDROID_ABI`,
+`TL_GOARCH`, `TL_TERMUX_ARCH`, `TL_ALPINE_ARCH`), never from a literal, so it builds for both.
+
+## x86_64
+
+A row's own columns describe its aarch64 build. On an x86_64 device tlstore reads three options
+in their place (`docs/SPEC.md`, Revision 12):
+
+- **A binary** is offered on x86_64 once its x86_64 build is published. Nothing is written by hand:
+  `build.yml` builds `<asset>-x86_64` beside `<asset>-aarch64` under the same `bins-…` tag,
+  `bins-record.sh` records its `SHA256SUMS` line, and `build-catalog.sh` appends
+  `x86_64:digest=<sha256>` to the row. Without that line the row gets no `x86_64:digest` and stays
+  hidden on x86_64, so the catalog is right before and after the build. Never write
+  `x86_64:digest` yourself; `build-catalog.sh` refuses it. A binary whose target names the
+  processor also gets `x86_64:target=` (the musl loader: `ld-musl-x86_64.so.1`).
+- **An npm-musl or npm-android item** needs `x86_64:source=npm:<x64 package>#<exe>` by hand, after
+  checking the package exists for x64 (`npm view <package> cpu`) and that the executable sits at
+  the same path inside it. claude-code and opencode have one. An npm-musl item is offered only
+  while the musl loader (and its `musl-libs`) are there for the processor too.
+- **codex** has none: `@mmmbuto/codex-cli-termux` is published for `cpu: arm64` only, so it stays
+  hidden on x86_64 until an x64 build of it exists.
+- **io.vaj.tl rows** are aarch64 only, like the edition itself.
 
 ## Pinning a readme or a hero picture
 
@@ -228,7 +254,7 @@ does not render well as-is — heavy badges, a build matrix, prose written for a
 4. **Point `items.tsv` at them.** `readme` (and, for a hero picture pinned the same way, `picture`
    or `demo`) takes `binaries:<path>@<tag>` — a path with a slash resolves to that exact file in
    the repository at the tag, where a bare asset name resolves to the release asset
-   `<asset>-aarch64` on a `bins-…` prerelease. Leave
+   `<asset>-<arch>` on a `bins-…` prerelease. Leave
    `readme-digest`/`demo-digest` alone: `build-catalog.sh` computes them from the same
    `SHA256SUMS`, by that repo-relative path, the way it already computes `picture-digest`.
 5. **Build, test, release** as above. A pinned readme that fails its digest check on a phone is a

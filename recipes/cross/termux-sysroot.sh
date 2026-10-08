@@ -1,5 +1,6 @@
 #!/bin/bash
-# termux-sysroot.sh — assemble a Termux aarch64 sysroot from published .deb packages.
+# termux-sysroot.sh — assemble a Termux sysroot from published .deb packages, for aarch64 or, with
+# TL_TERMUX_ARCH=x86_64, x86_64.
 #
 # The cross recipes need Termux's own headers and shared libraries, not the NDK's. The Termux
 # package server publishes both inside ordinary Debian archives, so a sysroot is just a set of

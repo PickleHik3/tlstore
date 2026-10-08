@@ -1,5 +1,6 @@
 #!/bin/bash
-# build-btop.sh — cross-compile btop for Android aarch64 from a Linux host, fully static.
+# build-btop.sh — cross-compile btop for Android (aarch64, or x86_64 with TL_ARCH=x86_64) from a
+# Linux host, fully static.
 #
 # btop is a privileged item: Termux:Launcher stages the binary under /data/local/tmp/tl and starts
 # it as the Shizuku shell uid (2000), outside any Termux prefix, with PATH=/system/bin and nothing
@@ -46,7 +47,9 @@ TL_BUILD_DIR=${TL_BUILD_DIR:-"$PWD/build-btop"}
 TL_ANDROID_API=${TL_ANDROID_API:-29}
 
 NDK_BIN="$TL_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
-CXX="$NDK_BIN/aarch64-linux-android$TL_ANDROID_API-clang++"
+TL_ARCH=${TL_ARCH:-aarch64}
+TL_TRIPLE=${TL_TRIPLE:-$TL_ARCH-linux-android}
+CXX="$NDK_BIN/$TL_TRIPLE$TL_ANDROID_API-clang++"
 [ -x "$CXX" ] || { echo "error: NDK compiler not found at $CXX (set TL_NDK)" >&2; exit 1; }
 for patch in "${PATCHES[@]}"; do
     [ -f "$patch" ] || { echo "error: patch not found at $patch" >&2; exit 1; }
@@ -68,12 +71,16 @@ if [ ! -d "$source_dir/.git" ]; then
 fi
 
 # btop's own Makefile does the right thing once it is told what it is building for: PLATFORM=Linux
-# picks the Linux collector, ARCH=aarch64 keeps GPU support off (it is x86_64-only there), and
-# STATIC=true adds -static and -DSTATIC_BUILD. The Makefile compile-tests each hardening flag before
-# using it, so -fcf-protection (x86 only) drops out on its own. CXX is the NDK's clang++ wrapper for
+# picks the Linux collector, ARCH is the processor, and STATIC=true adds -static and -DSTATIC_BUILD.
+# GPU support, which upstream enables only for a dynamic linux x86_64 build (it loads the desktop
+# GPU vendors' libraries at run time, which a static binary cannot and a phone does not have), is
+# off on both processors; GPU_SUPPORT=false says so rather than leaning on STATIC=true for it.
+# The Makefile compile-tests each
+# hardening flag before using it, so -fcf-protection (x86 only) is used on x86_64 and drops out on
+# aarch64 on its own. CXX is the NDK's clang++ wrapper for
 # the API level, which is what makes -static pick Bionic's libc.a and libc++_static.
 echo "Building..."
-make -C "$source_dir" QUIET=true STATIC=true PLATFORM=Linux ARCH=aarch64 \
+make -C "$source_dir" QUIET=true STATIC=true PLATFORM=Linux ARCH="$TL_ARCH" GPU_SUPPORT=false \
     CXX="$CXX" -j"${TL_BUILD_JOBS:-$(nproc)}"
 
 "$NDK_BIN/llvm-strip" -o "$TL_OUT/btop" "$source_dir/bin/btop"

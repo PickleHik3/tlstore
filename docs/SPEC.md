@@ -47,16 +47,17 @@ Columns:
 | `kind` | `pkg` \| `binary` \| `file` \| `file-once` \| `script` \| `npm-musl` \| `npm-android` \| `bundle` |
 | `version` | `-` for pkg/bundle; upstream version for binary/file/script; `latest` or pinned for npm-musl |
 | `prefixes` | `*` or comma list of app packages (`com.termux`, `io.vaj.tl`, `com.termux.launcher.nix`) |
-| `source` | `pkg`: space-separated package names. `binary`/`file`/`file-once`/`script`: a URL, or `binaries:<asset>@<tag>` (→ `https://github.com/PickleHik3/tlstore/releases/download/<tag>/<asset>-aarch64`, a release asset; with a slash in the asset, `binaries:<path>@<tag>` → `https://raw.githubusercontent.com/PickleHik3/tlstore/<tag>/<path>`, a file in the repository) or `launcher:<path>@<tag>` (→ `https://raw.githubusercontent.com/PickleHik3/termux-launcher/<tag>/<path>`). `npm-musl`: `npm:<package>#<executable inside package/>`. `bundle`: `-` |
+| `source` | `pkg`: space-separated package names. `binary`/`file`/`file-once`/`script`: a URL, or `binaries:<asset>@<tag>` (→ `https://github.com/PickleHik3/tlstore/releases/download/<tag>/<asset>-<arch>`, a release asset, `<arch>` being `aarch64` or `x86_64` (Revision 12); with a slash in the asset, `binaries:<path>@<tag>` → `https://raw.githubusercontent.com/PickleHik3/tlstore/<tag>/<path>`, a file in the repository) or `launcher:<path>@<tag>` (→ `https://raw.githubusercontent.com/PickleHik3/termux-launcher/<tag>/<path>`). `npm-musl`: `npm:<package>#<executable inside package/>`. `bundle`: `-` |
 | `digest` | sha256 hex of the downloaded file; `-` for pkg, bundle, npm-musl (npm's registry sha512 is the check) |
 | `target` | install path with `~`; `-` = default (`~/.local/bin/<name>` for binary, `~/.local/lib/tlstore/priv/<name>` for a binary with `priv=shizuku`, `~/.local/lib/<name>` for npm-musl, none for others) |
 | `requires` | comma list of catalog names installed first; bundle members live here |
-| `options` | `;`-separated `key=value`: `env=K=V` (wrapper exports, repeatable with `,`), `tz=1` (wrapper exports TZ from `persist.sys.timezone`), `mode=755`, `post=<catalog script name>`, `priv=shizuku` (binary only; Revision 5 below) |
+| `options` | `;`-separated `key=value`: `env=K=V` (wrapper exports, repeatable with `,`), `tz=1` (wrapper exports TZ from `persist.sys.timezone`), `mode=755`, `post=<catalog script name>`, `priv=shizuku` (binary only; Revision 5 below), `x86_64:source=`, `x86_64:digest=`, `x86_64:target=` (the x86_64 build, standing in for `source`, `digest` and `target` on an x86_64 device; Revision 12 below) |
 | `summary` | one plain sentence, product copy |
 
 Rules: one row per (name, prefix set) — per-edition builds are separate rows with their own
 digest (fastfetch, musl-loader). tlstore uses the first row whose `prefixes` matches. Items whose
-kind needs aarch64 (`binary`, `npm-musl`) are hidden on other CPUs.
+kind needs a processor of its own (`binary`, `npm-musl`, `npm-android`) are shown on aarch64, on
+x86_64 only with that build named in their `x86_64:` options (Revision 12), and hidden on any other CPU.
 
 Generated, never hand-edited: `scripts/tlstore/build-catalog.sh` reads `docs/en/examples/*`
 (digests), the checked-out binaries repo (`PickleHik3/tlstore`) `SHA256SUMS` (path argument), the item
@@ -650,3 +651,49 @@ A plain `tlstore self-update` that actually updates removes the file, so "never"
 documented command. `self-update --check` and `self-update --progress` are unchanged and ignore the
 file, which is what keeps tlstore-ui (it runs those two itself) untouched. `TLSTORE_VERSION` moves to
 0.9 so a phone takes the engine with the release that carries the change.
+
+## Revision 12 — x86_64 (tlstore 0.10)
+
+Termux Launcher also runs on x86_64 tablets, where every `binary`, `npm-musl` and `npm-android` row
+used to be hidden: the store offered two items. The catalog now carries an x86_64 build beside the
+aarch64 one, in the same row, and the engine picks the one for the processor it runs on.
+
+| addition | meaning |
+|---|---|
+| `x86_64:source=<source>` | an option: the x86_64 build's source, in place of column 5. For npm-musl and npm-android it is the x86_64 npm package (`npm:@anthropic-ai/claude-code-linux-x64-musl#claude`); a binary needs none, since its bare `binaries:<asset>@<tag>` already resolves per processor |
+| `x86_64:digest=<sha256>` | an option, in place of column 6. Never hand-written: `build-catalog.sh` appends it to a binary row when `SHA256SUMS` has `<asset>-x86_64` (or the row names an `x86_64:source` of its own), and leaves it off otherwise |
+| `x86_64:target=<path>` | an option, in place of column 7 (the musl loader lands as `ld-musl-x86_64.so.1`) |
+
+There is no new column: the row's own `source`, `digest` and `target` stay the aarch64 build, so
+an engine older than 0.10 reads every row exactly as before (an unknown option is skipped) and
+still hides these kinds off aarch64.
+
+Engine:
+
+- `ARCH` is normalised to `aarch64` (`aarch64`, `arm64`) or `x86_64` (`x86_64`, `amd64`); anything
+  else hides these kinds as before.
+- `rows()` decides and rewrites in one place. On aarch64 nothing changes. On x86_64 a binary row is
+  here only with `x86_64:digest`, an npm-musl or npm-android row only with `x86_64:source`, and
+  every row comes out with its `x86_64:` options already in columns 5–7, so `load_item`, the
+  musl loader and library lookups, `snapshot`, `prefetch`, `doctor` and `remove` all see the x86_64
+  build without knowing about it.
+- An npm-musl row is here only while the musl loader and every `musl-libs` item it names are here
+  too (the catalog is read twice for that). On aarch64 they always are; on x86_64 the npm package
+  exists before our own loader build does, and an item that cannot start is not offered.
+- `source_url` and the two awk `url_of` copies resolve a bare `binaries:<asset>@<tag>` to
+  `$BINARIES_RELEASES/<tag>/<asset>-$ARCH`; the musl loader is `ld-musl-$ARCH.so.1`, both where it
+  is copied and in patchelf's interpreter.
+- The snapshot key carries `ARCH` itself instead of `ARCH_OK`.
+
+Build: `recipes/cross/build-asset.sh` takes `TL_ARCH` (`aarch64` default, or `x86_64`) and derives
+every name from it — the NDK triple, `ANDROID_ABI`, compiler-rt, `GOARCH`, the Rust target, the
+Termux and Alpine package architecture, the asset suffix. Three things differ on x86_64 beyond
+names: kitten is linked by the NDK's clang (Go refuses to link android/amd64 itself); the musl
+loader is compiled for `x86_64-linux-musl` against the host's `libgcc.a` (Android's x86_64 ABI has
+a 128-bit long double, musl's x86_64 code an 80-bit one); and btop keeps GPU support off as on
+aarch64. `scripts/bins-plan.sh` builds every tool for both processors — except the io.vaj.tl
+edition's, which is aarch64 only — so one run puts both builds under one `bins-…` tag, and
+`scripts/bins-record.sh` records `<asset>-aarch64` and `<asset>-x86_64` lines alike.
+
+Not on x86_64: `codex` (its npm package is built for arm64 only) and every io.vaj.tl row.
+`TLSTORE_VERSION` moves to 0.10 so phones take the engine with the release that carries the rows.

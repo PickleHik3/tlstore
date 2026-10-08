@@ -4,12 +4,18 @@
 #
 #   scripts/bins-record.sh <tag> <assets dir>
 #
-# <assets dir> holds the files a build published, under their asset names (<tool>-aarch64,
-# <tool>-<package>-aarch64). For each one:
+# <assets dir> holds the files a build published, under their asset names (<tool>-<arch>,
+# <tool>-<package>-<arch>, <arch> one of aarch64 and x86_64). For each one:
 #   - its line in SHA256SUMS is replaced (or added), every other line left as it is;
 #   - every items.tsv row whose source is the bare form `binaries:<asset>@<old tag>` for it
 #     moves to `binaries:<asset>@<tag>`. Rows for assets the build did not produce keep their
 #     tag and digest.
+# A row names one tag for every processor, so an asset's builds move together. build.yml always
+# builds all of them; should a directory hold an asset's x86_64 build without its aarch64 one,
+# nothing is recorded, and an x86_64 line left behind by an aarch64-only rebuild is dropped (with
+# a note on stderr), since that file is not under the new tag: the item is then simply not
+# offered on x86_64 until a build that includes it. build-catalog.sh turns the x86_64 lines into
+# each row's x86_64:digest.
 # Phones decide whether an installed item has an update by its version alone (engine/tlstore,
 # update_items and snapshot_rows compare the catalog's version with the installed one), so a
 # rebuilt binary at an unchanged version would never be offered. A row whose digest changed and
@@ -40,14 +46,37 @@ while read -r digest name; do
     old_digest["$name"]="$digest"
 done < "$sums"
 
+# The processors an asset is built for; the first is the one every row's own columns describe.
+ARCHS='aarch64 x86_64'
+MAIN_ARCH=aarch64
+
 count=0
-for f in "$dir"/*-aarch64; do
-    [ -f "$f" ] || continue
-    name="$(basename "$f")"
-    new_digest["$name"]="$(sha256sum "$f" | cut -d' ' -f1)"
-    count=$((count + 1))
+declare -A built_base=()
+for arch in $ARCHS; do
+    for f in "$dir"/*-"$arch"; do
+        [ -f "$f" ] || continue
+        name="$(basename "$f")"
+        new_digest["$name"]="$(sha256sum "$f" | cut -d' ' -f1)"
+        built_base["${name%-"$arch"}"]=1
+        count=$((count + 1))
+    done
 done
-[ "$count" -gt 0 ] || { echo "bins-record: nothing named *-aarch64 in $dir" >&2; exit 1; }
+[ "$count" -gt 0 ] || { echo "bins-record: nothing named *-aarch64 or *-x86_64 in $dir" >&2; exit 1; }
+
+# Every processor's build of an asset lives under the row's one tag, so they move together.
+declare -A dropped=()
+for base in "${!built_base[@]}"; do
+    if [ -z "${new_digest["$base-$MAIN_ARCH"]:-}" ]; then
+        echo "bins-record: $base was built without its $MAIN_ARCH build; build both and record them together" >&2
+        exit 1
+    fi
+    for arch in $ARCHS; do
+        [ -z "${new_digest["$base-$arch"]:-}" ] || continue
+        [ -n "${old_digest["$base-$arch"]:-}" ] || continue
+        dropped["$base-$arch"]=1
+        echo "bins-record: $base-$arch was not part of this build and is not under the new tag; its SHA256SUMS line is dropped, so $base is not offered on $arch until it is built again" >&2
+    done
+done
 
 rebuilt=""
 changed=""
@@ -73,6 +102,8 @@ while IFS= read -r line || [ -n "$line" ]; do
     if [ -n "$name" ] && [ -n "${new_digest[$name]:-}" ]; then
         printf '%s  %s\n' "${new_digest[$name]}" "$name" >> "$tmp"
         written["$name"]=1
+    elif [ -n "$name" ] && [ -n "${dropped[$name]:-}" ]; then
+        :
     else
         printf '%s\n' "$line" >> "$tmp"
     fi
@@ -84,7 +115,7 @@ mv "$tmp" "$sums"
 
 # --- items.tsv: move the rows to the tag, bump a +…​.N version whose digest moved ------------
 tmp="$(mktemp)"
-awk -F '\t' -v OFS='\t' -v tag="$tag" -v rebuilt=" $rebuilt " -v changed=" $changed " '
+awk -F '\t' -v OFS='\t' -v tag="$tag" -v rebuilt=" $rebuilt " -v changed=" $changed " -v archs="$ARCHS" '
     /^#/ || NF < 5 { print; next }
     {
         src = $5
@@ -92,12 +123,18 @@ awk -F '\t' -v OFS='\t' -v tag="$tag" -v rebuilt=" $rebuilt " -v changed=" $chan
         rest = substr(src, 10)
         asset = rest; sub(/@[^@]*$/, "", asset)
         if (index(asset, "/") > 0) { print; next }
-        key = asset "-aarch64"
-        if (index(rebuilt, " " key " ") == 0) { print; next }
+        n = split(archs, arch, " ")
+        moved = 0; differs = 0
+        for (i = 1; i <= n; i++) {
+            key = asset "-" arch[i]
+            if (index(rebuilt, " " key " ") > 0) moved = 1
+            if (index(changed, " " key " ") > 0) differs = 1
+        }
+        if (!moved) { print; next }
         oldtag = rest; sub(/^.*@/, "", oldtag)
         $5 = "binaries:" asset "@" tag
         note = $1 " (" $4 "): " oldtag " -> " tag
-        if (index(changed, " " key " ") > 0) {
+        if (differs) {
             if (match($3, /\+.*\.[0-9]+$/)) {
                 n = $3; sub(/^.*\./, "", n)
                 head = substr($3, 1, length($3) - length(n))

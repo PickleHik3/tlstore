@@ -1,10 +1,11 @@
 #!/bin/bash
-# build-sigye.sh — cross-compile the patched Sigye clock for Termux aarch64 from a Linux host.
+# build-sigye.sh — cross-compile the patched Sigye clock for Termux (aarch64, or x86_64 with
+# TL_ARCH=x86_64) from a Linux host.
 #
 # Host-side counterpart of recipes/termux/sigye/build.sh, from the same pinned commit and patch.
 # Sigye links against nothing outside Bionic, so no Termux sysroot is needed here.
 #
-# Requires: rustup with the aarch64-linux-android target, the Android NDK, and git.
+# Requires: rustup with the <arch>-linux-android target, the Android NDK, and git.
 set -euo pipefail
 
 SIGYE_URL="https://github.com/am2rican5/sigye.git"
@@ -16,13 +17,18 @@ TL_NDK=${TL_NDK:-"$HOME/android-sdk/ndk/27.2.12479018"}
 TL_OUT=${TL_OUT:-"$PWD/out"}
 TL_BUILD_DIR=${TL_BUILD_DIR:-"$PWD/build-sigye"}
 TL_ANDROID_API=${TL_ANDROID_API:-26}
+TL_ARCH=${TL_ARCH:-aarch64}
+TL_TRIPLE=${TL_TRIPLE:-$TL_ARCH-linux-android}
+# The names cargo and the cc crate read their per-target settings under.
+triple_env=${TL_TRIPLE//-/_}
+triple_env_upper=${triple_env^^}
 
 NDK_BIN="$TL_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
 [ -d "$NDK_BIN" ] || { echo "error: NDK not found at $TL_NDK (set TL_NDK)" >&2; exit 1; }
 
 # Sigye v0.6.0 declares rust-version 1.97.1; an older toolchain fails during dependency resolution.
-rustup target list --installed 2>/dev/null | grep -qx aarch64-linux-android || {
-    echo "error: rust target missing — run: rustup target add aarch64-linux-android" >&2
+rustup target list --installed 2>/dev/null | grep -qx "$TL_TRIPLE" || {
+    echo "error: rust target missing — run: rustup target add $TL_TRIPLE" >&2
     exit 1
 }
 
@@ -42,14 +48,14 @@ fi
 echo "Building..."
 (
     cd "$source_dir"
-    CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$NDK_BIN/aarch64-linux-android$TL_ANDROID_API-clang" \
-    CC_aarch64_linux_android="$NDK_BIN/aarch64-linux-android$TL_ANDROID_API-clang" \
-    AR_aarch64_linux_android="$NDK_BIN/llvm-ar" \
-    cargo build --release --target aarch64-linux-android
+    export "CARGO_TARGET_${triple_env_upper}_LINKER=$NDK_BIN/$TL_TRIPLE$TL_ANDROID_API-clang"
+    export "CC_${triple_env}=$NDK_BIN/$TL_TRIPLE$TL_ANDROID_API-clang"
+    export "AR_${triple_env}=$NDK_BIN/llvm-ar"
+    cargo build --release --target "$TL_TRIPLE"
 )
 
 "$NDK_BIN/llvm-strip" -o "$TL_OUT/sigye" \
-    "$source_dir/target/aarch64-linux-android/release/sigye"
+    "$source_dir/target/$TL_TRIPLE/release/sigye"
 
 echo
 echo "Built: $TL_OUT/sigye"
