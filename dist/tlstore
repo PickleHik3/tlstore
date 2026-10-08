@@ -1384,7 +1384,10 @@ do_npm_musl() {
     esac
     np_expect=$(printf '%s' "${np_integrity#sha512-}" | base64 -d | od -An -v -tx1 | tr -d ' \n')
 
-    if [ -x "$np_dir/$np_exe" ] && [ "$(cat "$np_dir/version" 2>/dev/null)" = "$np_version" ]; then
+    # An npm-musl copy patched before the rpath-first marker may be one that
+    # segfaults (see the patchelf calls below), so it is not counted as here.
+    if [ -x "$np_dir/$np_exe" ] && [ "$(cat "$np_dir/version" 2>/dev/null)" = "$np_version" ] &&
+        { [ "$ii_kind" != npm-musl ] || [ -e "$np_dir/rpath-first" ]; }; then
         say "  $ii_name $np_version is already here"
     else
         say "  downloading $ii_name $np_version"
@@ -1466,12 +1469,18 @@ do_npm_musl() {
                 chmod 644 "$np_lib_dest"
             done
 
-            if ! "$PATCHELF" --set-interpreter "$np_dir/ld-musl-$ARCH.so.1" --set-rpath "$np_dir" "$np_dir.new/$np_exe"; then
+            # Two calls, the rpath first. Termux's patchelf 0.19.2, given both
+            # at once or the interpreter first, grows the headers into a new
+            # RW LOAD that overlaps the next, read-only one; .dynamic lands in
+            # the read-only mapping and the loader segfaults writing to it.
+            if ! "$PATCHELF" --set-rpath "$np_dir" "$np_dir.new/$np_exe" ||
+                ! "$PATCHELF" --set-interpreter "$np_dir/ld-musl-$ARCH.so.1" "$np_dir.new/$np_exe"; then
                 rm -rf "$np_dir.new"
                 CANCEL_EXTRA=""
                 err "could not prepare $ii_name for this device"
                 return 1
             fi
+            : > "$np_dir.new/rpath-first"
         fi
         printf '%s\n' "$np_version" > "$np_dir.new/version"
         CANCEL_EXTRA=""
