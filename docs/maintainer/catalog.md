@@ -97,6 +97,12 @@ rows, `mode=755`, sourced as `binaries:<path>@<ref>` with their digests in `SHA2
 visible `bundle`. `termux-api-shims` is the model, including `conflicts=<pkg>` for an item that
 owns commands a Termux package owns: `docs/maintainer/termux-api-shims.md`.
 
+A bundle that is a shell and its setup carries `login-shell=<shell>` (`fish-shell` is the model):
+once its members are in, the engine runs `chsh -s <shell>`, so new sessions start in it, and says
+so; a missing shell or `chsh` is reported with the command to run, and the install still stands.
+`remove` takes the `~/.termux/shell` link away again, but only while it still points at that
+shell. The engine tests cover both with a fake `chsh`.
+
 ## Cutting a release
 
 `dist/` is never hand-edited. `scripts/release.sh <tag>` builds it from the sources

@@ -144,6 +144,10 @@ write_catalog() {
         printf 'shimset\tbundle\t-\t*\t-\t-\t-\tshimpart\tconflicts=termux-api\tA bundle that owns commands a package owns.\t%s\n' "$R5_NONE"
         printf 'shimpart\tfile\t1\t*\tfile://%s/hello.conf\t%s\t~/.config/shimpart.conf\t-\thidden=1;conflicts=termux-api\tA part that owns a command a package owns.\t%s\n' "$FX" "$(sha "$FX/hello.conf")" "$R5_NONE"
         printf 'plug\tfisher\t-\t*\tdemo/one demo/two\t-\t-\t-\t-\tPlugins for the shell.\t%s\n' "$R5_NONE"
+        # login-shell=: a bundle that makes its shell the one new sessions start in, the way
+        # fish-shell does, and takes that back on remove.
+        printf 'shellkit\tbundle\t-\t*\t-\t-\t-\tsecret\tlogin-shell=fish\tA shell and its setup.\t%s\n' "$R5_NONE"
+        printf 'phantomshell\tbundle\t-\t*\t-\t-\t-\tsecret\tlogin-shell=nosuchsh\tA shell that is not there.\t%s\n' "$R5_NONE"
         printf 'secret\tfile\t1\t*\tfile://%s/mine.conf\t%s\t~/.config/secret.conf\t-\thidden=1\tA part of something else.\t%s\n' "$FX" "$(sha "$FX/mine.conf")" "$R5_NONE"
         printf 'launcheronly\tbinary\t1\t*\tfile://%s/twin.bin\t%s\t~/.local/bin/launcheronly\t-\thost=launcher\tOnly where the launcher runs it.\t%s\n' "$FX" "$(sha "$FX/twin.bin")" "$R5_NONE"
         printf 'termuxonly\tbinary\t1\t*\tfile://%s/other.bin\t%s\t~/.local/bin/termuxonly\t-\thost=termux\tOnly in the plain app.\t%s\n' "$FX" "$(sha "$FX/other.bin")" "$R5_NONE"
@@ -301,6 +305,17 @@ echo "\$@" >> "$ROOT/fish.log"
 exit 0
 EOF
     chmod +x "$FIXBIN/fish"
+
+    # A fake chsh, the way Termux's works: it links ~/.termux/shell at the
+    # shell it was given, and every call is logged so a test can see the ask.
+    cat > "$FIXBIN/chsh" <<EOF
+#!/bin/sh
+echo "\$@" >> "$ROOT/chsh.log"
+mkdir -p "\$HOME/.termux"
+ln -sf "$FIXBIN/\$2" "\$HOME/.termux/shell"
+exit 0
+EOF
+    chmod +x "$FIXBIN/chsh"
 
     # curl itself, counted: every call is written to curl.log before the real
     # curl runs it, so a test can prove a prefetch fetched nothing.
@@ -783,6 +798,28 @@ exec \"$TESTHOME/.local/bin/tl-priv\" run \"$TESTHOME/.local/lib/tlstore/priv/pr
     tl remove plug -y
     expect_status "remove fish plugins" 0
     if grep -q -- "-c fisher remove demo/one demo/two" "$ROOT/fish.log" 2>/dev/null; then pass; else fail "fisher was asked to remove the plugins"; fi
+
+    # --- a bundle that becomes the login shell (login-shell=) ---
+    tl install shellkit -y
+    expect_status "install a login-shell bundle" 0
+    if grep -q -- "-s fish" "$ROOT/chsh.log" 2>/dev/null; then pass; else fail "chsh was asked for fish"; fi
+    expect_out "the install says new sessions start in fish" "fish is now your login shell"
+    if [ "$(readlink "$TESTHOME/.termux/shell")" = "$FIXBIN/fish" ]; then pass; else fail "~/.termux/shell points at fish"; fi
+    tl remove shellkit -y
+    expect_status "remove a login-shell bundle" 0
+    if [ ! -e "$TESTHOME/.termux/shell" ] && [ ! -L "$TESTHOME/.termux/shell" ]; then pass; else fail "remove took the ~/.termux/shell link away"; fi
+    expect_out "remove says sessions are back to the default shell" "default shell again"
+    # A link the person pointed elsewhere themselves is not touched by remove.
+    tl install shellkit -y
+    ln -sf "$FIXBIN/pacman" "$TESTHOME/.termux/shell"
+    tl remove shellkit -y
+    if [ "$(readlink "$TESTHOME/.termux/shell")" = "$FIXBIN/pacman" ]; then pass; else fail "a link to another shell is left alone"; fi
+    rm -f "$TESTHOME/.termux/shell"
+    # A shell that is not installed is said, and the bundle still lands.
+    tl install phantomshell -y
+    expect_status "a missing shell does not fail the bundle" 0
+    expect_out "a missing shell is named" "nosuchsh is not installed"
+    tl remove phantomshell -y
 
     # --- npm-musl ---
     tl install claude-code -y

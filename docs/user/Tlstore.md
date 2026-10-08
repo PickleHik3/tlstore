@@ -11,7 +11,10 @@ tlstore install fish-shell
 ```
 
 installs the whole fish setup in one go: fish, a prompt that follows your wallpaper colors, a nicer
-`ls`, faster directory jumping, and a couple of plugins. From there, install everything else with:
+`ls`, faster directory jumping, and a couple of plugins, and makes fish the shell new sessions start
+in (`tlstore remove fish-shell` puts the default shell back). The prompt follows your wallpaper once
+Oh My Posh is ticked under Settings → Appearance → Look → Tools that follow the terminal colours.
+From there, install everything else with:
 
 ```sh
 tlstore install
