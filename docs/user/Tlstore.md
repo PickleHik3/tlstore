@@ -68,7 +68,7 @@ by name.
 | `tlstore refresh` | update the list of items without touching what is installed |
 | `tlstore display` | set up graphics for Linux apps |
 | `tlstore doctor` | check that everything is in place |
-| `tlstore self-update` | bring tlstore itself up to date (`--check` only says) |
+| `tlstore self-update` | bring tlstore itself up to date, and turn the offer on `update` back on after you said never (`--check` only says) |
 | `tlstore help` | the list of commands; `tlstore help install` or `tlstore install --help` is one command's own page |
 | `tlstore version` | show the tlstore and item-list versions |
 | `tlstore readme kitten` | print where a copy of the item's own README has been saved, fetching it when it is missing or a day old |
@@ -278,9 +278,9 @@ curl -fsSL https://raw.githubusercontent.com/PickleHik3/tlstore/main/scripts/ins
 
 It checks what it downloads before installing anything, and puts tlstore exactly where the
 launcher app would: the `tlstore` command in your Termux `bin`, with the shorter `tl` and `tls`
-where those names are still free, and its item list alongside it. `tlstore update` keeps tlstore
-itself current from there, the same way it keeps your installed items current — you never need to
-run the command above again. If you install Termux Launcher later, the app quietly takes over
+where those names are still free, and its item list alongside it. `tlstore update` offers a newer
+tlstore when there is one — answer yes, no, or never, and `tlstore self-update` brings the offer back
+— so you never need to run the command above again. If you install Termux Launcher later, the app quietly takes over
 keeping tlstore up to date. If you already have the launcher, running this command does nothing —
 it already provides tlstore.
 

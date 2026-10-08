@@ -1503,6 +1503,56 @@ y
         expect_no_out "nor under --tsv" "tlstore is now version"
         su_untouched "update --check --tsv"
 
+        cur_ver_q="$(sed -n 's/^TLSTORE_VERSION=//p' "$TLSTORE" | head -1)"
+        # update asks before taking a newer tlstore: yes (or just Enter), no,
+        # never; -y and nobody-to-ask are covered above and below.
+        su_quiet="$TESTHOME/.local/share/tlstore/self-update-quiet"
+        rm -f "$su_quiet"
+        su_reset
+        RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"; TTY_KNOB=1; STDIN_TEXT=$'y\nn\n'
+        tl update
+        expect_status "update, answered no" 0
+        expect_out "asks first" "tlstore 9.9 is available; you have $cur_ver_q. Update now"
+        expect_no_out "does not update" "tlstore is now version"
+        su_untouched "update, answered no"
+        expect_no_file "no is not remembered" "$su_quiet"
+
+        su_reset
+        RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"; TTY_KNOB=1; STDIN_TEXT=$'y\n\n'
+        tl update
+        expect_status "update, answered with Enter" 0
+        expect_out "Enter means yes" "tlstore is now version 9.9"
+        if grep -q "^# the newer one" "$TPREFIX/bin/tlstore"; then pass; else fail "Enter updates tlstore"; fi
+
+        su_reset
+        RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"; TTY_KNOB=1; STDIN_TEXT=$'y\nnever\n'
+        tl update
+        expect_status "update, answered never" 0
+        expect_out "says how to get it later" "tlstore self-update still gets it"
+        expect_file "never is remembered" "$su_quiet"
+        su_untouched "update, answered never"
+
+        RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"; TTY_KNOB=1; STDIN_TEXT=$'y\ny\n'
+        tl update
+        expect_status "update after never" 0
+        expect_no_out "no question any more" "Update now"
+        expect_no_out "and no update" "tlstore is now version"
+        su_untouched "update after never"
+
+        RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"
+        tl self-update
+        expect_status "self-update after never" 0
+        expect_out "still updates" "tlstore is now version 9.9"
+        expect_no_file "and asks again from then on" "$su_quiet"
+
+        su_reset
+        RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"
+        tl update
+        expect_status "update, nobody to ask" 0
+        expect_out "says it is there" "tlstore 9.9 is available. Run tlstore self-update to get it."
+        expect_no_out "and asks nothing" "Update now"
+        su_untouched "update, nobody to ask"
+
         # --- self-update --check --tsv: the first thing tlstore-ui asks ---
         cur_ver="$(sed -n 's/^TLSTORE_VERSION=//p' "$TLSTORE" | head -1)"
         su_cache="$TESTHOME/.cache/tlstore"
