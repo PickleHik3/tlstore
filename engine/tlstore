@@ -1846,9 +1846,9 @@ Usage: tlstore [-y] update [options] [name...]
        tlstore upgrade ...
 
 Fetches the newest item list and brings what you have up to date, then offers
-a newer tlstore when there is one: answer yes, no, or never (tlstore
-self-update brings it back). With no names it does everything you have installed, except
-items you have held; naming a held item updates it and lets go of the hold.
+a newer tlstore when there is one: answer yes, no, or never. With no names it
+does everything you have installed, except items you have held; naming a held
+item updates it and lets go of the hold.
 
 Options:
   --check        say what would change, and change nothing
