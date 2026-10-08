@@ -1,5 +1,6 @@
 #!/bin/bash
-# fetch-musl-runtime.sh — take musl's libstdc++ and libgcc_s out of Alpine's aarch64 packages.
+# fetch-musl-runtime.sh — take musl's libstdc++ and libgcc_s out of Alpine's packages for
+# TL_ARCH (aarch64 by default, or x86_64; build-asset.sh sets TL_ALPINE_ARCH).
 #
 # Some prebuilt binaries from the wider Linux world need more of the musl world than its libc:
 # opencode, for one, links libstdc++ and libgcc_s. Termux ships neither in a musl flavour — its C++
@@ -14,8 +15,20 @@ set -euo pipefail
 ALPINE_BRANCH=${ALPINE_BRANCH:-v3.22}
 ALPINE_MIRROR=${ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org/alpine}
 GCC_VERSION=14.2.0-r6
-LIBGCC_SHA256=ba1835eec3ad8a120efd3d5020e561d53553a0513763a08f509e3ce6d4baa9ca
-LIBSTDCXX_SHA256=0d2f054057a4f932e985a129eccb79908b40964185139a0a609aed3032aba064
+TL_ALPINE_ARCH=${TL_ALPINE_ARCH:-${TL_ARCH:-aarch64}}
+# Each architecture's two packages, pinned by digest. A new pin is downloaded once from
+# $ALPINE_MIRROR/$ALPINE_BRANCH/main/<arch>/ and its sha256 written here.
+case "$TL_ALPINE_ARCH" in
+    aarch64)
+        LIBGCC_SHA256=ba1835eec3ad8a120efd3d5020e561d53553a0513763a08f509e3ce6d4baa9ca
+        LIBSTDCXX_SHA256=0d2f054057a4f932e985a129eccb79908b40964185139a0a609aed3032aba064
+        ;;
+    x86_64)
+        LIBGCC_SHA256=04f3467bc967e705221a843fe4d3de5850db826e571686e0c0ed453d38cb5c59
+        LIBSTDCXX_SHA256=939f7c99898f3e8154207a17f4acbe8bc40437e1bb1b43f5525620ca9e452a2e
+        ;;
+    *) echo "error: no pinned Alpine packages for $TL_ALPINE_ARCH" >&2; exit 2 ;;
+esac
 
 TL_OUT=${TL_OUT:-"$PWD/out"}
 TL_BUILD_DIR=${TL_BUILD_DIR:-"$PWD/build-musl-runtime"}
@@ -25,7 +38,7 @@ cd "$TL_BUILD_DIR"
 
 fetch() {
     local package="$1" want="$2" file="$1-$GCC_VERSION.apk"
-    [ -f "$file" ] || curl -fsSLO "$ALPINE_MIRROR/$ALPINE_BRANCH/main/aarch64/$file"
+    [ -f "$file" ] || curl -fsSLO "$ALPINE_MIRROR/$ALPINE_BRANCH/main/$TL_ALPINE_ARCH/$file"
     echo "$want  $file" | sha256sum -c - >/dev/null
     # An .apk is a gzip stream per section concatenated; tar reads the whole thing and the
     # signature section simply unpacks as a dotfile nobody looks at.
@@ -52,7 +65,7 @@ for pair in "musl-libgcc:libgcc_s.so.1" "musl-libstdcxx:libstdc++.so.6"; do
         echo "error: $file does not carry the soname $soname" >&2
         exit 1
     fi
-    if ! grep -qa "libc.musl-aarch64.so.1" "$file"; then
+    if ! grep -qa "libc.musl-$TL_ALPINE_ARCH.so.1" "$file"; then
         echo "error: $file is not linked against musl" >&2
         exit 1
     fi

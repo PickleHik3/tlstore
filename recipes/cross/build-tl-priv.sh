@@ -1,6 +1,6 @@
 #!/bin/bash
 # build-tl-priv.sh — build tl-priv, the client half of Termux:Launcher's privileged lane, for
-# Android aarch64 from a Linux host.
+# Android (aarch64, or x86_64 with TL_ARCH=x86_64) from a Linux host.
 #
 # tl-priv is plain C against Bionic alone — a unix socket, a pty relay and termios — and is linked
 # -static, so it has no prefix, no RUNPATH and no library outside the binary: one build serves every
@@ -19,7 +19,9 @@ TL_BUILD_DIR=${TL_BUILD_DIR:-"$PWD/build-tl-priv"}
 TL_ANDROID_API=${TL_ANDROID_API:-26}
 
 NDK_BIN="$TL_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
-CC="$NDK_BIN/aarch64-linux-android$TL_ANDROID_API-clang"
+TL_ARCH=${TL_ARCH:-aarch64}
+TL_TRIPLE=${TL_TRIPLE:-$TL_ARCH-linux-android}
+CC="$NDK_BIN/$TL_TRIPLE$TL_ANDROID_API-clang"
 [ -x "$CC" ] || { echo "error: NDK compiler not found at $CC (set TL_NDK)" >&2; exit 1; }
 [ -f "$SOURCE" ] || { echo "error: source not found at $SOURCE" >&2; exit 1; }
 

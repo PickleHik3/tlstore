@@ -1,7 +1,8 @@
 # Cross-build recipes
 
 The recipes in [`../termux`](../termux) build on the phone. These build the same tools on a Linux
-host, for `aarch64` Termux, and add `kitten`, which cannot practically be built on-device.
+host, for `aarch64` and `x86_64` Termux, and add `kitten`, which cannot practically be built
+on-device.
 
 They deliberately do **not** use Docker or a `termux-packages` checkout. Termux publishes its
 headers and shared libraries as ordinary `.deb` archives, so a cross-build only needs the Android
@@ -12,8 +13,8 @@ NDK plus a sysroot assembled with `dpkg-deb -x`.
 | `termux-sysroot.sh` | `sysroot/` from published `.deb`s, from any edition's repository | curl, python3, dpkg-deb or ar+bsdtar |
 | `build-fastfetch.sh` | patched Fastfetch with animated Kitty graphics | NDK + CMake + Ninja |
 | `build-dawn.sh` | patched dawn, the markdown writing pad | NDK + CMake |
-| `build-sigye.sh` | patched Sigye clock | rustup `aarch64-linux-android` + NDK |
-| `build-kitten.sh` | kitty's standalone `kitten` client | Go + python3 |
+| `build-sigye.sh` | patched Sigye clock | rustup `<arch>-linux-android` + NDK |
+| `build-kitten.sh` | kitty's standalone `kitten` client | Go + python3 (+ NDK for x86_64) |
 | `build-btop.sh` | patched btop, fully static, for the launcher's Shizuku lane | NDK + GNU make |
 | `build-tl-priv.sh` | `tl-priv`, the lane's client (`tl-priv/tl-priv.c`), fully static | NDK |
 
@@ -24,7 +25,8 @@ launcher copies `btop` to `/data/local/tmp/tl/bin/` and starts it as the shell u
 items"). One build of each serves every edition.
 
 `fastfetch` and `dawn` are built once per launcher edition — see below. If you only want the
-binaries, they are published for `aarch64` as GitHub Release assets of this repository — one
+binaries, they are published for `aarch64` and `x86_64` as GitHub Release assets of this
+repository — one
 `bins-YYYY.MM.DD[-N]` prerelease per run of `.github/workflows/build.yml`, each asset under the
 name the catalog installs it by — and the `tlstore` catalog installs them with a pinned digest.
 `build-musl-loader.sh` builds the musl loader that lets npm-shipped musl binaries (Claude Code,
@@ -33,14 +35,25 @@ target another prefix, or move a pin.
 
 `build-asset.sh <tool> [edition]` is the one entry point the workflow uses: it runs the tool's
 recipe (assembling the edition's sysroot first where one is needed) and writes the result under
-its asset name — `<tool>-aarch64`, or `<tool>-<package>-aarch64` for an edition other than
-`com.termux` — into `$TL_ASSETS`. The same script runs on a laptop with `TL_NDK` set:
+its asset name — `<tool>-<arch>`, or `<tool>-<package>-<arch>` for an edition other than
+`com.termux` — into `$TL_ASSETS`. `TL_ARCH` picks the processor (`aarch64` by default, or
+`x86_64`) and every toolchain name is derived from it there, so the recipes carry no processor of
+their own. The io.vaj.tl edition is aarch64 only. The same script runs on a laptop with `TL_NDK`
+set:
 
 ```sh
 cd /some/scratch/dir
 /path/to/recipes/cross/build-asset.sh dawn io.vaj.tl     # -> assets/dawn-io.vaj.tl-aarch64
 /path/to/recipes/cross/build-asset.sh btop               # -> assets/btop-aarch64
+TL_ARCH=x86_64 /path/to/recipes/cross/build-asset.sh btop  # -> assets/btop-x86_64
 ```
+
+Three things differ on x86_64 beyond names. Go will not link android/amd64 itself, so the x86_64
+`kitten` is linked by the NDK's clang (`TL_CGO_CC`; kitty's Go code has no C, so this only links).
+Android's x86_64 ABI has a 128-bit `long double` where musl's x86_64 code expects x87's 80-bit one,
+so the x86_64 musl loader is compiled for `x86_64-linux-musl`, against the build host's own
+`libgcc.a` (the NDK ships compiler-rt for Android targets only). And btop's GPU support, which
+upstream offers on x86_64, stays off as on aarch64.
 
 On the runner the musl loader is built with the NDK's clang standing in for Termux's (the recipe
 names plain `clang` and a compiler-rt under `$PREFIX`; `build-asset.sh` puts a wrapper on `PATH`
@@ -86,7 +99,7 @@ TL_SYSROOT=$PWD/sysroot-vaj TL_OUT=$PWD/out-vaj \
     TERMUX_PREFIX=/data/data/io.vaj.tl/files/usr ./build-dawn.sh
 ```
 
-Each result is uploaded as `<tool>-<package name>-aarch64` (`fastfetch-io.vaj.tl-aarch64`,
+Each result is uploaded as `<tool>-<package name>-<arch>` (`fastfetch-io.vaj.tl-aarch64`,
 `dawn-io.vaj.tl-aarch64`), beside the unsuffixed `com.termux` asset. The tlstore catalog carries one
 row per edition and picks between them by `$PREFIX`, skipping the item with a build hint for a
 prefix nothing is published for.

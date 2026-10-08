@@ -1,5 +1,6 @@
 #!/bin/bash
-# build-kitten.sh — cross-compile kitty's `kitten` client for Android aarch64 from a Linux host.
+# build-kitten.sh — cross-compile kitty's `kitten` client for Android (arm64, or amd64 with
+# TL_GOARCH=amd64) from a Linux host.
 #
 # `kitten` is the standalone Go half of kitty. It is what programs shell out to for `kitten icat`,
 # and it is not packaged for Termux. It is CGO-free, so the cross-build itself is trivial; the
@@ -31,6 +32,11 @@ TL_OUT=${TL_OUT:-"$PWD/out"}
 TL_BUILD_DIR=${TL_BUILD_DIR:-"$PWD/build-kitten"}
 TL_GOOS=${TL_GOOS:-android}
 TL_GOARCH=${TL_GOARCH:-arm64}
+# Go links android/arm64 itself but refuses android/amd64 without an external linker, so an amd64
+# build names the NDK's clang here (build-asset.sh does). kitty's Go code has no C in it, so cgo
+# only does the linking: the binary is the same PIE bound to /system/bin/linker64.
+TL_CGO_CC=${TL_CGO_CC:-}
+if [ -n "$TL_CGO_CC" ]; then cgo=1; else cgo=0; fi
 
 for tool in go python3 git; do
     command -v "$tool" >/dev/null 2>&1 || { echo "error: missing required tool: $tool" >&2; exit 1; }
@@ -61,7 +67,7 @@ output="$TL_OUT/kitten-$TL_GOOS-$TL_GOARCH"
 echo "Building kitten for $TL_GOOS/$TL_GOARCH..."
 (
     cd "$source_dir"
-    CGO_ENABLED=0 GOOS="$TL_GOOS" GOARCH="$TL_GOARCH" go build -trimpath \
+    CGO_ENABLED=$cgo CC="${TL_CGO_CC:-cc}" GOOS="$TL_GOOS" GOARCH="$TL_GOARCH" go build -trimpath \
         -ldflags "-s -w -X github.com/kovidgoyal/kitty.VCSRevision=$revision -X github.com/kovidgoyal/kitty.IsStandaloneBuild=true" \
         -o "$output" ./tools/cmd
 )

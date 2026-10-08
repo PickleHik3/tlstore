@@ -58,7 +58,8 @@ launcher pins that tag's `dist/` by those digests.
 
 ## Prebuilt binaries, as release assets
 
-Prebuilt `aarch64` binaries for the terminal tools the launcher shows off but does not ship inside
+Prebuilt `aarch64` and `x86_64` binaries for the terminal tools the launcher shows off but does
+not ship inside
 the APK: `kitten`, a Fastfetch patched to animate Kitty-protocol GIFs, the `dawn` writing pad, the
 `sigye` clock and `btop` with its `tl-priv` client — plus the musl runtime that lets `tlstore` run
 Claude Code and opencode inside a Termux prefix.
@@ -71,7 +72,10 @@ Each lives at `https://github.com/PickleHik3/tlstore/releases/download/<bins-tag
 the prerelease `.github/workflows/build.yml` made it in, and `tlstore` installs it from there
 against the digest its catalog pins: a bare `binaries:<asset>@<tag>` source in `scripts/items.tsv`
 resolves to exactly that URL with `-aarch64` appended, and its digest is the `<asset>-aarch64`
-line of `SHA256SUMS`.
+line of `SHA256SUMS`; on an x86_64 device, `-x86_64` and the `x86_64:digest` that
+`scripts/build-catalog.sh` writes from the `<asset>-x86_64` line (`docs/SPEC.md`, Revision 12).
+Every asset below is also built as `-x86_64`, except the `io.vaj.tl` ones (that edition is aarch64
+only); the musl runtime's x86_64 pair comes from Alpine's x86_64 packages.
 
 ## What is published
 
