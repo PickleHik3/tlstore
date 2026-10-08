@@ -17,7 +17,8 @@
 #   TLSTORE_CATALOG_URL where refresh reads the catalog (file:// works)
 #   TLSTORE_ASSUME_YES  1 = same as -y
 #   TLSTORE_NPM_REGISTRY npm registry base (default https://registry.npmjs.org)
-#   TLSTORE_ARCH        override uname -m (tests exercise aarch64 items on a host)
+#   TLSTORE_ARCH        override uname -m (tests exercise aarch64 and x86_64
+#                       items on a host)
 #   TLSTORE_PATCHELF    the patchelf command (tests pass a no-op)
 #   TLSTORE_ASSUME_TTY  1 = answer questions from stdin even when it is not a
 #                       terminal (the test suite pipes them in)
@@ -38,7 +39,7 @@
 #                       repository's releases/latest/download; tests point it
 #                       at a file:// directory)
 #   TLSTORE_BINARIES_RELEASES  where a bare `binaries:<asset>@<tag>` source
-#                       is: <base>/<tag>/<asset>-aarch64 (default this
+#                       is: <base>/<tag>/<asset>-<arch> (default this
 #                       repository's releases/download; tests use file://)
 #   TLSTORE_BINARIES_RAW  where a `binaries:<path/with/slash>@<tag>` source
 #                       is: <base>/<tag>/<path>, a file in this repository at
@@ -46,7 +47,7 @@
 
 set -u
 
-TLSTORE_VERSION=0.8
+TLSTORE_VERSION=0.10
 
 # The store program that pairs with this script, one digest per processor.
 # Empty in the source tree: scripts/release.sh --prepare fills them in from
@@ -84,6 +85,8 @@ USER_CATALOG="$DATA_DIR/catalog.tsv"
 PUBKEY="$STORE_DIR/trusted.pub"
 STATE="$DATA_DIR/installed.tsv"
 HELD="$DATA_DIR/held"
+# Present when the user answered "never" to update's offer of a newer tlstore.
+SU_QUIET="$DATA_DIR/self-update-quiet"
 
 # The app writes this when it puts tlstore down (a hand install writes
 # .standalone instead, with the address it came from inside it; nothing here
@@ -155,9 +158,14 @@ DRY_RUN=0
 # Packages this run installed only so something else could be built.
 BUILD_ADDED=""
 
+# The processor, as the catalog names it: aarch64 or x86_64. A row's own
+# columns are the aarch64 build; on x86_64 its x86_64:source, x86_64:digest and
+# x86_64:target options stand in for them (rows). Any other processor has no
+# prebuilt tools at all.
 ARCH="${TLSTORE_ARCH:-$(uname -m 2>/dev/null || echo unknown)}"
 case "$ARCH" in
-    aarch64|arm64) ARCH_OK=1 ;;
+    aarch64|arm64) ARCH=aarch64; ARCH_OK=1 ;;
+    x86_64|amd64) ARCH=x86_64; ARCH_OK=1 ;;
     *) ARCH_OK=0 ;;
 esac
 
@@ -298,19 +306,34 @@ need_catalog() {
 }
 
 # Every row that applies here: this edition's prefix, this processor, this app,
-# a new enough launcher; first row per name wins.
+# a new enough launcher; first row per name wins. Off aarch64 a row comes out
+# with its <arch>:source, <arch>:digest and <arch>:target options already in
+# place of columns 5, 6 and 7, so nothing downstream needs to know the
+# processor. A binary is here only with its own <arch>:digest (build-catalog.sh
+# writes it once that build is published); an npm-musl or npm-android item only
+# with its own <arch>:source (the npm package built for it), and an npm-musl
+# item only while its musl loader and libraries are here as well.
 rows() {
-    awk -F "$TAB" -v pkgname="$APP_PACKAGE" -v archok="$ARCH_OK" \
-        -v host="$HOST" -v lver="$LAUNCHER_VERSION" '
+    awk -F "$TAB" -v OFS="$TAB" -v pkgname="$APP_PACKAGE" -v archok="$ARCH_OK" \
+        -v arch="$ARCH" -v host="$HOST" -v lver="$LAUNCHER_VERSION" '
         function prefix_ok(list,   n, i, parts) {
             if (list == "*" || list == "") return 1
             n = split(list, parts, ",")
             for (i = 1; i <= n; i++) if (parts[i] == pkgname) return 1
             return 0
         }
-        function arch_ok(kind) {
-            if (archok == "1") return 1
-            return (kind != "binary" && kind != "npm-musl" && kind != "npm-android")
+        function arch_ok(kind, opts) {
+            if (kind != "binary" && kind != "npm-musl" && kind != "npm-android") return 1
+            if (archok != "1") return 0
+            if (arch == "aarch64") return 1
+            if (kind == "binary") return optval(opts, arch ":digest") != ""
+            return optval(opts, arch ":source") != ""
+        }
+        function for_arch(   v) {
+            if (archok != "1" || arch == "aarch64") return
+            v = optval($9, arch ":source"); if (v != "") $5 = v
+            v = optval($9, arch ":digest"); if (v != "") $6 = v
+            v = optval($9, arch ":target"); if (v != "") $7 = v
         }
         function optval(list, key,   n, i, parts) {
             n = split(list, parts, ";")
@@ -344,16 +367,27 @@ rows() {
             if (lver == "") return 1
             return vercmp(lver, want) >= 0
         }
-        /^[ \t]*#/ { next }
-        /^[ \t]*$/ { next }
-        NF < 10 { next }
-        !prefix_ok($4) { next }
-        !arch_ok($2) { next }
-        !host_ok($9) { next }
-        !launcher_ok($9) { next }
+        function applies() {
+            if ($0 ~ /^[ \t]*#/ || $0 ~ /^[ \t]*$/ || NF < 10) return 0
+            return prefix_ok($4) && arch_ok($2, $9) && host_ok($9) && launcher_ok($9)
+        }
+        # An npm-musl item cannot start without the musl loader and the
+        # libraries its musl-libs names, so it is here only when they are:
+        # on x86_64 the npm package exists before our own builds do.
+        function musl_ready(opts,   n, i, parts) {
+            if (!("musl-loader" in here)) return 0
+            n = split(optval(opts, "musl-libs"), parts, ",")
+            for (i = 1; i <= n; i++) if (!(parts[i] in here)) return 0
+            return 1
+        }
+        # The catalog is read twice: once for the names that apply here, then
+        # for the rows themselves.
+        NR == FNR { if (applies()) here[$1] = 1; next }
+        !applies() { next }
+        $2 == "npm-musl" && !musl_ready($9) { next }
         seen[$1]++ { next }
-        { print }
-    ' "$CATALOG"
+        { for_arch(); print }
+    ' "$CATALOG" "$CATALOG"
 }
 
 # The rows a user picks from. The rest are plumbing: parts other items pull in,
@@ -492,9 +526,9 @@ source_url() {
                 # A path (a readme or a hero picture kept in the repository)
                 # resolves straight to that file at the tag; a bare asset name
                 # is the per-processor binary, published as a release asset
-                # under the tag.
+                # under the tag as <asset>-aarch64 or <asset>-x86_64.
                 */*) printf '%s/%s/%s' "$BINARIES_RAW" "$su_tag" "$su_asset" ;;
-                *) printf '%s/%s/%s-aarch64' "$BINARIES_RELEASES" "$su_tag" "$su_asset" ;;
+                *) printf '%s/%s/%s-%s' "$BINARIES_RELEASES" "$su_tag" "$su_asset" "$ARCH" ;;
             esac
             ;;
         *) printf '%s' "$1" ;;
@@ -631,6 +665,17 @@ hold_drop() {
     hd_tmp="$HELD.new"
     grep -vx -- "$1" "$HELD" > "$hd_tmp" || true
     mv "$hd_tmp" "$HELD"
+}
+
+# The "never" answer to update's offer of a newer tlstore: an empty file that
+# only a successful `tlstore self-update` takes away.
+su_quiet_on() {
+    mkdir -p "$DATA_DIR"
+    : > "$SU_QUIET"
+}
+
+su_quiet_off() {
+    rm -f "$SU_QUIET"
 }
 
 state_forget() {
@@ -1096,7 +1141,7 @@ install_item() {
     ii_name="$1"
     ii_force="${2:-0}"
     # Something a bundle asks for that has no row here — another edition's
-    # build, or an aarch64 tool on a different processor — is skipped, not an
+    # build, or a tool not built for this processor — is skipped, not an
     # error. A name typed on the command line is checked before we get here.
     load_item "$ii_name" || {
         say "$ii_name is not available on this device"
@@ -1386,7 +1431,7 @@ do_npm_musl() {
         chmod 755 "$np_dir.new/$np_exe"
 
         if [ "$ii_kind" = npm-musl ]; then
-            np_loader="$np_dir.new/ld-musl-aarch64.so.1"
+            np_loader="$np_dir.new/ld-musl-$ARCH.so.1"
             np_have_loader=$(item_targets musl-loader binary "$(field "$np_loader_row" 7)")
             if [ -f "$np_have_loader" ]; then
                 cp -f "$np_have_loader" "$np_loader"
@@ -1421,7 +1466,7 @@ do_npm_musl() {
                 chmod 644 "$np_lib_dest"
             done
 
-            if ! "$PATCHELF" --set-interpreter "$np_dir/ld-musl-aarch64.so.1" --set-rpath "$np_dir" "$np_dir.new/$np_exe"; then
+            if ! "$PATCHELF" --set-interpreter "$np_dir/ld-musl-$ARCH.so.1" --set-rpath "$np_dir" "$np_dir.new/$np_exe"; then
                 rm -rf "$np_dir.new"
                 CANCEL_EXTRA=""
                 err "could not prepare $ii_name for this device"
@@ -1832,9 +1877,10 @@ EOF
 Usage: tlstore [-y] update [options] [name...]
        tlstore upgrade ...
 
-Fetches the newest item list, brings what you have up to date, then updates
-tlstore itself. With no names it does everything you have installed, except
-items you have held; naming a held item updates it and lets go of the hold.
+Fetches the newest item list and brings what you have up to date, then offers
+a newer tlstore when there is one: answer yes, no, or never. With no names it
+does everything you have installed, except items you have held; naming a held
+item updates it and lets go of the hold.
 
 Options:
   --check        say what would change, and change nothing
@@ -1906,7 +1952,8 @@ EOF
             cat <<'EOF'
 Usage: tlstore self-update [--check]
 
-Brings tlstore itself, and the store app that goes with it, up to date.
+Brings tlstore itself, and the store app that goes with it, up to date. This
+also turns the offer on update back on after you said never.
 Exits 1 when a newer tlstore was offered and could not be taken.
 
 Options:
@@ -2623,7 +2670,7 @@ snapshot_key() {
     printf 'v=%s;serial=%s;catalog=%s:%s;state=%s;held=%s;cache=%s;host=%s;arch=%s;pkg=%s;lver=%s;home=%s;prefix=%s' \
         "$TLSTORE_VERSION" "$CATALOG_SERIAL" "$CATALOG" "$(file_stamp "$CATALOG")" \
         "$(file_stamp "$STATE")" "$(file_stamp "$HELD")" "$(file_stamp "$CACHE_DIR/.changed")" \
-        "$HOST" "$ARCH_OK" "$APP_PACKAGE" "$LAUNCHER_VERSION" "$HOME" "$PREFIX"
+        "$HOST" "$ARCH" "$APP_PACKAGE" "$LAUNCHER_VERSION" "$HOME" "$PREFIX"
 }
 
 # snapshot_rows — one awk pass over every row that applies here and the
@@ -2637,7 +2684,7 @@ snapshot_rows() {
     rows | awk -F "$TAB" -v OFS="$TAB" -v state="$STATE" -v heldfile="$HELD" -v home="$HOME" \
         -v bindir="$BIN_DIR" -v libdir="$LIB_DIR" -v privdir="$PRIV_DIR" \
         -v cachedir="$CACHE_DIR" -v launcher_raw="$LAUNCHER_RAW" -v binaries_raw="$BINARIES_RAW" \
-        -v binaries_rel="$BINARIES_RELEASES" '
+        -v binaries_rel="$BINARIES_RELEASES" -v arch="$ARCH" '
         function optval(list, key,   n, i, parts) {
             n = split(list, parts, ";")
             for (i = 1; i <= n; i++)
@@ -2684,7 +2731,7 @@ snapshot_rows() {
                 tag = rest; sub(/.*@/, "", tag)
                 path = rest; sub(/@[^@]*$/, "", path)
                 if (index(path, "/") > 0) return binaries_raw "/" tag "/" path
-                return binaries_rel "/" tag "/" path "-aarch64"
+                return binaries_rel "/" tag "/" path "-" arch
             }
             return src
         }
@@ -2925,7 +2972,7 @@ prefetch_gc() {
     gc_changed=0
     gc_list=$(rows | awk -F "$TAB" -v OFS="$TAB" -v cachedir="$CACHE_DIR" \
         -v launcher_raw="$LAUNCHER_RAW" -v binaries_raw="$BINARIES_RAW" \
-        -v binaries_rel="$BINARIES_RELEASES" '
+        -v binaries_rel="$BINARIES_RELEASES" -v arch="$ARCH" '
         function dash(v) { return (v == "") ? "-" : v }
         function url_of(src,   rest, path, tag) {
             if (index(src, "launcher:") == 1) {
@@ -2939,7 +2986,7 @@ prefetch_gc() {
                 tag = rest; sub(/.*@/, "", tag)
                 path = rest; sub(/@[^@]*$/, "", path)
                 if (index(path, "/") > 0) return binaries_raw "/" tag "/" path
-                return binaries_rel "/" tag "/" path "-aarch64"
+                return binaries_rel "/" tag "/" path "-" arch
             }
             return src
         }
@@ -3477,14 +3524,14 @@ update_items() {
 cmd_update() {
     update_items "$@"
     cu_status=$?
-    # tlstore keeps itself, and the store program that pairs with it, current
-    # on a plain `update` — never offline, never on `--check` (the refresh
+    # A plain `update` offers the newer tlstore, and the store program that
+    # pairs with it, when there is one — never offline, never on `--check` (the refresh
     # tlstore-ui runs in the background; swapping the files under a running
     # UI is what `self-update --progress` exists to do in plain view), and
     # not inside a --progress stream, which carries the item lines alone.
     if [ "$cu_status" != 2 ] && [ "${cu_offline:-0}" = 0 ] && [ "${cu_check:-0}" = 0 ] && [ "$PROGRESS" != 1 ]; then
         # A refused or failed self-update fails the command, as a failed item does.
-        self_update || [ "$cu_status" != 0 ] || cu_status=1
+        self_update_offer || [ "$cu_status" != 0 ] || cu_status=1
     fi
     return "$cu_status"
 }
@@ -3868,14 +3915,76 @@ self_update_try() {
     return "$su_rc"
 }
 
-# The self-update `update` runs: one line when something moved, the reason
-# when something was refused, nothing otherwise.
+# The self-update `self-update` runs: one line when something moved, the
+# reason when something was refused, nothing otherwise. su_moved says it did.
+# With 1 a script the offer already fetched and verified is taken from the cache.
 self_update() {
-    self_update_try 0
+    su_moved=0
+    self_update_try "${1:-0}"
     case $? in
-        0) su_say "tlstore is now version $su_version." ;;
+        0) su_moved=1; su_say "tlstore is now version $su_version." ;;
         2) err "$SU_NOTE"; return 1 ;;
     esac
+    return 0
+}
+
+# su_reply — the answer to the offer, read from stdin like ask_yn: y (also
+# empty), n, or never; anything else counts as n. Sets su_answer.
+su_reply() {
+    read -r su_answer || su_answer=""
+    case "$su_answer" in
+        ''|y|Y|yes|YES|Yes) su_answer=y ;;
+        never|NEVER|Never) su_answer=never ;;
+        *) su_answer=n ;;
+    esac
+}
+
+# The self-update `update` runs: ask before taking a newer tlstore. Nothing
+# newer, offline, or the user said never: silence. -y takes it unasked; with
+# nobody to ask it says so on one line and leaves it. The script is fetched
+# and verified first, so a bad signature is refused the same way as ever.
+self_update_offer() {
+    SU_NOTE=""
+    su_ready || return 0
+    CANCEL_EXTRA="$su_new $su_sig $su_ui_new"
+    su_fetch_script 0
+    su_rc=$?
+    CANCEL_EXTRA=""
+    case "$su_rc" in
+        0) ;;
+        2) err "$SU_NOTE"; return 1 ;;
+        *) return 0 ;;
+    esac
+    if [ -f "$SU_QUIET" ]; then
+        rm -f "$su_new" "$su_sig"
+        return 0
+    fi
+    if [ "$ASSUME_YES" = 1 ]; then
+        self_update 1
+        return $?
+    fi
+    if ! interactive; then
+        rm -f "$su_new" "$su_sig"
+        su_say "tlstore $su_version is available. Run tlstore self-update to get it."
+        return 0
+    fi
+    if [ "${cu_tsv:-0}" = 1 ]; then
+        printf 'tlstore %s is available; you have %s. Update now? [Y/n/never] ' "$su_version" "$TLSTORE_VERSION" >&2
+    else
+        printf 'tlstore %s is available; you have %s. Update now? [Y/n/never] ' "$su_version" "$TLSTORE_VERSION"
+    fi
+    su_reply
+    case "$su_answer" in
+        y)
+            self_update 1
+            return $?
+            ;;
+        never)
+            su_quiet_on
+            su_say "Okay. tlstore self-update still gets it whenever you want."
+            ;;
+    esac
+    rm -f "$su_new" "$su_sig"
     return 0
 }
 
@@ -3965,7 +4074,9 @@ cmd_self_update() {
     elif [ "$cs_progress" = 1 ]; then
         self_update_progress
     else
-        self_update
+        self_update || return 1
+        # Asking for it by hand is the way back from "never".
+        [ "$su_moved" = 0 ] || su_quiet_off
     fi
 }
 
