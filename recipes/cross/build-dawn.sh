@@ -18,7 +18,7 @@
 set -euo pipefail
 
 DAWN_URL="https://github.com/PickleHik3/dawn.git"
-DAWN_COMMIT="70fe1b0f8120ae169381bdff348d9904d3e2d431"   # tl: upstream 0e958747 (v0.1.3 plus fixes) + touch, data safety, P1, Material surfaces, bottom-sheet chat, scroll pill, warm session, voice, meaning index, the 2026-10-06 fixes, Nerd Font task boxes, storage robustness, EmbeddingGemma 2 meaning search, the status panel
+DAWN_COMMIT="20caf6c327bdbd67ac7699212aa4bfb4438fa24c"   # tl: upstream 0e958747 (v0.1.3 plus fixes) + touch, data safety, P1, Material surfaces, bottom-sheet chat, scroll pill, warm session, voice, meaning index, the 2026-10-06 fixes, Nerd Font task boxes, storage robustness, EmbeddingGemma 2 meaning search, the status panel, earlier live titles for short notes
 # The version the binary reports (dawn -v): upstream's release plus the short fork commit, so the
 # build names what it is made from. The catalog rows in scripts/items.tsv carry the same base with
 # a build number (0.1.3+<commit>.N) that bins-record.sh bumps; when DAWN_COMMIT moves, move the
