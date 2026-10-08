@@ -14,6 +14,8 @@
 # tlstore reads both by design:
 #   TLSTORE_ARCH=aarch64   — binary and npm-musl items are hidden on other
 #                            processors; the fixture sets this so they show up.
+#                            ARCH_KNOB=x86_64 (or any other name) runs one
+#                            call as that processor, for the x86_64 rows.
 #   TLSTORE_PATCHELF=true  — the npm-musl install runs patchelf on the
 #                            downloaded executable. The fixture payload is a
 #                            shell script, so patchelf would (rightly) refuse
@@ -52,7 +54,7 @@
 #                            `binaries:<asset>@<tag>` source (a release asset)
 #                            and a `binaries:<path>@<tag>` source (a file in
 #                            the repository) resolve; file:// trees laid out
-#                            <tag>/<asset>-aarch64 and <tag>/<path>.
+#                            <tag>/<asset>-<arch> and <tag>/<path>.
 # The catalog signature tests need minisign. Without it they are skipped, and
 # the suite says so instead of passing quietly.
 
@@ -236,6 +238,9 @@ build_fixture() {
     # form resolves: <releases>/<tag>/<asset>-aarch64 and <raw>/<tag>/<path>.
     mkdir -p "$FX/rel/1.0" "$FX/raw/1.0/readme"
     printf '#!/bin/sh\necho relbin from a release\n' > "$FX/rel/1.0/relbin-aarch64"
+    # The same release's x86_64 build, and an x86_64 musl loader (Revision 12).
+    printf '#!/bin/sh\necho relbin built for x86_64\n' > "$FX/rel/1.0/relbin-x86_64"
+    printf 'not really an x86_64 loader\n' > "$FX/loader-x86.bin"
     printf '<!-- tlstore: pinned from demo/relpinned@abcdef1 -->\n# relpinned\n\nread from the repository at the tag\n' > "$FX/raw/1.0/readme/relpinned.md"
 
     # GitHub, as a directory: <host>/<path> under $FX/gh, which TLSTORE_GITHUB
@@ -320,6 +325,14 @@ EOF
     printf '{"name":"demo-cli","version":"1.0.0","dist":{"tarball":"file://%s/demo-cli-1.0.0.tgz","integrity":"sha512-%s"}}\n' \
         "$FX" "$(sha512_b64 "$FX/demo-cli-1.0.0.tgz")" > "$FX/registry/demo-cli/latest"
 
+    # The x86_64 package of the first, which an x86_64:source names.
+    mkdir -p "$FX/registry/demo-cli-x64" "$FX/pkgsrc-x64/package"
+    printf '#!/bin/sh\necho "demo-cli x64 1.0.0"\n' > "$FX/pkgsrc-x64/package/claude"
+    chmod +x "$FX/pkgsrc-x64/package/claude"
+    tar czf "$FX/demo-cli-x64-1.0.0.tgz" -C "$FX/pkgsrc-x64" package
+    printf '{"name":"demo-cli-x64","version":"1.0.0","dist":{"tarball":"file://%s/demo-cli-x64-1.0.0.tgz","integrity":"sha512-%s"}}\n' \
+        "$FX" "$(sha512_b64 "$FX/demo-cli-x64-1.0.0.tgz")" > "$FX/registry/demo-cli-x64/latest"
+
     # The second keeps its executable in a subdirectory and needs a library the
     # loader alone does not provide — opencode's shape.
     mkdir -p "$FX/registry/demo-agent" "$FX/agentsrc/package/bin"
@@ -394,7 +407,7 @@ tl() {
             TLSTORE_PREFIX="$TPREFIX" \
             TLSTORE_CATALOG_URL="$CATALOG_URL" \
             TLSTORE_NPM_REGISTRY="file://$FX/registry" \
-            TLSTORE_ARCH=aarch64 \
+            TLSTORE_ARCH="${ARCH_KNOB:-aarch64}" \
             TLSTORE_PATCHELF="${PATCHELF_KNOB:-true}" \
             TLSTORE_ASSUME_TTY="${TTY_KNOB:-0}" \
             TLSTORE_HOST="${HOST_KNOB:-}" \
@@ -412,7 +425,7 @@ tl() {
             TLSTORE_PREFIX="$TPREFIX" \
             TLSTORE_CATALOG_URL="$CATALOG_URL" \
             TLSTORE_NPM_REGISTRY="file://$FX/registry" \
-            TLSTORE_ARCH=aarch64 \
+            TLSTORE_ARCH="${ARCH_KNOB:-aarch64}" \
             TLSTORE_PATCHELF="${PATCHELF_KNOB:-true}" \
             TLSTORE_ASSUME_TTY="${TTY_KNOB:-0}" \
             TLSTORE_HOST="${HOST_KNOB:-}" \
@@ -428,6 +441,7 @@ tl() {
     ST=$?
     STDIN_TEXT=""
     TTY_KNOB=0
+    ARCH_KNOB=""
     HOST_KNOB=""
     PATCHELF_KNOB=""
     UI_KNOB=""
@@ -497,6 +511,7 @@ run_suite() {
     build_fixture
     CATALOG_URL="file://$FX/newer.tsv"
     STDIN_TEXT=""
+    ARCH_KNOB=""
     HOST_KNOB=""
     PATCHELF_KNOB=""
     UI_KNOB=""
@@ -1434,6 +1449,103 @@ y
     expect_content "the pinned copy is what was served" "$OUT" "$(cat "$FX/raw/1.0/readme/relpinned.md")"
     tl remove relbin -y
     if [ -n "$saved_catalog" ]; then mv "$saved_catalog" "$user_catalog"; else rm -f "$user_catalog"; fi
+
+    # --- x86_64 (Revision 12): a row's x86_64: options stand in for its own columns there ---
+    # The rows' own columns are the aarch64 build. On x86_64 a binary is offered only with an
+    # x86_64:digest, an npm item only with an x86_64:source, an npm-musl item only while its
+    # loader and libraries are here too, and every other processor sees none of them. The block
+    # starts from nothing installed and puts ~/.local back as it found it afterwards (the list,
+    # what is installed), so the tests after it see the same phone.
+    rm -rf "$ROOT/saved-local"
+    cp -a "$TESTHOME/.local" "$ROOT/saved-local"
+    rm -rf "$TESTHOME/.local/share/tlstore/installed.tsv" "$TESTHOME/.local/lib" "$TESTHOME/.local/bin"
+    {
+        printf '# tlstore catalog\tserial=2026090651\n'
+        printf 'relbin\tbinary\t1\t*\tbinaries:relbin@1.0\t%s\t-\t-\tx86_64:digest=%s\tA tool built for both processors.\t%s\n' \
+            "$(sha "$FX/rel/1.0/relbin-aarch64")" "$(sha "$FX/rel/1.0/relbin-x86_64")" "$R5_NONE"
+        printf 'armonly\tbinary\t1\t*\tbinaries:relbin@1.0\t%s\t~/.local/bin/armonly\t-\t-\tA tool with no x86_64 build yet.\t%s\n' \
+            "$(sha "$FX/rel/1.0/relbin-aarch64")" "$R5_NONE"
+        printf 'relbad\tbinary\t1\t*\tbinaries:relbin@1.0\t%s\t~/.local/bin/relbad\t-\tx86_64:digest=%s\tIts x86_64 digest never matches, on purpose.\t%s\n' \
+            "$(sha "$FX/rel/1.0/relbin-aarch64")" 0000000000000000000000000000000000000000000000000000000000000000 "$R5_NONE"
+        printf 'musl-loader\tbinary\t1\t*\tfile://%s/loader.bin\t%s\t~/.local/lib/musl/ld-musl-aarch64.so.1\t-\thidden=1;x86_64:source=file://%s/loader-x86.bin;x86_64:digest=%s;x86_64:target=~/.local/lib/musl/ld-musl-x86_64.so.1\tWhat tools from other systems need to start.\t%s\n' \
+            "$FX" "$(sha "$FX/loader.bin")" "$FX" "$(sha "$FX/loader-x86.bin")" "$R5_NONE"
+        printf 'nolib\tbinary\t1\t*\tfile://%s/musllib.bin\t%s\t~/.local/lib/musl/libnone.so.1\t-\thidden=1\tA library with no x86_64 build.\t%s\n' \
+            "$FX" "$(sha "$FX/musllib.bin")" "$R5_NONE"
+        printf 'claude-code\tnpm-musl\tlatest\t*\tnpm:demo-cli#claude\t-\t-\tmusl-loader\tx86_64:source=npm:demo-cli-x64#claude\tA tool that comes from npm.\t%s\n' "$R5_NONE"
+        printf 'muslonly\tnpm-musl\tlatest\t*\tnpm:demo-cli#claude\t-\t-\tmusl-loader\tcommand=muslonly\tAn npm tool with no x86_64 package.\t%s\n' "$R5_NONE"
+        printf 'needslib\tnpm-musl\tlatest\t*\tnpm:demo-cli#claude\t-\t-\tmusl-loader,nolib\tcommand=needslib;musl-libs=nolib;x86_64:source=npm:demo-cli-x64#claude\tNeeds a library x86_64 does not have.\t%s\n' "$R5_NONE"
+        printf 'droid\tnpm-android\tlatest\t*\tnpm:demo-droid#bin/droid.bin\t-\t-\t-\tcommand=droid\tAn Android build for arm64 only.\t%s\n' "$R5_NONE"
+        printf 'hello\tfile\t1\t*\tfile://%s/hello.conf\t%s\t~/.config/hello.conf\t-\t-\tA greeting you can read.\t%s\n' "$FX" "$(sha "$FX/hello.conf")" "$R5_NONE"
+    } > "$user_catalog"
+
+    ARCH_KNOB=x86_64
+    tl list --tsv
+    expect_status "list on x86_64" 0
+    expect_out "a binary with an x86_64 build is offered on x86_64" $'^relbin\t'
+    expect_no_out "one without is not" $'^armonly\t'
+    expect_out "an npm-musl item with an x86_64 package is offered" $'^claude-code\t'
+    expect_no_out "one without is not" $'^muslonly\t'
+    expect_no_out "nor one whose musl library has no x86_64 build" $'^needslib\t'
+    expect_no_out "an npm-android item without an x86_64 package is not" $'^droid\t'
+    expect_out "and a file is offered everywhere" $'^hello\t'
+    ARCH_KNOB=amd64
+    tl list --tsv
+    expect_out "amd64 is read as x86_64" $'^relbin\t'
+
+    : > "$ROOT/curl.log"
+    ARCH_KNOB=x86_64
+    tl install relbin -y
+    expect_status "the x86_64 build installs" 0
+    if grep -q "file://$FX/rel/1.0/relbin-x86_64" "$ROOT/curl.log"; then pass; else fail "binaries:relbin@1.0 resolved to <releases>/1.0/relbin-x86_64 on x86_64" "$(cat "$ROOT/curl.log")"; fi
+    if grep -q "relbin-aarch64" "$ROOT/curl.log"; then fail "the aarch64 build is never fetched on x86_64"; else pass; fi
+    expect_content "it is the x86_64 file that landed" "$TESTHOME/.local/bin/relbin" "$(cat "$FX/rel/1.0/relbin-x86_64")"
+    ARCH_KNOB=x86_64
+    tl remove relbin -y
+    ARCH_KNOB=x86_64
+    tl install relbad -y
+    if [ "$ST" != 0 ]; then pass; else fail "the x86_64 digest is the one checked: a wrong one refuses the install"; fi
+    expect_no_file "and nothing landed" "$TESTHOME/.local/bin/relbad"
+
+    cat > "$ROOT/patchelf-log" <<EOF
+#!/bin/sh
+printf '%s\n' "\$*" >> "$ROOT/patchelf.log"
+EOF
+    chmod +x "$ROOT/patchelf-log"
+    : > "$ROOT/patchelf.log"
+    : > "$ROOT/curl.log"
+    ARCH_KNOB=x86_64
+    PATCHELF_KNOB="$ROOT/patchelf-log"
+    tl install claude-code -y
+    expect_status "an npm-musl item installs on x86_64" 0
+    if grep -q "registry/demo-cli-x64/latest" "$ROOT/curl.log"; then pass; else fail "from the package its x86_64:source names" "$(cat "$ROOT/curl.log")"; fi
+    if grep -q "registry/demo-cli/latest" "$ROOT/curl.log"; then fail "and never from the aarch64 one"; else pass; fi
+    expect_content "the x86_64 loader is the musl-loader part" "$TESTHOME/.local/lib/musl/ld-musl-x86_64.so.1" "$(cat "$FX/loader-x86.bin")"
+    expect_content "and is copied in as ld-musl-x86_64.so.1" "$TESTHOME/.local/lib/claude-code/ld-musl-x86_64.so.1" "$(cat "$FX/loader-x86.bin")"
+    expect_no_file "with no aarch64 loader beside it" "$TESTHOME/.local/lib/claude-code/ld-musl-aarch64.so.1"
+    if grep -q -- "--set-interpreter $TESTHOME/.local/lib/claude-code/ld-musl-x86_64.so.1" "$ROOT/patchelf.log"; then pass; else fail "patchelf points the executable at ld-musl-x86_64.so.1" "$(cat "$ROOT/patchelf.log")"; fi
+    if "$TESTHOME/.local/bin/claude" 2>/dev/null | grep -q 'demo-cli x64'; then pass; else fail "the wrapper runs the x86_64 package"; fi
+    ARCH_KNOB=x86_64
+    tl remove claude-code musl-loader -y
+
+    ARCH_KNOB=riscv64
+    tl list --tsv
+    expect_status "list on a processor with no prebuilt tools" 0
+    expect_no_out "no binary is offered there" $'^relbin\t'
+    expect_no_out "and no npm item, x86_64 package or not" $'^claude-code\t'
+    expect_out "files still are" $'^hello\t'
+
+    tl list --tsv
+    expect_out "on aarch64 a binary is offered without an x86_64 build" $'^armonly\t'
+    expect_out "and so is an npm item without an x86_64 package" $'^muslonly\t'
+    expect_out "and an npm-android one" $'^droid\t'
+    expect_out "and one whose musl library is aarch64 only" $'^needslib\t'
+    : > "$ROOT/curl.log"
+    tl install relbin -y
+    if grep -q "relbin-x86_64" "$ROOT/curl.log"; then fail "aarch64 never reads the x86_64 options"; else pass; fi
+    expect_content "and installs its own build" "$TESTHOME/.local/bin/relbin" "$(cat "$FX/rel/1.0/relbin-aarch64")"
+    tl remove relbin -y
+    rm -rf "$TESTHOME/.local"
+    mv "$ROOT/saved-local" "$TESTHOME/.local"
 
     # --- keeping tlstore itself current, with the store program that pairs with it ---
     if [ "$HAVE_MINISIGN" = 1 ]; then
@@ -2758,6 +2870,32 @@ bc_write_items "$bc_items" 0 Tools
 OUT="$(cd "$BC_ROOT" && bash scripts/build-catalog.sh "$BC_SUMS" 2>&1)"; ST=$?
 if [ "$ST" != 0 ]; then pass; else fail "no item at all being featured is refused"; fi
 
+# x86_64 (Revision 12): a binary's x86_64:digest comes from SHA256SUMS, only once it is there.
+bc_write_items "$bc_items" 1 Tools
+printf 'cli\tnpm-musl\tlatest\t*\tnpm:demo-arm64#cli\t-\t-\tenv=A=1;x86_64:source=npm:demo-x64#cli\tAn npm tool.\t-\t-\t0\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t0\t-\t-\n' >> "$bc_items"
+printf 'loader\tbinary\t1\t*\tbinaries:demo@1.0\t~/.local/lib/x/ld-aarch64\t-\thidden=1;x86_64:target=~/.local/lib/x/ld-x86_64\tA part.\t-\t-\t0\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t0\t-\t-\n' >> "$bc_items"
+OUT="$(cd "$BC_ROOT" && bash scripts/build-catalog.sh "$BC_SUMS" 2>&1)"; ST=$?
+if [ "$ST" = 0 ]; then pass; else fail "build-catalog.sh with x86_64 options and no x86_64 build" "$OUT"; fi
+if awk -F'\t' '$1=="demo" { exit ($9=="-") ? 0 : 1 }' "$bc_cat"; then pass; else fail "no <asset>-x86_64 line: the binary gets no x86_64:digest"; fi
+if awk -F'\t' '$1=="loader" { exit ($9=="hidden=1;x86_64:target=~/.local/lib/x/ld-x86_64") ? 0 : 1 }' "$bc_cat"; then pass; else fail "and a binary's other x86_64 options ride through"; fi
+if awk -F'\t' '$1=="cli" { exit ($9=="env=A=1;x86_64:source=npm:demo-x64#cli" && $6=="-") ? 0 : 1 }' "$bc_cat"; then pass; else fail "an npm item's x86_64:source rides through, with no digest"; fi
+cp "$BC_SUMS" "$BC_ROOT/SHA256SUMS.arm"
+printf '4444444444444444444444444444444444444444444444444444444444444444  demo-x86_64\n' >> "$BC_SUMS"
+OUT="$(cd "$BC_ROOT" && bash scripts/build-catalog.sh "$BC_SUMS" 2>&1)"; ST=$?
+if [ "$ST" = 0 ]; then pass; else fail "build-catalog.sh with an x86_64 build published" "$OUT"; fi
+if awk -F'\t' '$1=="demo" { exit ($9=="x86_64:digest=4444444444444444444444444444444444444444444444444444444444444444" && $6=="1111111111111111111111111111111111111111111111111111111111111111") ? 0 : 1 }' "$bc_cat"; then pass; else fail "with <asset>-x86_64 in SHA256SUMS the row gets x86_64:digest, its own digest unchanged" "$(grep '^demo' "$bc_cat" | cut -f6,9)"; fi
+if awk -F'\t' '$1=="loader" { exit ($9=="hidden=1;x86_64:target=~/.local/lib/x/ld-x86_64;x86_64:digest=4444444444444444444444444444444444444444444444444444444444444444") ? 0 : 1 }' "$bc_cat"; then pass; else fail "appended after the options already there"; fi
+if awk -F'\t' '$1=="cli" { exit ($9=="env=A=1;x86_64:source=npm:demo-x64#cli") ? 0 : 1 }' "$bc_cat"; then pass; else fail "an npm item never gets an x86_64:digest"; fi
+cp "$bc_cat" "$bc_prefix/libexec/termux-launcher/tlstore/catalog.tsv"
+OUT="$(env -i HOME="$BC_ROOT/home" PATH="/usr/bin:/bin" TLSTORE_PREFIX="$bc_prefix" \
+    TLSTORE_CATALOG_URL="file://$BC_ROOT/none.tsv" TLSTORE_RELEASE_BASE="file://$BC_ROOT/none" \
+    TLSTORE_ARCH=x86_64 /bin/sh "$TLSTORE" list --tsv 2>&1)"; ST=$?
+if printf '%s' "$OUT" | grep -q $'^demo\t'; then pass; else fail "tlstore on x86_64 offers the row build-catalog.sh gave an x86_64:digest" "$OUT"; fi
+cp "$BC_ROOT/SHA256SUMS.arm" "$BC_SUMS"
+printf 'hand\tbinary\t1\t*\tbinaries:demo@1.0\t-\t-\tx86_64:digest=5555555555555555555555555555555555555555555555555555555555555555\tWritten by hand.\t-\t-\t0\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t0\t-\t-\n' >> "$bc_items"
+OUT="$(cd "$BC_ROOT" && bash scripts/build-catalog.sh "$BC_SUMS" 2>&1)"; ST=$?
+if [ "$ST" != 0 ]; then pass; else fail "a hand-written x86_64:digest is refused"; fi
+
 rm -rf "$BC_ROOT"
 
 echo
@@ -2789,16 +2927,20 @@ expect_out "and says which one" "tlstore-ui-x86_64"
 # --- bins-plan.sh: the build matrix ---
 OUT="$(bash "$BN_ROOT/scripts/bins-plan.sh" all 2>&1)"; ST=$?
 expect_status "bins-plan.sh all" 0
-expect_out "a per-edition tool gets a job per edition" '{"tool":"dawn","edition":"io.vaj.tl","asset":"dawn-io.vaj.tl-aarch64"}'
-expect_out "with the unsuffixed asset for com.termux" '{"tool":"dawn","edition":"com.termux","asset":"dawn-aarch64"}'
-expect_out "an edition-agnostic tool gets one job" '{"tool":"btop","edition":"-","asset":"btop-aarch64"}'
+expect_out "a per-edition tool gets a job per edition" '{"tool":"dawn","edition":"io.vaj.tl","arch":"aarch64","asset":"dawn-io.vaj.tl-aarch64"}'
+expect_out "with the unsuffixed asset for com.termux" '{"tool":"dawn","edition":"com.termux","arch":"aarch64","asset":"dawn-aarch64"}'
+expect_out "an edition-agnostic tool gets one job per processor" '{"tool":"btop","edition":"-","arch":"aarch64","asset":"btop-aarch64"}'
+expect_out "x86_64 included" '{"tool":"btop","edition":"-","arch":"x86_64","asset":"btop-x86_64"}'
+expect_out "a per-edition tool's x86_64 build for com.termux" '{"tool":"dawn","edition":"com.termux","arch":"x86_64","asset":"dawn-x86_64"}'
+expect_no_out "and none for io.vaj.tl, which is aarch64 only" '"edition":"io.vaj.tl","arch":"x86_64"'
 expect_out "the musl runtime is one job for two assets" '"asset":"musl-libgcc-aarch64,musl-libstdcxx-aarch64"'
+expect_out "on each processor" '"asset":"musl-libgcc-x86_64,musl-libstdcxx-x86_64"'
 if command -v python3 >/dev/null 2>&1; then
-    if printf '%s' "$OUT" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if len(d["include"]) == 11 else 1)'; then pass; else fail "the matrix is JSON with eleven entries" "$OUT"; fi
+    if printf '%s' "$OUT" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if len(d["include"]) == 19 else 1)'; then pass; else fail "the matrix is JSON with nineteen entries" "$OUT"; fi
 fi
 OUT="$(bash "$BN_ROOT/scripts/bins-plan.sh" dawn,btop 2>&1)"; ST=$?
 expect_status "bins-plan.sh with a comma list" 0
-if [ "$(printf '%s' "$OUT" | grep -o '"tool"' | wc -l)" = 3 ]; then pass; else fail "dawn,btop is three jobs" "$OUT"; fi
+if [ "$(printf '%s' "$OUT" | grep -o '"tool"' | wc -l)" = 5 ]; then pass; else fail "dawn,btop is five jobs" "$OUT"; fi
 OUT="$(bash "$BN_ROOT/scripts/bins-plan.sh" nonsense 2>&1)"; ST=$?
 expect_status "an unknown tool is refused" 2
 
@@ -2845,6 +2987,34 @@ expect_status "bins-record.sh for a plain-versioned rebuild" 0
 if awk -F'\t' '$1=="btop" { exit ($5=="binaries:btop@bins-2026.09.27" && $3=="1.4.7") ? 0 : 1 }' "$BN_ROOT/scripts/items.tsv"; then pass; else fail "the row moves to the tag, version untouched"; fi
 if grep -q 'bins-record: btop (\*): the binary changed but its version 1.4.7 did not' "$BN_ROOT/record.err"; then pass; else fail "and stderr says the version needs a hand" "$(cat "$BN_ROOT/record.err")"; fi
 if awk -F'\t' '$1=="dawn" && $4=="com.termux" { exit ($5=="binaries:dawn@bins-2026.09.26") ? 0 : 1 }' "$BN_ROOT/scripts/items.tsv"; then pass; else fail "dawn, not in this build, keeps the earlier tag"; fi
+# Both processors in one build: the x86_64 lines are recorded the same way, and an asset whose
+# x86_64 build alone is new still moves its row and bumps a +commit.N version.
+printf 'btop for x86_64\n' > "$BN_ROOT/assets/btop-x86_64"
+printf 'built dawn\n' > "$BN_ROOT/assets/dawn-aarch64"
+printf 'built dawn for x86_64\n' > "$BN_ROOT/assets/dawn-x86_64"
+OUT="$(cd "$BN_ROOT" && bash scripts/bins-record.sh bins-2026.09.28 assets 2>"$BN_ROOT/record.err")"; ST=$?
+expect_status "bins-record.sh for a build of both processors" 0
+if grep -qx "$(sha "$BN_ROOT/assets/btop-x86_64")  btop-x86_64" "$BN_ROOT/SHA256SUMS" && grep -qx "$(sha "$BN_ROOT/assets/dawn-x86_64")  dawn-x86_64" "$BN_ROOT/SHA256SUMS"; then pass; else fail "the x86_64 assets' lines are added" "$(cat "$BN_ROOT/SHA256SUMS")"; fi
+if grep -qx "$(sha "$BN_ROOT/assets/btop-aarch64")  btop-aarch64" "$BN_ROOT/SHA256SUMS"; then pass; else fail "beside the aarch64 ones"; fi
+if awk -F'\t' '$1=="dawn" && $4=="com.termux" { exit ($5=="binaries:dawn@bins-2026.09.28" && $3=="0.1.3+0e958747.5") ? 0 : 1 }' "$BN_ROOT/scripts/items.tsv"; then pass; else fail "a new x86_64 build moves the row and bumps its build number" "$(grep '^dawn' "$BN_ROOT/scripts/items.tsv" | cut -f3-5)"; fi
+if awk -F'\t' '$1=="dawn" && $4=="io.vaj.tl" { exit ($5=="binaries:dawn-io.vaj.tl@bins-2026.09.26") ? 0 : 1 }' "$BN_ROOT/scripts/items.tsv"; then pass; else fail "the aarch64-only edition's row stays where it was"; fi
+if awk -F'\t' '$1=="btop" { exit ($5=="binaries:btop@bins-2026.09.28") ? 0 : 1 }' "$BN_ROOT/scripts/items.tsv"; then pass; else fail "btop moves with both builds"; fi
+# A later aarch64-only rebuild moves the row to a tag without the x86_64 file: its line goes.
+printf 'btop a third time\n' > "$BN_ROOT/assets/btop-aarch64"
+bn_dawn_x86="$(sha "$BN_ROOT/assets/dawn-x86_64")"
+rm -f "$BN_ROOT/assets/btop-x86_64" "$BN_ROOT/assets/dawn-aarch64" "$BN_ROOT/assets/dawn-x86_64"
+OUT="$(cd "$BN_ROOT" && bash scripts/bins-record.sh bins-2026.09.29 assets 2>"$BN_ROOT/record.err")"; ST=$?
+expect_status "bins-record.sh for an aarch64-only rebuild" 0
+if grep -q '  btop-x86_64$' "$BN_ROOT/SHA256SUMS"; then fail "the x86_64 line not under the new tag is dropped" "$(cat "$BN_ROOT/SHA256SUMS")"; else pass; fi
+if grep -q 'bins-record: btop-x86_64 was not part of this build' "$BN_ROOT/record.err"; then pass; else fail "and stderr says so" "$(cat "$BN_ROOT/record.err")"; fi
+if grep -qx "$bn_dawn_x86  dawn-x86_64" "$BN_ROOT/SHA256SUMS"; then pass; else fail "another tool's x86_64 line is untouched"; fi
+# An x86_64 build without its aarch64 one cannot move the row: nothing is recorded.
+rm -f "$BN_ROOT/assets/btop-aarch64"
+printf 'sigye for x86_64\n' > "$BN_ROOT/assets/sigye-x86_64"
+bn_before="$(sha "$BN_ROOT/SHA256SUMS") $(sha "$BN_ROOT/scripts/items.tsv")"
+OUT="$(cd "$BN_ROOT" && bash scripts/bins-record.sh bins-2026.09.30 assets 2>"$BN_ROOT/record.err")"; ST=$?
+if [ "$ST" != 0 ]; then pass; else fail "an x86_64 build without its aarch64 one is refused"; fi
+if [ "$bn_before" = "$(sha "$BN_ROOT/SHA256SUMS") $(sha "$BN_ROOT/scripts/items.tsv")" ]; then pass; else fail "and nothing is changed"; fi
 rm -rf "$BN_ROOT"
 
 echo
