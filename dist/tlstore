@@ -1329,6 +1329,44 @@ do_fisher() {
 
 do_bundle() {
     state_record "$ii_name" bundle "$ii_version"
+    db_shell=$(opt "$ii_options" login-shell)
+    [ -n "$db_shell" ] && set_login_shell "$ii_name" "$db_shell"
+    return 0
+}
+
+# set_login_shell <item> <shell> — a bundle with login-shell=<shell> makes that shell the one new
+# sessions start in, through Termux's own chsh (the ~/.termux/shell symlink the app follows). A
+# shell that is not there, or a chsh that is not, is said and leaves the install standing: the
+# bundle's files are in place either way, and the hint is the one command the person would run.
+set_login_shell() {
+    sls_item="$1"
+    sls_shell="$2"
+    if ! have "$sls_shell"; then
+        err "$sls_item could not make $sls_shell your login shell: $sls_shell is not installed"
+        return 0
+    fi
+    if ! have chsh; then
+        err "$sls_item could not make $sls_shell your login shell: chsh is missing. Run: chsh -s $sls_shell"
+        return 0
+    fi
+    if chsh -s "$sls_shell" </dev/null >/dev/null 2>&1; then
+        say "$sls_shell is now your login shell: new sessions start in it"
+    else
+        err "$sls_item could not make $sls_shell your login shell. Run: chsh -s $sls_shell"
+    fi
+    return 0
+}
+
+# unset_login_shell <shell> — the way back out: when ~/.termux/shell still points at <shell>, the
+# symlink goes and sessions start in the default shell again. A link to anything else is the
+# person's own choice and is left alone.
+unset_login_shell() {
+    uls_link="$HOME/.termux/shell"
+    [ -L "$uls_link" ] || return 0
+    uls_to=$(readlink "$uls_link" 2>/dev/null || true)
+    [ "$(basename "$uls_to")" = "$1" ] || return 0
+    rm -f "$uls_link"
+    say "  new sessions start in the default shell again"
     return 0
 }
 
@@ -1547,7 +1585,13 @@ remove_item() {
     state_forget "$ri_name"
     case "$ri_kind" in
         pkg) say "$ri_name is no longer tracked; the package itself stays installed" ;;
-        bundle) say "removed $ri_name" ;;
+        bundle)
+            say "removed $ri_name"
+            ri_item=$(row "$ri_name")
+            ri_shell=""
+            [ -n "$ri_item" ] && ri_shell=$(opt "$(field "$ri_item" 9)" login-shell)
+            [ -n "$ri_shell" ] && unset_login_shell "$ri_shell"
+            ;;
         *) say "removed $ri_name" ;;
     esac
     return 0
