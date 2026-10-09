@@ -4,7 +4,7 @@
 #
 #   ./build-asset.sh <tool> [edition]
 #
-#   tool      btop | tl-priv | kitten | sigye | fastfetch | dawn | musl-loader | musl-runtime
+#   tool      btop | tl-priv | kitten | sigye | herdr | fastfetch | dawn | musl-loader | musl-runtime
 #   edition   com.termux (default) | io.vaj.tl — only for fastfetch, dawn and musl-loader, the
 #             three whose binary carries the edition's prefix (README.md, "One build per
 #             launcher edition"); the others build once for every edition
@@ -169,6 +169,11 @@ case "$tool" in
     sigye)
         "$SCRIPT_DIR/build-sigye.sh"
         cp "$TL_OUT/sigye" "$TL_ASSETS/$asset"
+        ;;
+    herdr)
+        # Not built: upstream's static Linux binary, checked against its pinned digest.
+        "$SCRIPT_DIR/fetch-herdr.sh"
+        cp "$TL_OUT/herdr" "$TL_ASSETS/$asset"
         ;;
     fastfetch)
         sysroot

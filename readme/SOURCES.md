@@ -26,5 +26,9 @@ Notes:
   `download_url` GitHub's contents API returned was that exact URL; fetching the same content
   through `gh api .../contents/<path>?ref=<sha>` (base64-decoded) worked for both. Cause not
   diagnosed — noted here in case it recurs for a future re-pin.
+- `herdr.md` is not a copy of upstream's README either: that one is a short feature list for a
+  desktop install (badges, a video, install commands). It is written for this store from that
+  list and herdr's quick-start docs (`herdrdev/herdr@7b116c05bfda646af39d2524c54e70c751f57ee8`,
+  tag `v0.9.3`, Apache-2.0), with what was verified on a phone, so it has no pinned line either.
 - `termux-api-shims.md` is not fetched from upstream: it is written for this store, so it has no
   `<!-- tlstore: pinned from ... -->` line and no relative images to resolve.

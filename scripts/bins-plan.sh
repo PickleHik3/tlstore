@@ -27,6 +27,7 @@ btop         -                     btop
 tl-priv      -                     tl-priv
 kitten       -                     kitten
 sigye        -                     sigye
+herdr        -                     herdr
 fastfetch    com.termux,io.vaj.tl  -
 dawn         com.termux,io.vaj.tl  -
 musl-loader  com.termux,io.vaj.tl  -

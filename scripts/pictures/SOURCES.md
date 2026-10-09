@@ -20,6 +20,7 @@ does not print black. `[0]` on the source file selects a GIF's first frame.)
 | `opencode.jpg` | `packages/web/src/assets/lander/screenshot.png` in [anomalyco/opencode](https://github.com/anomalyco/opencode) | opencode is MIT licensed |
 | `sigye.jpg` | first frame of `assets/demo.gif` in [am2rican5/sigye](https://github.com/am2rican5/sigye) | sigye is MIT licensed |
 | `btop.jpg` | a frame of the same screen recording as `hero/btop.png`: this build of btop running on a phone through the privileged lane | btop is Apache-2.0 licensed; the screenshot is this repository's own |
+| `herdr.jpg` | `assets/screenshot.png` in [herdrdev/herdr](https://github.com/herdrdev/herdr) at `7b116c05bfda646af39d2524c54e70c751f57ee8` (tag `v0.9.3`), cropped to the terminal window (`-crop 1566x980+177+48` on the 1920x1080 original) before the usual conversion, since the desktop around it is wasted width on a phone | herdr is Apache-2.0 licensed |
 
 `fish-shell` has no picture: it is the launcher's own setup, not one upstream project, so there is
 no single README to take a hero image from.

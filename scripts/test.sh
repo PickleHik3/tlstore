@@ -3015,7 +3015,7 @@ expect_no_out "and none for io.vaj.tl, which is aarch64 only" '"edition":"io.vaj
 expect_out "the musl runtime is one job for two assets" '"asset":"musl-libgcc-aarch64,musl-libstdcxx-aarch64"'
 expect_out "on each processor" '"asset":"musl-libgcc-x86_64,musl-libstdcxx-x86_64"'
 if command -v python3 >/dev/null 2>&1; then
-    if printf '%s' "$OUT" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if len(d["include"]) == 19 else 1)'; then pass; else fail "the matrix is JSON with nineteen entries" "$OUT"; fi
+    if printf '%s' "$OUT" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if len(d["include"]) == 21 else 1)'; then pass; else fail "the matrix is JSON with twenty-one entries" "$OUT"; fi
 fi
 OUT="$(bash "$BN_ROOT/scripts/bins-plan.sh" dawn,btop 2>&1)"; ST=$?
 expect_status "bins-plan.sh with a comma list" 0

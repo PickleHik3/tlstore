@@ -17,6 +17,7 @@ NDK plus a sysroot assembled with `dpkg-deb -x`.
 | `build-kitten.sh` | kitty's standalone `kitten` client | Go + python3 (+ NDK for x86_64) |
 | `build-btop.sh` | patched btop, fully static, for the launcher's Shizuku lane | NDK + GNU make |
 | `build-tl-priv.sh` | `tl-priv`, the lane's client (`tl-priv/tl-priv.c`), fully static | NDK |
+| `fetch-herdr.sh` | herdr, upstream's own static musl build, digest-pinned (not built) | curl |
 
 `btop` and `tl-priv` are edition-agnostic: both are linked `-static` against the NDK's Bionic
 `libc.a`, have no interpreter, no `NEEDED` entries and no prefix baked in. They have to be — the
@@ -104,7 +105,7 @@ Each result is uploaded as `<tool>-<package name>-<arch>` (`fastfetch-io.vaj.tl-
 row per edition and picks between them by `$PREFIX`, skipping the item with a build hint for a
 prefix nothing is published for.
 
-`sigye` and `kitten` are prefix-independent — no `RUNPATH`, no absolute prefix anywhere in either
+`sigye`, `kitten` and `herdr` are prefix-independent — no `RUNPATH`, no absolute prefix anywhere in either
 binary — so one build of each serves every edition.
 
 ## Why `kitten` is here and not in `../termux`

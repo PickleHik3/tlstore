@@ -27,7 +27,7 @@ on:
   workflow_dispatch:
     inputs:
       tools:
-        description: "Tools to build: all, or a comma list of btop, tl-priv, kitten, sigye, fastfetch, dawn, musl-loader, musl-runtime"
+        description: "Tools to build: all, or a comma list of btop, tl-priv, kitten, sigye, herdr, fastfetch, dawn, musl-loader, musl-runtime"
         required: false
         default: "all"
 
@@ -72,9 +72,10 @@ jobs:
             libxinerama-dev libxcursor-dev libxkbcommon-x11-dev libx11-xcb-dev libwayland-dev \
             wayland-protocols libdbus-1-dev libfontconfig-dev
 
-      # kitten needs the NDK only on x86_64, where its link goes through the NDK's clang.
+      # kitten needs the NDK only on x86_64, where its link goes through the NDK's clang. herdr and
+      # musl-runtime are fetched, not built.
       - name: NDK
-        if: matrix.tool != 'musl-runtime' && (matrix.tool != 'kitten' || matrix.arch == 'x86_64')
+        if: matrix.tool != 'musl-runtime' && matrix.tool != 'herdr' && (matrix.tool != 'kitten' || matrix.arch == 'x86_64')
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" >/dev/null
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
