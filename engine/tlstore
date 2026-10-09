@@ -914,10 +914,12 @@ pm_run() {
     [ "$pr_status" = 0 ]
 }
 
+# -Sy as Termux's own pkg does on pacman: a fresh bootstrap has never synced its
+# package lists, and a plain -S finds nothing in them ("target not found").
 install_pkg() {
     if have pacman; then
         # shellcheck disable=SC2068
-        pm_run pacman -S --needed --noconfirm $@
+        pm_run pacman -Sy --needed --noconfirm $@
     elif have pkg; then
         # shellcheck disable=SC2068
         pm_run pkg install -y $@
@@ -930,7 +932,7 @@ install_pkg() {
 upgrade_pkg() {
     if have pacman; then
         # shellcheck disable=SC2068
-        pm_run pacman -S --needed --noconfirm $@
+        pm_run pacman -Sy --needed --noconfirm $@
     elif have apt; then
         # shellcheck disable=SC2068
         pm_run apt-get install -y -qq --only-upgrade $@
@@ -1071,7 +1073,19 @@ already_here() {
     [ -n "$ah_row" ] || return 1
     is_installed "$1" || return 1
     case "$(field "$ah_row" 2)" in
-        pkg|bundle|fisher) return 0 ;;
+        # A package counts only while it is really there: one taken away behind
+        # tlstore's back (pkg uninstall) is still in the state, and trusting that
+        # would skip it on every install from then on.
+        pkg)
+            for ah_p in $(field "$ah_row" 5); do
+                pkg_present "$ah_p" || return 1
+            done
+            return 0
+            ;;
+        # A bundle's own step is never skipped: it is cheap, and login-shell=
+        # has to happen again when the shell was changed or not there last time.
+        bundle) return 1 ;;
+        fisher) return 0 ;;
     esac
     [ "$(installed_version "$1")" = "$(field "$ah_row" 3)" ]
 }
@@ -1169,7 +1183,11 @@ install_item() {
         PROGRESS_NOTE="already installed"
         return 0
     fi
-    conflict_check "$ii_name" || return 1
+    # An installed bundle comes through here every time (already_here never skips one); as in
+    # cmd_install, what is already installed is not refused afterwards.
+    if [ "$ii_kind" != bundle ] || ! is_installed "$ii_name"; then
+        conflict_check "$ii_name" || return 1
+    fi
 
     case "$ii_kind" in
         pkg) do_pkg ;;
@@ -1328,6 +1346,19 @@ do_fisher() {
 }
 
 do_bundle() {
+    # A member that did not install fails the bundle, rather than the bundle
+    # standing as installed around it. One with no row here (another edition's,
+    # or not built for this processor) was skipped on purpose and does not count.
+    db_missing=""
+    for db_m in $(commas "$(field "$(row "$ii_name")" 8)"); do
+        [ "$db_m" = "-" ] && continue
+        [ -n "$(row "$db_m")" ] || continue
+        is_installed "$db_m" || db_missing="$db_missing $db_m"
+    done
+    if [ -n "$db_missing" ]; then
+        err "$ii_name is not complete: $(words_list "${db_missing# }") did not install"
+        return 1
+    fi
     state_record "$ii_name" bundle "$ii_version"
     db_shell=$(opt "$ii_options" login-shell)
     [ -n "$db_shell" ] && set_login_shell "$ii_name" "$db_shell"
@@ -1341,18 +1372,24 @@ do_bundle() {
 set_login_shell() {
     sls_item="$1"
     sls_shell="$2"
+    # The note is what tlstore-ui shows on the item's closing line; err alone
+    # goes to a stderr the store does not show.
     if ! have "$sls_shell"; then
         err "$sls_item could not make $sls_shell your login shell: $sls_shell is not installed"
+        PROGRESS_NOTE="$sls_shell is not installed, so it is not your login shell"
         return 0
     fi
     if ! have chsh; then
         err "$sls_item could not make $sls_shell your login shell: chsh is missing. Run: chsh -s $sls_shell"
+        PROGRESS_NOTE="installed; run chsh -s $sls_shell to start sessions in it"
         return 0
     fi
     if chsh -s "$sls_shell" </dev/null >/dev/null 2>&1; then
         say "$sls_shell is now your login shell: new sessions start in it"
+        PROGRESS_NOTE="new sessions start in $sls_shell"
     else
         err "$sls_item could not make $sls_shell your login shell. Run: chsh -s $sls_shell"
+        PROGRESS_NOTE="installed; run chsh -s $sls_shell to start sessions in it"
     fi
     return 0
 }

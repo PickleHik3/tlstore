@@ -147,6 +147,7 @@ write_catalog() {
         # login-shell=: a bundle that makes its shell the one new sessions start in, the way
         # fish-shell does, and takes that back on remove.
         printf 'shellkit\tbundle\t-\t*\t-\t-\t-\tsecret\tlogin-shell=fish\tA shell and its setup.\t%s\n' "$R5_NONE"
+        printf 'pkgkit\tbundle\t-\t*\t-\t-\t-\tdemo-pkg\t-\tA bundle of one package.\t%s\n' "$R5_NONE"
         printf 'phantomshell\tbundle\t-\t*\t-\t-\t-\tsecret\tlogin-shell=nosuchsh\tA shell that is not there.\t%s\n' "$R5_NONE"
         printf 'secret\tfile\t1\t*\tfile://%s/mine.conf\t%s\t~/.config/secret.conf\t-\thidden=1\tA part of something else.\t%s\n' "$FX" "$(sha "$FX/mine.conf")" "$R5_NONE"
         printf 'launcheronly\tbinary\t1\t*\tfile://%s/twin.bin\t%s\t~/.local/bin/launcheronly\t-\thost=launcher\tOnly where the launcher runs it.\t%s\n' "$FX" "$(sha "$FX/twin.bin")" "$R5_NONE"
@@ -282,7 +283,9 @@ EOF
     cat > "$FIXBIN/pacman" <<EOF
 #!/bin/sh
 echo "\$@" >> "$ROOT/pkg.log"
-if [ "\${1:-}" = -S ]; then
+# A failed install, while the test has dropped this marker: a package it cannot find.
+if [ "\${1:-}" = -Sy ] && [ -e "$ROOT/pacman-fails" ]; then echo "error: target not found"; exit 1; fi
+if [ "\${1:-}" = -S ] || [ "\${1:-}" = -Sy ]; then
     # What the real one prints with no terminal, so --progress has lines to read.
     echo ":: Synchronizing package databases..."
     echo " demo-one-1-1-aarch64 downloading..."
@@ -294,6 +297,8 @@ fi
 [ "\${2:-}" = demo-build ] && exit 1
 # termux-api is "installed" only while the test has dropped this marker (the conflicts= tests).
 if [ "\${2:-}" = termux-api ] && [ ! -e "$ROOT/have-termux-api" ]; then exit 1; fi
+# demo-two is "gone" while this marker is there: removed behind tlstore's back (pkg uninstall).
+if [ "\${2:-}" = demo-two ] && [ -e "$ROOT/gone-demo-two" ]; then exit 1; fi
 exit 0
 EOF
     chmod +x "$FIXBIN/pacman"
@@ -820,6 +825,36 @@ exec \"$TESTHOME/.local/bin/tl-priv\" run \"$TESTHOME/.local/lib/tlstore/priv/pr
     expect_status "a missing shell does not fail the bundle" 0
     expect_out "a missing shell is named" "nosuchsh is not installed"
     tl remove phantomshell -y
+    # Installed again, a bundle is not skipped: the shell is set again, since it may have been
+    # changed or missing last time.
+    tl install shellkit -y
+    rm -f "$TESTHOME/.termux/shell"
+    tl install shellkit -y
+    expect_no_out "an installed bundle is not skipped" "shellkit is already installed"
+    if [ "$(readlink "$TESTHOME/.termux/shell")" = "$FIXBIN/fish" ]; then pass; else fail "installing the bundle again sets the login shell again"; fi
+    tl remove shellkit -y
+    rm -f "$TESTHOME/.termux/shell"
+    # A recorded package that is not really there any more is installed again, not skipped.
+    tl install demo-pkg -y
+    touch "$ROOT/gone-demo-two"
+    pk_seen=$(wc -l < "$ROOT/pkg.log")
+    tl install demo-pkg -y
+    expect_no_out "a package removed behind tlstore's back is not already installed" "already installed"
+    if tail -n "+$((pk_seen + 1))" "$ROOT/pkg.log" | grep -q -- "-Sy --needed --noconfirm demo-one demo-two"; then pass; else fail "the package manager was asked for it again"; fi
+    rm -f "$ROOT/gone-demo-two"
+    tl install demo-pkg -y
+    expect_out "with the package back, it is already installed" "demo-pkg is already installed"
+    tl remove demo-pkg -y
+    # A bundle whose member did not install is not recorded as installed around it.
+    touch "$ROOT/pacman-fails"
+    tl install pkgkit -y
+    rm -f "$ROOT/pacman-fails"
+    expect_status "a bundle with a member that failed fails" 1
+    expect_out "and names the member" "pkgkit is not complete: demo-pkg did not install"
+    if grep -q "^pkgkit$(printf '\t')" "$TESTHOME/.local/share/tlstore/installed.tsv"; then fail "the bundle is not recorded"; else pass; fi
+    tl install pkgkit -y
+    expect_status "installed again once the package can be found, it lands" 0
+    tl remove pkgkit -y
 
     # --- npm-musl ---
     tl install claude-code -y
@@ -834,7 +869,7 @@ exec \"$TESTHOME/.local/bin/tl-priv\" run \"$TESTHOME/.local/lib/tlstore/priv/pr
     expect_status "the wrapper runs" 0
     expect_out "the wrapper runs the package executable" "demo-cli 1.0.0"
     expect_out "the wrapper exports the options" "DEMO_FLAG=1"
-    if grep -q -- "-S --needed --noconfirm demo-build" "$ROOT/pkg.log"; then pass; else fail "the build tool was installed"; fi
+    if grep -q -- "-Sy --needed --noconfirm demo-build" "$ROOT/pkg.log"; then pass; else fail "the build tool was installed"; fi
     if grep -q -- "-R --noconfirm demo-build" "$ROOT/pkg.log"; then pass; else fail "the build tool was removed again"; fi
     tl info claude-code
     expect_out "info names the build tools" "Builds with demo-build"
