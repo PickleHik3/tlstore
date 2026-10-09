@@ -45,6 +45,20 @@ if [ "$mode" = "--prepare" ]; then
     # together; the signature made next covers those lines.
     "$here/embed-ui-digests.sh" "$dist"
 
+    # Phones already on a release take a new script (and the UI it names) only when its
+    # TLSTORE_VERSION is newer than theirs, so a script that changed under the same version
+    # reaches them only with an APK update. dist/tlstore as committed is the last release's.
+    prev="$(git -C "$repo" show HEAD:dist/tlstore 2>/dev/null || true)"
+    if [ -n "$prev" ] && [ "$prev" != "$(cat "$dist/tlstore")" ]; then
+        prev_version="$(printf '%s\n' "$prev" | sed -n 's/^TLSTORE_VERSION=//p' | head -1)"
+        version="$(sed -n 's/^TLSTORE_VERSION=//p' "$dist/tlstore" | head -1)"
+        if [ "$prev_version" = "$version" ]; then
+            echo "dist/tlstore changed since the last release but TLSTORE_VERSION is still $version:" >&2
+            echo "phones would never self-update to it. Raise TLSTORE_VERSION in engine/tlstore." >&2
+            exit 1
+        fi
+    fi
+
     echo
     echo "dist/ is prepared for tag $tag."
     echo "Now sign it by hand:  bash scripts/sign.sh"
