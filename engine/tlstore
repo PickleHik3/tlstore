@@ -2938,8 +2938,16 @@ snapshot_key() {
     printf 'v=%s;serial=%s;catalog=%s:%s;state=%s;held=%s;cache=%s;channel=%s;host=%s;arch=%s;pkg=%s;lver=%s;home=%s;prefix=%s' \
         "$TLSTORE_VERSION" "$CATALOG_SERIAL" "$CATALOG" "$(file_stamp "$CATALOG")" \
         "$(file_stamp "$STATE")" "$(file_stamp "$HELD")" "$(file_stamp "$CACHE_DIR/.changed")" \
-        "$(file_stamp "$CHANNEL_FILE")" \
+        "$(channel_stamp)" \
         "$HOST" "$ARCH" "$APP_PACKAGE" "$LAUNCHER_VERSION" "$HOME" "$PREFIX"
+}
+
+# channel_stamp — the channel answers without their times: every check
+# rewrites channel.tsv, and only a changed outcome or reason changes the
+# snapshot.
+channel_stamp() {
+    [ -f "$CHANNEL_FILE" ] || return 0
+    awk -F "$TAB" '{ printf "%s:%s:%s,", $1, $2, $4 }' "$CHANNEL_FILE"
 }
 
 # snapshot_channels — a `channel` line per channel CHANNEL_FILE has an
