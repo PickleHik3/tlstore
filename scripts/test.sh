@@ -509,6 +509,38 @@ tl_stdout() {
     return 0
 }
 
+# tl_fn <shell code> — the engine sourced with TLSTORE_SOURCE_ONLY=1, in the
+# environment tl gives it, then the code run against its functions directly.
+tl_fn() {
+    OUT="$(env -i \
+        HOME="$TESTHOME" PATH="$RUNPATH" \
+        TLSTORE_SOURCE_ONLY=1 \
+        TLSTORE_PREFIX="$TPREFIX" \
+        TLSTORE_CATALOG_URL="$CATALOG_URL" \
+        TLSTORE_NPM_REGISTRY="file://$FX/registry" \
+        TLSTORE_ARCH="${ARCH_KNOB:-aarch64}" \
+        TLSTORE_PATCHELF="${PATCHELF_KNOB:-true}" \
+        TLSTORE_ASSUME_TTY=0 \
+        TLSTORE_HOST="${HOST_KNOB:-}" \
+        TLSTORE_UI="${UI_KNOB:-}" \
+        TLSTORE_GITHUB="file://$FX/gh" \
+        TLSTORE_RELEASE_BASE="${RELEASE_KNOB:-file://$FX/release-none}" \
+        TLSTORE_BINARIES_RELEASES="file://$FX/rel" \
+        TLSTORE_BINARIES_RAW="file://$FX/raw" \
+        TERM_PROGRAM="${TP_KNOB:-}" \
+        TERM_PROGRAM_VERSION="${TPV_KNOB:-}" \
+        "${SHCMD[@]}" -c '. "$0"; '"$1" "$TLSTORE" < /dev/null 2>&1)"
+    ST=$?
+    ARCH_KNOB=""
+    HOST_KNOB=""
+    PATCHELF_KNOB=""
+    UI_KNOB=""
+    RELEASE_KNOB=""
+    TP_KNOB=""
+    TPV_KNOB=""
+    return 0
+}
+
 expect_status() {
     if [ "$ST" = "$2" ]; then pass; else fail "$1" "expected exit $2, got $ST"; fi
 }
@@ -547,6 +579,12 @@ run_suite() {
     TPV_KNOB=""
 
     # --- help, version, usage ---
+    # --- sourced: the functions, and nothing run ---
+    tl_fn 'need_catalog; printf "plan=%s\n" "$(plan_for fishkit)"'
+    expect_status "sourcing the engine runs nothing" 0
+    expect_out "a sourced engine answers a function call" "^plan=fishfn fishplugs fishkit$"
+    expect_no_out "a sourced engine prints no list" "Run 'tlstore install'"
+
     tl help; expect_status "help" 0; expect_out "help lists commands" "install \[name"
     expect_out "help has a usage line" "Usage: tlstore"
     expect_no_out "help does not list the store app's own commands" "readme-asset"

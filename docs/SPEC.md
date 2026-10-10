@@ -704,3 +704,135 @@ edition's, which is aarch64 only — so one run puts both builds under one `bins
 
 Not on x86_64: `codex` (its npm package is built for arm64 only) and every io.vaj.tl row.
 `TLSTORE_VERSION` moves to 0.10 so phones take the engine with the release that carries the rows.
+
+## Revision 13 — a plan, and a channel that says when it could not check (tlstore 0.12)
+
+Two problems, both seen on a phone. With minisign missing, the item list and tlstore itself never
+moved, while `self-update --check` said "tlstore is up to date.". And an install was a loop of
+separate installs: the package manager synced once per package, a failed item did not stop the
+items that need it, a part with no row here counted as installed, and the dry run was a hand-kept
+copy of the rules that had already drifted from the real run.
+
+### A seam for tests
+
+The last line of the engine is `[ "${TLSTORE_SOURCE_ONLY:-0}" = 1 ] || main "$@"`. A test sets the
+environment, sources the file in a subshell and calls a function directly (`plan_build`,
+`channel_fetch`) instead of driving the whole command line and reading logs.
+
+### The signed channel
+
+`channel_fetch catalog|self` fetches what the newest release offers and checks it. It is the only
+place that does, and `refresh_catalog` and `su_fetch_script` are its callers. It sets `CH_OUTCOME`,
+`CH_REASON` (one sentence, empty for `newer` and `current`) and, for `newer`, leaves the verified
+file in the cache as before. It returns 0 for `newer` and 1 for anything else.
+
+| outcome | when |
+|---|---|
+| `newer` | signed by the trusted key, and ahead of what is here |
+| `current` | signed, and the same serial or version as what is here |
+| `offline` | the release could not be reached |
+| `cannot-verify` | minisign is not installed, or the trusted key is missing |
+| `refused` | a bad signature, an unreadable serial or version, or an older list than the one here |
+
+Each answer is kept in `$DATA_DIR/channel.tsv`, one line for each channel, replaced every time:
+`catalog|self <TAB> outcome <TAB> when <TAB> reason`.
+
+Everything that asks must say so when the answer is anything but `newer` or `current`:
+
+- `refresh` says why it could not check, naming the fix. For a missing minisign that is
+  `pkg install minisign`, after it has asked to install it as before.
+- A plain `update` adds one line before the item lines, such as `Could not check for a newer item
+  list: minisign is not installed (pkg install minisign).` When it is interactive and minisign is
+  missing it asks to install it, as `refresh` does, and `-y` installs it. `--check`, `--tsv` and
+  `--progress` never ask or install.
+- `self-update --check` says `Could not check for a newer tlstore: <reason>.` and never "up to
+  date". Its `--tsv` line gains two fields, `self <have> <latest> <available> <outcome> <reason>`;
+  an older UI reads the first four.
+- A plain `self-update` prints `tlstore is up to date.` for `current` and the reason otherwise,
+  and exits 1 for anything but `newer` and `current`. `self-update --progress` ends with
+  `done tlstore failed <reason>` and the real reason.
+- `doctor` prints a `Channel` line for each channel: what was last found, and when. A missing
+  minisign is a `doctor` failure, since nothing can be updated without it.
+- `snapshot --tsv` gains `channel <TAB> catalog|self <TAB> outcome <TAB> reason` lines, and the
+  snapshot key includes `channel.tsv`. tlstore-ui shows `Couldn't check for updates: <reason>` on
+  the Front notice row when either channel is `cannot-verify` or `refused`. `offline` is normal on
+  a phone and is not shown. The UI takes a fresh snapshot when its self-check ends, so the self
+  channel shows up without waiting for the next launch.
+
+### The plan
+
+An install, update or remove is first built as a plan, then shown or applied. The plan is data:
+one row for each item, in apply order, kept in the shell variable `PLAN`, with these fields:
+
+`name <TAB> action <TAB> kind <TAB> version <TAB> by <TAB> why`
+
+| action | meaning |
+|---|---|
+| `install` | not here yet, or (`update`, a forced reinstall) replaced |
+| `skip` | already here in the version the list offers |
+| `unavailable` | no row applies here; `why` says so |
+| `remove` | taken away |
+| `forget` | a `pkg` item: forgotten, and the package stays |
+| `retire` | a retired item that `update` takes away |
+| `absent` | asked to remove something that is not installed |
+
+`by` is `requested` (named on the command line) or `auto` (pulled in). `why` says why the row is
+there, for example `needed by fish-shell`, `part of fish-shell`, `needs fisher` or
+`only fish-shell needed it`.
+
+- `plan_build install|update|remove <names>` builds `PLAN`. It does every check that refuses the
+  whole command before anything is asked or fetched: not in the list, retired, part of another
+  item, or a package that owns the same commands. When it refuses, `PLAN` is empty and it
+  returns 1, with the reason already said.
+- `plan_show` prints the dry run from `PLAN`. It is the only dry-run code, so a dry run cannot
+  drift from the real run.
+- `plan_apply` runs `PLAN`, and `cmd_install`, `cmd_remove` and the item half of `update` are its
+  callers.
+
+A part with no row here is the one case that differs by kind. A bundle's member with no row is
+another edition's build, and the bundle installs without it, as before. Any other item that
+requires something with no row here is `unavailable` too, with the reason `needs <x>, which is
+not available on this device`. When that item was named on the command line, `plan_build`
+refuses the whole command.
+
+`plan_apply`, in order:
+
+1. Writes `$DATA_DIR/journal`: the verb and `PLAN`, then a `done <name> <outcome>` line as each
+   row finishes. It removes the file at the end. A journal found at the start of the next
+   `plan_apply`, or by `doctor`, is reported in one line: `The last install was interrupted;
+   <names> did not finish.`.
+2. Makes one package-manager call for every package the plan needs: the `pkg` rows and any
+   missing `build=` tools. On pacman this is one `pacman -Sy --needed --noconfirm`, so the lists
+   are synced once. On apt an update uses `--only-upgrade`, so build tools there are a second call.
+   Under `--progress` the call's step lines belong to the first `pkg` row. Afterwards each `pkg` row
+   is `ok` only when all its packages are present, and otherwise fails with the reason
+   `the package manager could not install <packages>`.
+3. Fetches and verifies the payload of every `binary`, `file` and `file-once` row into
+   `$CACHE_DIR/stage/` before any row is applied. A row whose payload does not arrive fails at
+   this point. The npm kinds still fetch while they apply.
+4. Applies the rows in order. A row that requires a row that failed or was skipped is skipped,
+   with the reason `needs <x>, which did not install`. The rows around it carry on.
+5. Records state. `installed.tsv` gains column 11, `by`. A reinstall keeps the old value, and an
+   explicit install of an `auto` item makes it `requested`. A row without column 11 reads as
+   unknown.
+
+Each row ends with an outcome: `ok`, `failed` or `skipped`, and a reason. Under `--progress` the
+`done` line carries that reason: the engine's own last error message for the item rather than
+`could not install <name>`, and the skip reason for a skipped row. The exit status is 1 when any
+row failed or was skipped.
+
+Remove plans run in reverse install order and also take:
+
+- a bundle's members, except members recorded as `requested` on their own (unknown counts as
+  part of the bundle, as before);
+- installed items that require something being removed (`needs <x>`);
+- installed items recorded as `auto` that nothing installed will still need afterwards
+  (`only <x> needed it`).
+
+An update plan is the update decisions as before (holds, retired items, versions, npm `latest`).
+It adds an `install` row for any requirement the newer list gives an item that is not installed
+yet.
+
+`rollback` still installs its one item directly through `install_item`. A confirm screen in
+tlstore-ui built on the plan (a `--dry-run --tsv`) is left for later. `TLSTORE_VERSION` moves to
+0.12.

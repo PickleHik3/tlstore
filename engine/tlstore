@@ -44,6 +44,8 @@
 #   TLSTORE_BINARIES_RAW  where a `binaries:<path/with/slash>@<tag>` source
 #                       is: <base>/<tag>/<path>, a file in this repository at
 #                       that tag (default the raw GitHub URL; tests use file://)
+#   TLSTORE_SOURCE_ONLY 1 = define the functions and run nothing (tests source
+#                       the file and call them directly)
 
 set -u
 
@@ -4391,4 +4393,6 @@ main() {
     esac
 }
 
-main "$@"
+# TLSTORE_SOURCE_ONLY=1 defines everything and runs nothing, so a test can
+# source this file and call a function directly (scripts/test.sh, tl_fn).
+[ "${TLSTORE_SOURCE_ONLY:-0}" = 1 ] || main "$@"
