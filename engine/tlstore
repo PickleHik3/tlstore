@@ -174,9 +174,14 @@ esac
 CATALOG=""
 CATALOG_SERIAL=""
 CATALOG_FROM=""
-FAILED=0
 
 TAB=$(printf '\t')
+NL='
+'
+
+# The last thing err said, so a --progress done line can carry the real
+# reason an item failed (plan_apply clears it before each row).
+LAST_ERR=""
 
 # What a cancel (SIGTERM to the whole process group — tlstore-ui sends it when
 # the person backs out of a running --progress job) has to clean up: the temp
@@ -199,7 +204,7 @@ say() {
         printf '%s\n' "$*"
     fi
 }
-err() { printf 'tlstore: %s\n' "$*" >&2; }
+err() { LAST_ERR="$*"; printf 'tlstore: %s\n' "$*" >&2; }
 die() { err "$*"; exit 1; }
 
 # progress_line <step> <name> <pct> <words> — one line of the --progress
@@ -396,12 +401,6 @@ rows() {
 # never listed and never installed by name.
 visible_rows() {
     rows | awk -F "$TAB" '$9 !~ /(^|;)hidden=1(;|$)/'
-}
-
-hidden_item() {
-    hi_row=$(row "$1")
-    [ -n "$hi_row" ] || return 1
-    [ "$(opt "$(field "$hi_row" 9)" hidden)" = 1 ]
 }
 
 # A retired item's row stays in the catalog (hidden, so old engines never
@@ -613,6 +612,12 @@ installed_names() {
 # (a reinstall, npm's "already here") keeps what was there. A row with no
 # source recorded cannot say what it was, so nothing is kept for it.
 # SR_CLEAR_PREV=1 drops them, which a rollback does: it goes back one step only.
+# Column 11 is `by` (Revision 13): requested (named on the command line) or
+# auto (pulled in by another item). SR_BY says which this install is: a
+# reinstall keeps what was recorded unless SR_BY is requested, and a new row
+# takes SR_BY (empty, as a rollback leaves it, records nothing). A row from
+# before the column reads as unknown.
+SR_BY=""
 state_record() {
     sr_name="$1"
     sr_kind="$2"
@@ -641,13 +646,40 @@ state_record() {
             sr_pd=$(field "$sr_old" 10)
         fi
     fi
+    if [ "${SR_BY:-}" = requested ]; then
+        sr_by=requested
+    elif [ -n "$sr_old" ]; then
+        sr_by=$(field "$sr_old" 11)
+    elif [ "${SR_BY:-}" = auto ]; then
+        sr_by=auto
+    else
+        sr_by=""
+    fi
     mkdir -p "$DATA_DIR"
-    [ -f "$STATE" ] || printf '# tlstore installed\tname\tkind\tversion\twhen\tfiles\tsource\tdigest\tprev_version\tprev_source\tprev_digest\n' > "$STATE"
+    [ -f "$STATE" ] || printf '# tlstore installed\tname\tkind\tversion\twhen\tfiles\tsource\tdigest\tprev_version\tprev_source\tprev_digest\tby\n' > "$STATE"
     sr_tmp="$STATE.new"
     awk -F "$TAB" -v want="$sr_name" '$1 != want' "$STATE" > "$sr_tmp" || return 1
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$sr_name" "$sr_kind" "$sr_version" "$(timestamp)" "$sr_files" \
-        "$sr_src" "$sr_dig" "$sr_pv" "$sr_ps" "$sr_pd" >> "$sr_tmp"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$sr_name" "$sr_kind" "$sr_version" "$(timestamp)" "$sr_files" \
+        "$sr_src" "$sr_dig" "$sr_pv" "$sr_ps" "$sr_pd" "$sr_by" >> "$sr_tmp"
     mv "$sr_tmp" "$STATE"
+}
+
+# state_set_by <name> <by> — column 11 alone, for an item that is already
+# here: an explicit install of something another item pulled in makes it
+# requested, so remove no longer takes it away with that item.
+state_set_by() {
+    [ -f "$STATE" ] || return 0
+    ssb_tmp="$STATE.new"
+    awk -F "$TAB" -v OFS="$TAB" -v want="$1" -v by="$2" \
+        '/^#/ { print; next } $1 == want { $11 = by } { print }' "$STATE" > "$ssb_tmp" || return 1
+    mv "$ssb_tmp" "$STATE"
+}
+
+# state_by <name> — column 11: requested, auto, or empty for unknown.
+state_by() {
+    sb_row=$(state_row "$1" 2>/dev/null) || return 0
+    [ -n "$sb_row" ] || return 0
+    field "$sb_row" 11
 }
 
 # Holds: names, one a line, kept apart from installed.tsv so a reinstall
@@ -885,8 +917,14 @@ same_file() {
 # and the unpacking move it past that, and everything it says goes to stderr so
 # stdout stays the machine stream.
 pm_run() {
-    if [ "$PROGRESS" != 1 ] || [ -z "$CANCEL_ITEM" ]; then
+    if [ "$PROGRESS" != 1 ]; then
         "$@"
+        return
+    fi
+    # No item to give the steps to (only build tools to fetch): what it says
+    # still stays off stdout, which is the machine stream.
+    if [ -z "$CANCEL_ITEM" ]; then
+        "$@" >&2
         return
     fi
     mkdir -p "$CACHE_DIR"
@@ -1025,27 +1063,8 @@ plan_for() {
         done
         pf_todo="$pf_next"
     done
-
-    pf_plan=""
-    pf_left="$pf_closure"
-    while [ -n "$pf_left" ]; do
-        pf_moved=0
-        pf_rest=""
-        for pf_n in $pf_left; do
-            if deps_ready "$pf_n" "$pf_closure" "$pf_plan"; then
-                pf_plan="$pf_plan $pf_n"
-                pf_moved=1
-            else
-                pf_rest="$pf_rest $pf_n"
-            fi
-        done
-        pf_left=$(printf '%s' "$pf_rest" | sed 's/^ *//')
-        if [ "$pf_moved" = 0 ]; then
-            pf_plan="$pf_plan $pf_left"
-            break
-        fi
-    done
-    printf '%s' "$pf_plan" | sed 's/^ *//'
+    plan_order "$pf_closure"
+    printf '%s' "$po_out"
 }
 
 # What a name needs installed before it.
@@ -1057,12 +1076,83 @@ item_deps() {
     printf '%s' "$id_req"
 }
 
-deps_ready() {
-    for dr_d in $(item_deps "$1"); do
-        in_list "$2" "$dr_d" || continue
-        in_list "$3" "$dr_d" || return 1
+# A map is " key=value key=value " in one variable (names and the values kept
+# in one are free of spaces). map_get <map> <key> sets mg_v and says whether
+# the key was there.
+map_get() {
+    case "$1" in
+        *" $2="*)
+            mg_v="${1#* "$2"=}"
+            mg_v="${mg_v%% *}"
+            return 0
+            ;;
+    esac
+    mg_v=""
+    return 1
+}
+
+# What one run has read of the catalog, a row per name at most: its kind (-
+# when it has no row here), version, requires (commas) and flags (h hidden,
+# r retired).
+PB_KIND=" "
+PB_VER=" "
+PB_DEPS=" "
+PB_FLAGS=" "
+
+# pb_row <name> — sets prw_kind, prw_ver, prw_deps (commas) and prw_flags.
+pb_row() {
+    if map_get "$PB_KIND" "$1"; then
+        prw_kind="$mg_v"
+        map_get "$PB_VER" "$1"; prw_ver="$mg_v"
+        map_get "$PB_DEPS" "$1"; prw_deps="$mg_v"
+        map_get "$PB_FLAGS" "$1"; prw_flags="$mg_v"
+        return 0
+    fi
+    prw_kind="-"; prw_ver="-"; prw_deps=""; prw_flags=""
+    if [ -n "$CATALOG" ] && load_item "$1"; then
+        prw_kind="$it_kind"
+        prw_ver="${it_version:--}"
+        [ "$it_requires" = "-" ] || prw_deps="$it_requires"
+        case ";$it_options;" in *";hidden=1;"*) prw_flags="h" ;; esac
+        case ";$it_options;" in *";retired=1;"*) prw_flags="${prw_flags}r" ;; esac
+    fi
+    PB_KIND="$PB_KIND$1=$prw_kind "
+    PB_VER="$PB_VER$1=$prw_ver "
+    PB_DEPS="$PB_DEPS$1=$prw_deps "
+    PB_FLAGS="$PB_FLAGS$1=$prw_flags "
+}
+
+# plan_order <names> — the same names in the order they have to be installed:
+# each after whatever of the others it requires. Sets po_out. A loop (which
+# the catalog never has) keeps the order it was given.
+plan_order() {
+    po_out=""
+    po_left="$1"
+    while :; do
+        po_moved=0
+        po_rest=""
+        for po_n in $po_left; do
+            pb_row "$po_n"
+            po_ready=1
+            for po_d in $(commas "$prw_deps"); do
+                in_list "$1" "$po_d" || continue
+                in_list "$po_out" "$po_d" || { po_ready=0; break; }
+            done
+            if [ "$po_ready" = 1 ]; then
+                po_out="$po_out $po_n"
+                po_moved=1
+            else
+                po_rest="$po_rest $po_n"
+            fi
+        done
+        [ -n "$po_rest" ] || break
+        if [ "$po_moved" = 0 ]; then
+            po_out="$po_out$po_rest"
+            break
+        fi
+        po_left="$po_rest"
     done
-    return 0
+    po_out="${po_out# }"
 }
 
 # ---------------------------------------------------------------------------
@@ -1110,25 +1200,9 @@ build_tools_for() {
     printf '%s' "$bt_out" | sed 's/^ *//'
 }
 
-# Installs the ones that are not here already, remembering which those were so
-# they can be offered back afterwards.
-# add_build_tools <names> <force>
-add_build_tools() {
-    ab_missing=""
-    for ab_p in $(build_tools_for "$1" "$2"); do
-        pkg_present "$ab_p" || ab_missing="$ab_missing $ab_p"
-    done
-    [ -n "$(printf '%s' "$ab_missing" | tr -d ' ')" ] || return 0
-    say "Installing what is needed to build:$ab_missing"
-    # shellcheck disable=SC2086
-    if ! install_pkg $ab_missing; then
-        err "could not install what is needed to build:$ab_missing"
-        return 1
-    fi
-    BUILD_ADDED="$BUILD_ADDED$ab_missing"
-    return 0
-}
-
+# The ones that were not here are installed by plan_packages, in the plan's
+# one package-manager call, and remembered in BUILD_ADDED so they can be
+# offered back afterwards.
 drop_build_tools() {
     db_pkgs=$(printf '%s' "$BUILD_ADDED" | sed 's/^ *//')
     BUILD_ADDED=""
@@ -1156,13 +1230,13 @@ drop_build_tools() {
 install_item() {
     ii_name="$1"
     ii_force="${2:-0}"
-    # Something a bundle asks for that has no row here — another edition's
-    # build, or a tool not built for this processor — is skipped, not an
-    # error. A name typed on the command line is checked before we get here.
+    # Something with no row here (another edition's build, or a tool not
+    # built for this processor) never reaches this point: plan_build marks it
+    # unavailable and plan_apply passes it by. Should one arrive anyway, it is
+    # not counted as installed.
     load_item "$ii_name" || {
-        say "$ii_name is not available on this device"
-        PROGRESS_NOTE="$ii_name is not available on this device"
-        return 0
+        err "$ii_name is not available on this device"
+        return 1
     }
     ii_kind="$it_kind"
     ii_version="$it_version"
@@ -1204,15 +1278,11 @@ install_item() {
     esac
 }
 
+# The package manager already ran, once for the whole plan (plan_packages),
+# and plan_apply only comes here when every package of this item is present:
+# all that is left is to record it.
 do_pkg() {
-    say "installing $ii_name"
-    # shellcheck disable=SC2086  # the source column is a list of package names
-    if ! install_pkg $ii_source; then
-        err "could not install $ii_name"
-        return 1
-    fi
     state_record "$ii_name" pkg "$ii_version"
-    return 0
 }
 
 do_binary() {
@@ -1350,11 +1420,13 @@ do_fisher() {
 do_bundle() {
     # A member that did not install fails the bundle, rather than the bundle
     # standing as installed around it. One with no row here (another edition's,
-    # or not built for this processor) was skipped on purpose and does not count.
+    # or not built for this processor), or one the plan found unavailable for
+    # that reason further down, was skipped on purpose and does not count.
     db_missing=""
     for db_m in $(commas "$(field "$(row "$ii_name")" 8)"); do
         [ "$db_m" = "-" ] && continue
         [ -n "$(row "$db_m")" ] || continue
+        in_list "$PLAN_UNAVAILABLE" "$db_m" && continue
         is_installed "$db_m" || db_missing="$db_missing $db_m"
     done
     if [ -n "$db_missing" ]; then
@@ -2128,6 +2200,8 @@ Usage: tlstore [-y] remove [options] <name...>
        tlstore uninstall ...
 
 Removes items tlstore installed, and puts back any file of yours it kept.
+What needs a removed item goes with it, and so do the parts it brought in
+that nothing else needs. --dry-run lists them first.
 A package item is only forgotten: the package stays with your package manager.
 
 Options:
@@ -3421,64 +3495,892 @@ cmd_prefetch() {
     return 0
 }
 
-# dry_install <plan> — what install would do with this plan, in order, from the
-# same plan_for list it would use. Nothing is fetched, written or asked of the
-# package manager, so the build tools are named, not checked for.
-dry_install() {
-    di_tools=$(build_tools_for "$1" 0)
-    say "Would install, in this order:"
-    for di_n in $1; do
-        di_row=$(row "$di_n")
-        if [ -z "$di_row" ]; then
-            say "  $di_n  (not available on this device, skipped)"
-        elif already_here "$di_n"; then
-            say "  $di_n  (already installed, skipped)"
+# ---------------------------------------------------------------------------
+# The plan (Revision 13)
+# ---------------------------------------------------------------------------
+
+# An install, update or remove is built once as a plan, then shown (--dry-run)
+# or applied, so a dry run cannot drift from the real run. PLAN holds one row
+# per item, in apply order, one row a line:
+#   name <TAB> action <TAB> kind <TAB> version <TAB> by <TAB> why
+# action  install skip unavailable remove forget retire absent
+# by      requested (named on the command line) or auto (pulled in)
+# why     why the row is there: "part of fishkit", "needed by claude-code",
+#         "needs fishfn", "only claude-code needed it", ...
+# An empty field is written "-", so every row splits into six.
+PLAN=""
+PLAN_VERB=""
+# update's knobs, which update_items sets before plan_build update.
+PLAN_CHECK=0
+PLAN_OFFLINE=0
+PLAN_TSV=0
+# What the plan found no way to install here; do_bundle does not wait for it.
+PLAN_UNAVAILABLE=""
+# The why of an npm item pinned to latest, which update asks its source about.
+PLAN_LATEST="follows latest"
+
+plan_add() {
+    PLAN="$PLAN${PLAN:+$NL}$1$TAB$2$TAB${3:--}$TAB${4:--}$TAB${5:--}$TAB${6:--}"
+}
+
+# plan_split <row> — sets ps_name ps_action ps_kind ps_version ps_by ps_why.
+plan_split() {
+    ps_rest="$1$TAB"
+    ps_name="${ps_rest%%"$TAB"*}"; ps_rest="${ps_rest#*"$TAB"}"
+    ps_action="${ps_rest%%"$TAB"*}"; ps_rest="${ps_rest#*"$TAB"}"
+    ps_kind="${ps_rest%%"$TAB"*}"; ps_rest="${ps_rest#*"$TAB"}"
+    ps_version="${ps_rest%%"$TAB"*}"; ps_rest="${ps_rest#*"$TAB"}"
+    ps_by="${ps_rest%%"$TAB"*}"; ps_rest="${ps_rest#*"$TAB"}"
+    ps_why="${ps_rest%%"$TAB"*}"
+}
+
+# plan_names [action] — the names in PLAN, or only those with that action.
+plan_names() {
+    pn_out=""
+    pn_ifs="$IFS"
+    IFS="$NL"
+    for pn_line in $PLAN; do
+        IFS="$pn_ifs"
+        plan_split "$pn_line"
+        [ -z "${1:-}" ] || [ "$ps_action" = "$1" ] || continue
+        pn_out="$pn_out $ps_name"
+    done
+    IFS="$pn_ifs"
+    printf '%s' "${pn_out# }"
+}
+
+# deps_has <requires, commas> <name>
+deps_has() {
+    case ",$1," in
+        *",$2,"*) return 0 ;;
+    esac
+    return 1
+}
+
+# plan_why_from <item> — sets pw_why: "part of <item>" when it is a bundle,
+# "needed by <item>" otherwise. (It reads the row, so prw_* change.)
+plan_why_from() {
+    pb_row "$1"
+    if [ "$prw_kind" = bundle ]; then
+        pw_why="part of $1"
+    else
+        pw_why="needed by $1"
+    fi
+}
+
+# plan_build install|update|remove <names> — builds PLAN. Every check that
+# refuses the whole command happens here, before anything is asked or
+# fetched; then PLAN is empty, the reason has been said, and it returns 1.
+plan_build() {
+    pb_verb="$1"
+    shift
+    PLAN=""
+    PLAN_VERB="$pb_verb"
+    PLAN_UNAVAILABLE=""
+    case "$pb_verb" in
+        install) plan_build_install "$@" ;;
+        update) plan_build_update "$@" ;;
+        remove) plan_build_remove "$@" ;;
+        *) err "plan_build: no such verb: $pb_verb"; false ;;
+    esac
+    pb_rc=$?
+    [ "$pb_rc" = 0 ] || PLAN=""
+    return "$pb_rc"
+}
+
+plan_build_install() {
+    bi_names=""
+    for bi_n in "$@"; do
+        in_list "$bi_names" "$bi_n" || bi_names="$bi_names $bi_n"
+    done
+    for bi_n in $bi_names; do
+        pb_row "$bi_n"
+        [ "$prw_kind" != "-" ] || { err "$bi_n is not in the list"; return 1; }
+        case "$prw_flags" in *r*) err "$bi_n was retired"; return 1 ;; esac
+        case "$prw_flags" in *h*) err "$bi_n is part of another item"; return 1 ;; esac
+    done
+
+    # Everything they need, breadth first, remembering which item pulled each
+    # part in. A retired part refuses the install, as a retired name does.
+    bi_closure=""
+    bi_parent=" "
+    bi_todo="$bi_names"
+    while [ -n "$bi_todo" ]; do
+        bi_next=""
+        for bi_n in $bi_todo; do
+            in_list "$bi_closure" "$bi_n" && continue
+            pb_row "$bi_n"
+            case "$prw_flags" in *r*) err "$bi_n was retired"; return 1 ;; esac
+            bi_closure="$bi_closure $bi_n"
+            for bi_d in $(commas "$prw_deps"); do
+                in_list "$bi_names" "$bi_d" || map_get "$bi_parent" "$bi_d" || bi_parent="$bi_parent$bi_d=$bi_n "
+                bi_next="$bi_next $bi_d"
+            done
+        done
+        bi_todo="$bi_next"
+    done
+    plan_order "$bi_closure"
+    bi_order="$po_out"
+
+    # A package that owns the same commands is reported before anything is asked or fetched.
+    for bi_n in $bi_order; do
+        is_installed "$bi_n" || conflict_check "$bi_n" || return 1
+    done
+
+    # A part with no row here. A bundle installs without it (it is another
+    # edition's build); anything else that needs it cannot be installed
+    # either, and when that was named, nothing is. bi_un maps each such name
+    # to what it is missing (- for a name with no row itself).
+    bi_un=" "
+    for bi_n in $bi_order; do
+        pb_row "$bi_n"
+        if [ "$prw_kind" = "-" ]; then
+            bi_un="$bi_un$bi_n=- "
+            continue
+        fi
+        [ "$prw_kind" != bundle ] || continue
+        for bi_d in $(commas "$prw_deps"); do
+            if map_get "$bi_un" "$bi_d"; then
+                bi_un="$bi_un$bi_n=$bi_d "
+                break
+            fi
+        done
+    done
+    for bi_n in $bi_names; do
+        map_get "$bi_un" "$bi_n" || continue
+        err "$bi_n needs $mg_v, which is not available on this device"
+        return 1
+    done
+
+    for bi_n in $bi_order; do
+        bi_by=auto
+        in_list "$bi_names" "$bi_n" && bi_by=requested
+        bi_why="-"
+        if map_get "$bi_parent" "$bi_n"; then
+            plan_why_from "$mg_v"
+            bi_why="$pw_why"
+        fi
+        pb_row "$bi_n"
+        if map_get "$bi_un" "$bi_n"; then
+            if [ "$mg_v" = "-" ]; then
+                bi_why="not available on this device"
+            else
+                bi_why="needs $mg_v, which is not available on this device"
+            fi
+            PLAN_UNAVAILABLE="$PLAN_UNAVAILABLE $bi_n"
+            plan_add "$bi_n" unavailable "$prw_kind" - "$bi_by" "$bi_why"
+        elif already_here "$bi_n"; then
+            plan_add "$bi_n" skip "$prw_kind" "$prw_ver" "$bi_by" "$bi_why"
         else
-            di_ver=$(field "$di_row" 3)
-            case "$(field "$di_row" 2)" in
-                pkg) say "  $di_n  (packages: $(words_list "$(field "$di_row" 5)"))" ;;
-                bundle|fisher) say "  $di_n" ;;
-                *) say "  $di_n  $di_ver" ;;
-            esac
+            plan_add "$bi_n" install "$prw_kind" "$prw_ver" "$bi_by" "$bi_why"
         fi
     done
-    if [ -n "$di_tools" ]; then
-        say "Needed only while installing: $(words_list "$di_tools")"
+    return 0
+}
+
+# The update decisions: holds, retired items, versions, npm's latest. With no
+# names, everything installed; a held item only when it is named. Then an
+# install row for anything the list now says one of them needs that is not
+# here yet. PLAN_CHECK asks npm's registry about latest (unless PLAN_OFFLINE)
+# instead of planning to fetch it; PLAN_TSV keeps the remarks off stdout.
+plan_build_update() {
+    bu_explicit=1
+    bu_names=""
+    for bu_n in "$@"; do
+        in_list "$bu_names" "$bu_n" || bu_names="$bu_names $bu_n"
+    done
+    if [ -z "$bu_names" ]; then
+        bu_explicit=0
+        bu_names=$(installed_names | tr '\n' ' ')
+    fi
+    bu_set=""
+    # Each planned name's action|version|why-code.
+    bu_rows=" "
+    bu_retire=""
+    for bu_n in $bu_names; do
+        if ! is_installed "$bu_n"; then
+            [ "$PLAN_TSV" = 1 ] || say "$bu_n is not installed"
+            continue
+        fi
+        pb_row "$bu_n"
+        if [ "$prw_kind" = "-" ]; then
+            [ "$PLAN_TSV" = 1 ] || say "$bu_n is no longer in the list"
+            continue
+        fi
+        case "$prw_flags" in
+            *r*) bu_retire="$bu_retire $bu_n"; continue ;;
+        esac
+        if [ "$bu_explicit" = 0 ] && is_held "$bu_n"; then
+            [ "$PLAN_TSV" = 1 ] || say "$bu_n is held at $(installed_version "$bu_n"); 'tlstore unhold $bu_n' lets it update"
+            continue
+        fi
+        bu_have=$(installed_version "$bu_n")
+        bu_act=skip
+        bu_ver="$prw_ver"
+        bu_code=-
+        case "$prw_kind" in
+            pkg) bu_act=install; bu_code=pkg ;;
+            bundle|fisher) ;;
+            npm-musl|npm-android)
+                # An item pinned to latest is whatever its source says today.
+                # A check asks the registry which version that is and plans it
+                # only when it differs from what is here; offline, or when the
+                # registry cannot be reached, it is left for the update itself.
+                if [ "$prw_ver" = latest ]; then
+                    bu_code=latest
+                    if [ "$PLAN_CHECK" = 0 ]; then
+                        bu_act=install
+                    elif [ "$PLAN_OFFLINE" = 0 ]; then
+                        bu_now=$(npm_latest_version "$(field "$(row "$bu_n")" 5)")
+                        if [ -n "$bu_now" ] && [ "$bu_now" != "$bu_have" ]; then
+                            bu_act=install
+                            bu_ver="$bu_now"
+                        fi
+                    fi
+                elif [ "$prw_ver" != "$bu_have" ]; then
+                    bu_act=install
+                fi
+                ;;
+            *) [ "$prw_ver" = "$bu_have" ] || bu_act=install ;;
+        esac
+        bu_set="$bu_set $bu_n"
+        bu_rows="$bu_rows$bu_n=$bu_act|$bu_ver|$bu_code "
+    done
+
+    # What the list now says these need that is not here yet.
+    bu_new=""
+    bu_parent=" "
+    bu_todo="$bu_set"
+    while [ -n "$bu_todo" ]; do
+        bu_next=""
+        for bu_n in $bu_todo; do
+            pb_row "$bu_n"
+            for bu_d in $(commas "$prw_deps"); do
+                in_list "$bu_set" "$bu_d" && continue
+                in_list "$bu_new" "$bu_d" && continue
+                is_installed "$bu_d" && continue
+                bu_new="$bu_new $bu_d"
+                bu_parent="$bu_parent$bu_d=$bu_n "
+                bu_next="$bu_next $bu_d"
+            done
+        done
+        bu_todo="$bu_next"
+    done
+    plan_order "$bu_set$bu_new"
+    bu_order="$po_out"
+
+    # A new part with no row here (or a retired one) is not installed, nor is
+    # a new part that needs one, unless it is a bundle. What is already here
+    # is updated as before either way.
+    bu_un=" "
+    for bu_n in $bu_order; do
+        in_list "$bu_new" "$bu_n" || continue
+        pb_row "$bu_n"
+        case "$prw_kind:$prw_flags" in
+            -:*|*:*r*) bu_un="$bu_un$bu_n=- "; continue ;;
+        esac
+        [ "$prw_kind" != bundle ] || continue
+        for bu_d in $(commas "$prw_deps"); do
+            if map_get "$bu_un" "$bu_d"; then
+                bu_un="$bu_un$bu_n=$bu_d "
+                break
+            fi
+        done
+    done
+
+    for bu_n in $bu_order; do
+        if in_list "$bu_new" "$bu_n"; then
+            map_get "$bu_parent" "$bu_n"
+            plan_why_from "$mg_v"
+            bu_why="$pw_why"
+            pb_row "$bu_n"
+            if map_get "$bu_un" "$bu_n"; then
+                if [ "$mg_v" = "-" ]; then
+                    bu_why="not available on this device"
+                else
+                    bu_why="needs $mg_v, which is not available on this device"
+                fi
+                PLAN_UNAVAILABLE="$PLAN_UNAVAILABLE $bu_n"
+                plan_add "$bu_n" unavailable "$prw_kind" - auto "$bu_why"
+            else
+                plan_add "$bu_n" install "$prw_kind" "$prw_ver" auto "$bu_why"
+            fi
+            continue
+        fi
+        map_get "$bu_rows" "$bu_n"
+        bu_act="${mg_v%%|*}"
+        bu_rest="${mg_v#*|}"
+        bu_ver="${bu_rest%%|*}"
+        bu_code="${bu_rest#*|}"
+        case "$bu_code" in
+            latest) bu_why="$PLAN_LATEST" ;;
+            pkg) bu_why="the package manager checks it" ;;
+            *) bu_why="-" ;;
+        esac
+        bu_by=$(state_by "$bu_n")
+        pb_row "$bu_n"
+        plan_add "$bu_n" "$bu_act" "$prw_kind" "$bu_ver" "${bu_by:--}" "$bu_why"
+    done
+    for bu_n in $bu_retire; do
+        bu_by=$(state_by "$bu_n")
+        pb_row "$bu_n"
+        plan_add "$bu_n" retire "$prw_kind" "$(installed_version "$bu_n")" "${bu_by:--}" retired
+    done
+    return 0
+}
+
+# What remove takes, in the reverse of the install order: the names, and
+#  - a bundle's members, except members recorded as requested on their own
+#    (a row from before the by column counts as part of the bundle);
+#  - what needs something that is going (a package item only stops being
+#    tracked, so needing one is no reason to go);
+#  - what was pulled in (auto) by something that is going;
+# but never a part that something staying still needs.
+plan_build_remove() {
+    br_named=""
+    for br_n in "$@"; do
+        in_list "$br_named" "$br_n" || br_named="$br_named $br_n"
+    done
+    br_all="$br_named"
+    # Why each one the command line did not name is here: p:<bundle> (part
+    # of it), n:<item> (needs it), o:<item> (only it needed this one).
+    br_codes=" "
+    br_kinds=" "
+    br_bys=" "
+    if [ -f "$STATE" ]; then
+        br_kinds=$(awk -F "$TAB" '/^#/ { next } NF { printf " %s=%s", $1, $2 } END { printf " " }' "$STATE")
+        br_bys=$(awk -F "$TAB" '/^#/ { next } NF { printf " %s=%s", $1, ($11 == "" ? "-" : $11) } END { printf " " }' "$STATE")
+    fi
+    if [ -n "$CATALOG" ]; then
+        br_installed=$(installed_names | tr '\n' ' ')
+        br_changed=1
+        while [ "$br_changed" = 1 ]; do
+            br_changed=0
+            for br_i in $br_installed; do
+                in_list "$br_all" "$br_i" && continue
+                pb_row "$br_i"
+                br_ideps="$prw_deps"
+                br_code=""
+                for br_r in $(commas "$br_ideps"); do
+                    in_list "$br_all" "$br_r" || continue
+                    map_get "$br_kinds" "$br_r" || continue
+                    [ "$mg_v" != pkg ] || continue
+                    br_code="n:$br_r"
+                    break
+                done
+                if [ -z "$br_code" ]; then
+                    map_get "$br_bys" "$br_i"
+                    br_by="$mg_v"
+                    [ "$br_by" != requested ] || continue
+                    br_part=""
+                    br_only=""
+                    for br_r in $br_all; do
+                        map_get "$br_kinds" "$br_r" || continue
+                        br_rkind="$mg_v"
+                        pb_row "$br_r"
+                        deps_has "$prw_deps" "$br_i" || continue
+                        if [ "$br_rkind" = bundle ]; then
+                            [ -n "$br_part" ] || br_part="$br_r"
+                        else
+                            [ -n "$br_only" ] || br_only="$br_r"
+                        fi
+                    done
+                    if [ -n "$br_part" ]; then
+                        br_code="p:$br_part"
+                    elif [ -n "$br_only" ] && [ "$br_by" = auto ]; then
+                        br_code="o:$br_only"
+                    else
+                        continue
+                    fi
+                    br_kept=0
+                    for br_j in $br_installed; do
+                        [ "$br_j" != "$br_i" ] || continue
+                        in_list "$br_all" "$br_j" && continue
+                        pb_row "$br_j"
+                        if deps_has "$prw_deps" "$br_i"; then
+                            br_kept=1
+                            break
+                        fi
+                    done
+                    [ "$br_kept" = 0 ] || continue
+                fi
+                br_all="$br_all $br_i"
+                br_codes="$br_codes$br_i=$br_code "
+                br_changed=1
+            done
+        done
+        # The reverse of the install order: what needs another item goes
+        # first, so fish plugins are taken away while the fisher they need
+        # is still there.
+        plan_order "$br_all"
+        br_order=""
+        for br_n in $po_out; do
+            br_order="$br_n $br_order"
+        done
+    else
+        # Without a list there is nothing to read the order from.
+        br_order="$br_all"
+    fi
+
+    for br_n in $br_order; do
+        br_by=auto
+        in_list "$br_named" "$br_n" && br_by=requested
+        br_why="-"
+        if map_get "$br_codes" "$br_n"; then
+            case "$mg_v" in
+                p:*) br_why="part of ${mg_v#p:}" ;;
+                n:*) br_why="needs ${mg_v#n:}" ;;
+                o:*) br_why="only ${mg_v#o:} needed it" ;;
+            esac
+        fi
+        if ! map_get "$br_kinds" "$br_n"; then
+            pb_row "$br_n"
+            plan_add "$br_n" absent "$prw_kind" - "$br_by" "$br_why"
+            continue
+        fi
+        br_act=remove
+        [ "$mg_v" != pkg ] || br_act=forget
+        plan_add "$br_n" "$br_act" "$mg_v" "$(installed_version "$br_n")" "$br_by" "$br_why"
+    done
+    return 0
+}
+
+# plan_show — the dry run, from PLAN: the only dry-run code there is. (For
+# update it is also what --check says; DRY_RUN adds "Nothing was changed.")
+plan_show() {
+    case "$PLAN_VERB" in
+        install) plan_show_install ;;
+        remove) plan_show_remove ;;
+        update) plan_show_update ;;
+    esac
+}
+
+# Nothing is fetched, written or asked of the package manager, so the build
+# tools are named, not checked for.
+plan_show_install() {
+    si_names=""
+    say "Would install, in this order:"
+    si_ifs="$IFS"
+    IFS="$NL"
+    for si_line in $PLAN; do
+        IFS="$si_ifs"
+        plan_split "$si_line"
+        si_note=""
+        [ "$ps_why" = "-" ] || si_note="  ($ps_why)"
+        case "$ps_action" in
+            unavailable) say "  $ps_name  ($ps_why, skipped)" ;;
+            skip) say "  $ps_name  (already installed, skipped)" ;;
+            *)
+                si_names="$si_names $ps_name"
+                case "$ps_kind" in
+                    pkg) say "  $ps_name  (packages: $(words_list "$(field "$(row "$ps_name")" 5)"))$si_note" ;;
+                    bundle|fisher) say "  $ps_name$si_note" ;;
+                    *) say "  $ps_name  $ps_version$si_note" ;;
+                esac
+                ;;
+        esac
+    done
+    IFS="$si_ifs"
+    si_tools=$(build_tools_for "$si_names" 1)
+    if [ -n "$si_tools" ]; then
+        say "Needed only while installing: $(words_list "$si_tools")"
         say "  (any that are missing are added first, and you are asked about taking them back)"
     fi
     say "Nothing was changed."
 }
 
-# dry_remove <names> — what remove would take away: each item and the files
-# the state records for it.
-dry_remove() {
+# Each item and the files the state records for it.
+plan_show_remove() {
     say "Would remove:"
-    for dr_n in $1; do
-        dr_row=$(state_row "$dr_n" 2>/dev/null || true)
-        if [ -z "$dr_row" ]; then
-            say "  $dr_n  (not installed, nothing to do)"
-            continue
-        fi
-        if [ "$(field "$dr_row" 2)" = pkg ]; then
-            say "  $dr_n  (only forgotten; the package stays installed)"
-            continue
-        fi
-        say "  $dr_n"
-        dr_digest=$(field "$dr_row" 7)
-        for dr_f in $(field "$dr_row" 5); do
-            case "$(field "$dr_row" 2)" in
+    sw_ifs="$IFS"
+    IFS="$NL"
+    for sw_line in $PLAN; do
+        IFS="$sw_ifs"
+        plan_split "$sw_line"
+        sw_note=""
+        [ "$ps_why" = "-" ] || sw_note="  ($ps_why)"
+        case "$ps_action" in
+            absent) say "  $ps_name  (not installed, nothing to do)"; continue ;;
+            forget) say "  $ps_name  (only forgotten; the package stays installed)$sw_note"; continue ;;
+        esac
+        say "  $ps_name$sw_note"
+        sw_row=$(state_row "$ps_name" 2>/dev/null || true)
+        sw_digest=$(field "$sw_row" 7)
+        for sw_f in $(field "$sw_row" 5); do
+            case "$ps_kind" in
                 file|file-once)
-                    if [ -f "$dr_f" ] && [ -n "$dr_digest" ] && [ "$dr_digest" != "-" ] &&
-                        [ "$(file_digest "$dr_f")" != "$dr_digest" ]; then
-                        say "    $dr_f  (changed since it was installed; kept beside it as a .bak)"
+                    if [ -f "$sw_f" ] && [ -n "$sw_digest" ] && [ "$sw_digest" != "-" ] &&
+                        [ "$(file_digest "$sw_f")" != "$sw_digest" ]; then
+                        say "    $sw_f  (changed since it was installed; kept beside it as a .bak)"
                         continue
                     fi
                     ;;
             esac
-            say "    $dr_f"
+            say "    $sw_f"
         done
     done
+    IFS="$sw_ifs"
     say "Nothing was changed."
+}
+
+# What update --check says, read off the plan.
+plan_show_update() {
+    sp_any=0
+    sp_up=""
+    sp_pkgs=0
+    sp_wait=""
+    sp_ifs="$IFS"
+    IFS="$NL"
+    for sp_line in $PLAN; do
+        IFS="$sp_ifs"
+        plan_split "$sp_line"
+        case "$ps_action:$ps_kind" in
+            install:pkg) ! is_installed "$ps_name" || sp_pkgs=1 ;;
+            install:*)
+                if [ "$ps_why" = "$PLAN_LATEST" ]; then
+                    sp_any=1
+                    say "$ps_name $ps_version is available; you have $(installed_version "$ps_name")"
+                elif is_installed "$ps_name"; then
+                    sp_up="$sp_up $ps_name"
+                fi
+                ;;
+            skip:*) [ "$ps_why" != "$PLAN_LATEST" ] || sp_wait="$sp_wait $ps_name" ;;
+        esac
+    done
+    IFS="$NL"
+    for sp_line in $PLAN; do
+        IFS="$sp_ifs"
+        plan_split "$sp_line"
+        [ "$ps_action" = retire ] || continue
+        sp_any=1
+        say "$ps_name was retired; update will remove it"
+    done
+    IFS="$NL"
+    for sp_line in $PLAN; do
+        IFS="$sp_ifs"
+        plan_split "$sp_line"
+        case "$ps_action" in
+            install)
+                [ "$ps_by" = auto ] || continue
+                ! is_installed "$ps_name" || continue
+                ;;
+            unavailable) ;;
+            *) continue ;;
+        esac
+        sp_any=1
+        case "$ps_action:$ps_why" in
+            install:*) say "$ps_name is $ps_why; update will install it" ;;
+            *:needs\ *) say "$ps_name $ps_why; update leaves it out" ;;
+            *) say "$ps_name is $ps_why; update leaves it out" ;;
+        esac
+    done
+    IFS="$sp_ifs"
+    if [ "$sp_any" = 0 ] && [ -z "$sp_up" ]; then
+        say "Everything is up to date."
+    else
+        for sp_n in $sp_up; do
+            sp_row=$(row "$sp_n")
+            if [ "$(field "$sp_row" 2)" = file ]; then
+                say "$sp_n has a new version; update shows the change and asks"
+            else
+                say "$sp_n $(field "$sp_row" 3) is available; you have $(installed_version "$sp_n")"
+            fi
+        done
+    fi
+    [ "$sp_pkgs" = 0 ] || say "Packages are checked by the package manager when you update."
+    [ "$DRY_RUN" = 0 ] || say "Nothing was changed."
+    if [ "$PLAN_OFFLINE" = 1 ]; then
+        for sp_n in $sp_wait; do
+            say "$sp_n is checked against its source when you update."
+        done
+    fi
+}
+
+# update --check --tsv, read off the plan: name, have, new, note. No line for
+# a retired item (it is hidden, so the store UI could count it but never show
+# or run it; snapshot retires it instead), nor for a part not installed yet.
+plan_tsv() {
+    pt_ifs="$IFS"
+    IFS="$NL"
+    for pt_line in $PLAN; do
+        IFS="$pt_ifs"
+        plan_split "$pt_line"
+        [ "$ps_action" = install ] && [ "$ps_kind" != pkg ] && [ "$ps_why" != "$PLAN_LATEST" ] || continue
+        is_installed "$ps_name" || continue
+        pt_note=""
+        [ "$ps_kind" = file ] && pt_note=config-asks
+        printf '%s\t%s\t%s\t%s\n' "$ps_name" "$(installed_version "$ps_name")" "$ps_version" "$pt_note"
+    done
+    IFS="$NL"
+    for pt_line in $PLAN; do
+        IFS="$pt_ifs"
+        plan_split "$pt_line"
+        [ "$ps_action" = install ] && [ "$ps_why" = "$PLAN_LATEST" ] || continue
+        printf '%s\t%s\t%s\t%s\n' "$ps_name" "$(installed_version "$ps_name")" "$ps_version" latest
+    done
+    IFS="$pt_ifs"
+}
+
+# plan_packages — the plan's one call to the package manager, for every
+# package its pkg rows need and every build= tool that is missing. On pacman
+# that is one -Sy, so the lists are synced once; on apt an update upgrades
+# with --only-upgrade, so build tools there are a second call. Sets
+# pa_first_pkg (the first pkg row, which the call's --progress steps belong
+# to), pa_pkg_at (how far those steps got), pa_pkg_bad (pkg rows whose
+# packages are not all present afterwards) and pa_tools_bad (build tools that
+# did not arrive); the tools it added go in BUILD_ADDED.
+plan_packages() {
+    pp_pkgs=""
+    pp_names=""
+    pp_ifs="$IFS"
+    IFS="$NL"
+    for pp_line in $PLAN; do
+        IFS="$pp_ifs"
+        plan_split "$pp_line"
+        [ "$ps_action" = install ] || continue
+        pp_names="$pp_names $ps_name"
+        [ "$ps_kind" = pkg ] || continue
+        [ -n "$pa_first_pkg" ] || pa_first_pkg="$ps_name"
+        pp_pkgs="$pp_pkgs $(field "$(row "$ps_name")" 5)"
+    done
+    IFS="$pp_ifs"
+    pp_missing=""
+    for pp_t in $(build_tools_for "$pp_names" 1); do
+        pkg_present "$pp_t" || pp_missing="$pp_missing $pp_t"
+    done
+    [ -n "$pp_pkgs$pp_missing" ] || return 0
+
+    if [ "$PROGRESS" = 1 ] && [ -n "$pa_first_pkg" ]; then
+        CANCEL_ITEM="$pa_first_pkg"
+        PROGRESS_AT=0
+        progress_stage 10 fetched
+    fi
+    [ -z "$pp_missing" ] || say "Installing what is needed to build:$pp_missing"
+    if [ -n "$pp_pkgs" ]; then
+        if [ "$PLAN_VERB" = update ]; then
+            say "Updating packages"
+        else
+            say "Installing packages: $(words_list "$pp_pkgs")"
+        fi
+    fi
+    pp_rc=0
+    # shellcheck disable=SC2086  # lists of package names, split on purpose
+    if have pacman; then
+        pm_run pacman -Sy --needed --noconfirm $pp_missing $pp_pkgs || pp_rc=1
+    elif [ "$PLAN_VERB" = update ] && have apt; then
+        [ -z "$pp_pkgs" ] || upgrade_pkg $pp_pkgs || pp_rc=1
+        [ -z "$pp_missing" ] || install_pkg $pp_missing || pp_rc=1
+    else
+        install_pkg $pp_missing $pp_pkgs || pp_rc=1
+    fi
+    pa_pkg_at="$PROGRESS_AT"
+    CANCEL_ITEM=""
+
+    for pp_t in $pp_missing; do
+        if [ "$pp_rc" = 0 ] || pkg_present "$pp_t"; then
+            BUILD_ADDED="$BUILD_ADDED $pp_t"
+        else
+            pa_tools_bad="$pa_tools_bad $pp_t"
+        fi
+    done
+    [ -z "$pa_tools_bad" ] || err "could not install what is needed to build:$pa_tools_bad"
+
+    IFS="$NL"
+    for pp_line in $PLAN; do
+        IFS="$pp_ifs"
+        plan_split "$pp_line"
+        [ "$ps_action" = install ] && [ "$ps_kind" = pkg ] || continue
+        for pp_p in $(field "$(row "$ps_name")" 5); do
+            if ! pkg_present "$pp_p"; then
+                pa_pkg_bad="$pa_pkg_bad $ps_name"
+                break
+            fi
+        done
+    done
+    IFS="$pp_ifs"
+}
+
+# plan_apply — runs PLAN, row by row, in order. Each row ends ok, failed or
+# skipped (a row that needs one that failed or was skipped), with a reason
+# that the --progress done line carries; the rows around a failure carry on.
+# Returns 1 when any row failed or was skipped. Its helpers below share the
+# pa_ variables.
+plan_apply() {
+    pa_rc=0
+    pa_bad=""
+    pa_first_pkg=""
+    pa_pkg_at=0
+    pa_pkg_bad=""
+    pa_tools_bad=""
+    case "$PLAN_VERB" in
+        install|update) plan_packages ;;
+    esac
+    pa_ifs="$IFS"
+    IFS="$NL"
+    for pa_line in $PLAN; do
+        IFS="$pa_ifs"
+        plan_split "$pa_line"
+        pa_n="$ps_name"
+        pa_action="$ps_action"
+        pa_kind="$ps_kind"
+        pa_by="$ps_by"
+        pa_why="$ps_why"
+        LAST_ERR=""
+        PROGRESS_NOTE=""
+        case "$pa_action" in
+            install) plan_apply_install ;;
+            skip)
+                if [ "$PLAN_VERB" = update ]; then
+                    plan_let_go "$pa_n"
+                else
+                    plan_apply_skip
+                fi
+                ;;
+            unavailable)
+                # A bundle's part from another edition, or what needs one:
+                # passed by on purpose, which is not a failure.
+                case "$pa_why" in
+                    needs\ *) pa_said="$pa_n $pa_why" ;;
+                    *) pa_said="$pa_n is $pa_why" ;;
+                esac
+                say "$pa_said"
+                [ "$PROGRESS" != 1 ] || progress_done "$pa_n" ok "$pa_said"
+                ;;
+            remove|forget|absent) plan_apply_remove ;;
+            retire) plan_apply_retire ;;
+        esac
+    done
+    IFS="$pa_ifs"
+    drop_build_tools
+    return "$pa_rc"
+}
+
+# A held item named on update's command line: updating it lets go of the hold.
+plan_let_go() {
+    is_held "$1" || return 0
+    hold_drop "$1"
+    say "$1 was held; updating it lets go of the hold"
+}
+
+plan_apply_skip() {
+    # Named on the command line, something another item pulled in is yours now.
+    if [ "$pa_by" = requested ] && [ "$(state_by "$pa_n")" != requested ]; then
+        state_set_by "$pa_n" requested
+    fi
+    say "$pa_n is already installed"
+    [ "$PROGRESS" = 1 ] || return 0
+    CANCEL_ITEM="$pa_n"
+    PROGRESS_AT=0
+    progress_stage 10 fetched
+    progress_stage 60 "signature checked"
+    progress_stage 90 "putting files in place"
+    progress_stage 100 ready
+    progress_done "$pa_n" ok "already installed"
+    CANCEL_ITEM=""
+}
+
+plan_apply_install() {
+    pa_word=installed
+    pa_fail="could not install $pa_n"
+    if [ "$PLAN_VERB" = update ] && is_installed "$pa_n"; then
+        pa_word=updated
+        pa_fail="could not update $pa_n"
+    fi
+    pb_row "$pa_n"
+    pa_reason=""
+    for pa_d in $(commas "$prw_deps"); do
+        if in_list "$pa_bad" "$pa_d"; then
+            pa_reason="needs $pa_d, which did not install"
+            break
+        fi
+    done
+    if [ -n "$pa_reason" ]; then
+        pa_bad="$pa_bad $pa_n"
+        pa_rc=1
+        err "skipped $pa_n: $pa_reason"
+        [ "$PROGRESS" != 1 ] || progress_done "$pa_n" failed "$pa_reason"
+        return 0
+    fi
+    CANCEL_ITEM="$pa_n"
+    if [ "$pa_n" = "$pa_first_pkg" ]; then
+        PROGRESS_AT="$pa_pkg_at"
+    else
+        PROGRESS_AT=0
+    fi
+    progress_stage 10 fetched
+    [ "$PLAN_VERB" != update ] || plan_let_go "$pa_n"
+    pa_ok=1
+    pa_short=""
+    if [ "$pa_kind" = pkg ] && in_list "$pa_pkg_bad" "$pa_n"; then
+        for pa_p in $(field "$(row "$pa_n")" 5); do
+            pkg_present "$pa_p" || pa_short="$pa_short $pa_p"
+        done
+    else
+        for pa_t in $(build_tools_for "$pa_n" 1); do
+            in_list "$pa_tools_bad" "$pa_t" && pa_short="$pa_short $pa_t"
+        done
+    fi
+    if [ -n "$pa_short" ]; then
+        err "the package manager could not install $(words_list "$pa_short")"
+        pa_ok=0
+    else
+        pa_force=0
+        [ "$PLAN_VERB" != update ] || pa_force=1
+        SR_BY="$pa_by"
+        install_item "$pa_n" "$pa_force" || pa_ok=0
+        SR_BY=""
+    fi
+    if [ "$pa_ok" = 1 ]; then
+        progress_stage 60 "signature checked"
+        progress_stage 90 "putting files in place"
+        progress_stage 100 ready
+        [ "$PROGRESS" != 1 ] || progress_done "$pa_n" ok "${PROGRESS_NOTE:-$pa_word}"
+    else
+        pa_bad="$pa_bad $pa_n"
+        pa_rc=1
+        [ "$PROGRESS" != 1 ] || progress_done "$pa_n" failed "${LAST_ERR:-$pa_fail}"
+    fi
+    CANCEL_ITEM=""
+}
+
+plan_apply_remove() {
+    pa_word=removed
+    [ "$pa_action" != absent ] || pa_word="not installed"
+    if [ "$PROGRESS" = 1 ]; then
+        CANCEL_ITEM="$pa_n"
+        progress_line step "$pa_n" 30 fetched
+    fi
+    if remove_item "$pa_n"; then
+        if [ "$PROGRESS" = 1 ]; then
+            progress_line step "$pa_n" 75 "putting files in place"
+            progress_line step "$pa_n" 100 ready
+            progress_done "$pa_n" ok "$pa_word"
+        fi
+    else
+        pa_bad="$pa_bad $pa_n"
+        pa_rc=1
+        [ "$PROGRESS" != 1 ] || progress_done "$pa_n" failed "${LAST_ERR:-could not remove $pa_n}"
+    fi
+    CANCEL_ITEM=""
+}
+
+plan_apply_retire() {
+    if [ "$PROGRESS" = 1 ]; then
+        CANCEL_ITEM="$pa_n"
+        progress_line step "$pa_n" 30 fetched
+    fi
+    if retire_item "$pa_n"; then
+        if [ "$PROGRESS" = 1 ]; then
+            progress_line step "$pa_n" 75 "putting files in place"
+            progress_line step "$pa_n" 100 ready
+            progress_done "$pa_n" ok retired
+        fi
+    else
+        pa_bad="$pa_bad $pa_n"
+        pa_rc=1
+        [ "$PROGRESS" != 1 ] || progress_done "$pa_n" failed "${LAST_ERR:-could not retire $pa_n}"
+    fi
+    CANCEL_ITEM=""
 }
 
 cmd_install() {
@@ -3524,50 +4426,15 @@ cmd_install() {
         fi
     fi
 
-    for ci_n in $ci_names; do
-        [ -n "$(row "$ci_n")" ] || { err "$ci_n is not in the list"; return 1; }
-        ! retired_item "$ci_n" || { err "$ci_n was retired"; return 1; }
-        ! hidden_item "$ci_n" || { err "$ci_n is part of another item"; return 1; }
-    done
-
     # shellcheck disable=SC2086  # a list of names, split on purpose
-    if ! ci_plan=$(plan_for $ci_names); then
-        return 1
-    fi
-    # A package that owns the same commands is reported before anything is asked or fetched.
-    for ci_n in $ci_plan; do
-        is_installed "$ci_n" || conflict_check "$ci_n" || return 1
-    done
+    plan_build install $ci_names || return 1
     if [ "$DRY_RUN" = 1 ]; then
-        dry_install "$ci_plan"
+        plan_show
         return 0
     fi
-    say "Installing: $(words_list "$ci_plan")"
+    say "Installing: $(words_list "$(plan_names)")"
     ask_yn "Go ahead?" || { say "Nothing was installed."; return 0; }
-    add_build_tools "$ci_plan" 0 || return 1
-    for ci_n in $ci_plan; do
-        if [ "$PROGRESS" = 1 ]; then
-            CANCEL_ITEM="$ci_n"
-            PROGRESS_AT=0
-            progress_stage 10 fetched
-            PROGRESS_NOTE=""
-            if install_item "$ci_n"; then
-                progress_stage 60 "signature checked"
-                progress_stage 90 "putting files in place"
-                progress_stage 100 ready
-                progress_done "$ci_n" ok "${PROGRESS_NOTE:-installed}"
-            else
-                FAILED=1
-                progress_done "$ci_n" failed "could not install $ci_n"
-            fi
-            CANCEL_ITEM=""
-        else
-            install_item "$ci_n" || FAILED=1
-        fi
-    done
-    drop_build_tools
-    [ "$FAILED" = 0 ] || return 1
-    return 0
+    plan_apply
 }
 
 cmd_remove() {
@@ -3584,62 +4451,15 @@ cmd_remove() {
     [ -n "$cr_names" ] || { err "remove needs a name"; return 2; }
     pick_catalog || true
 
-    # A bundle takes the members it brought in with it.
-    cr_all=""
-    for cr_n in $cr_names; do
-        cr_all="$cr_all $cr_n"
-        cr_row=$(state_row "$cr_n" 2>/dev/null || true)
-        [ -n "$cr_row" ] || continue
-        [ "$(field "$cr_row" 2)" = bundle ] || continue
-        [ -n "$CATALOG" ] || continue
-        cr_item=$(row "$cr_n")
-        [ -n "$cr_item" ] || continue
-        for cr_m in $(commas "$(field "$cr_item" 8)"); do
-            [ "$cr_m" = "-" ] && continue
-            is_installed "$cr_m" || continue
-            in_list "$cr_all" "$cr_m" || cr_all="$cr_all $cr_m"
-        done
-    done
-    # The reverse of the install order: what needs another item goes first,
-    # so fish-plugins is taken away while the fisher it needs is still there.
-    # Without a list (or with a retired name in it) the order stays as it is.
     # shellcheck disable=SC2086  # a list of names, split on purpose
-    if [ -n "$CATALOG" ] && cr_plan=$(plan_for $cr_all 2>/dev/null); then
-        cr_order=""
-        for cr_n in $cr_plan; do
-            in_list "$cr_all" "$cr_n" && cr_order="$cr_n $cr_order"
-        done
-        for cr_n in $cr_all; do
-            in_list "$cr_order" "$cr_n" || cr_order="$cr_order $cr_n"
-        done
-        cr_all="$cr_order"
-    fi
-
+    plan_build remove $cr_names || return 1
     if [ "$DRY_RUN" = 1 ]; then
-        dry_remove "$cr_all"
+        plan_show
         return 0
     fi
-    say "Removing: $(words_list "$cr_all")"
+    say "Removing: $(words_list "$(plan_names)")"
     ask_yn "Go ahead?" || { say "Nothing was removed."; return 0; }
-    for cr_n in $cr_all; do
-        if [ "$PROGRESS" = 1 ]; then
-            CANCEL_ITEM="$cr_n"
-            progress_line step "$cr_n" 30 fetched
-            if remove_item "$cr_n"; then
-                progress_line step "$cr_n" 75 "putting files in place"
-                progress_line step "$cr_n" 100 ready
-                progress_done "$cr_n" ok removed
-            else
-                FAILED=1
-                progress_done "$cr_n" failed "could not remove $cr_n"
-            fi
-            CANCEL_ITEM=""
-        else
-            remove_item "$cr_n" || FAILED=1
-        fi
-    done
-    [ "$FAILED" = 0 ] || return 1
-    return 0
+    plan_apply
 }
 
 # The item half of update; cmd_update adds the self-update on top of it.
@@ -3647,7 +4467,6 @@ update_items() {
     cu_check=0
     cu_offline=0
     cu_tsv=0
-    cu_dry=0
     cu_names=""
     for cu_a in "$@"; do
         case "$cu_a" in
@@ -3657,7 +4476,7 @@ update_items() {
             --configs) REPLACE_CONFIGS=1 ;;
             --progress) PROGRESS=1; ASSUME_YES=1 ;;
             -y|--yes) ASSUME_YES=1 ;;
-            -n|--dry-run) cu_check=1; cu_dry=1 ;;
+            -n|--dry-run) cu_check=1; DRY_RUN=1 ;;
             -*) bad_opt update "$cu_a"; return 2 ;;
             *) cu_names="$cu_names $cu_a" ;;
         esac
@@ -3666,173 +4485,28 @@ update_items() {
     [ "$cu_offline" = 1 ] || update_refresh
     need_catalog
 
-    # Named on the command line, an item is updated even when it is held.
-    cu_explicit=1
-    if [ -z "$cu_names" ]; then
-        cu_explicit=0
-        cu_names=$(installed_names | tr '\n' ' ')
-    fi
-    if [ -z "$(printf '%s' "$cu_names" | tr -d ' ')" ]; then
+    if [ -z "$cu_names" ] && [ -z "$(installed_names)" ]; then
         [ "$cu_tsv" = 1 ] || say "Nothing is installed yet."
         return 0
     fi
-
-    cu_out=""
-    cu_pkgs=""
-    cu_latest=""
-    cu_resolved=""
-    cu_retired=""
-    for cu_n in $cu_names; do
-        if ! is_installed "$cu_n"; then
-            [ "$cu_tsv" = 1 ] || say "$cu_n is not installed"
-            continue
-        fi
-        cu_row=$(row "$cu_n")
-        if [ -z "$cu_row" ]; then
-            [ "$cu_tsv" = 1 ] || say "$cu_n is no longer in the list"
-            continue
-        fi
-        if [ "$(opt "$(field "$cu_row" 9)" retired)" = 1 ]; then
-            cu_retired="$cu_retired $cu_n"
-            continue
-        fi
-        if is_held "$cu_n"; then
-            if [ "$cu_explicit" = 0 ]; then
-                [ "$cu_tsv" = 1 ] || say "$cu_n is held at $(installed_version "$cu_n"); 'tlstore unhold $cu_n' lets it update"
-                continue
-            fi
-            if [ "$cu_check" = 0 ]; then
-                hold_drop "$cu_n"
-                say "$cu_n was held; updating it lets go of the hold"
-            fi
-        fi
-        cu_kind=$(field "$cu_row" 2)
-        cu_new=$(field "$cu_row" 3)
-        cu_have=$(installed_version "$cu_n")
-        case "$cu_kind" in
-            pkg) cu_pkgs="$cu_pkgs $(field "$cu_row" 5)" ;;
-            bundle|fisher) ;;
-            npm-musl|npm-android)
-                # An item pinned to latest is whatever its source says today.
-                # --check asks the registry which version that is and names the
-                # item only when it differs from what is here; offline, or when
-                # the registry cannot be reached, it says nothing about it.
-                if [ "$cu_new" = latest ]; then
-                    cu_latest="$cu_latest $cu_n"
-                    if [ "$cu_check" = 1 ] && [ "$cu_offline" = 0 ]; then
-                        cu_now=$(npm_latest_version "$(field "$cu_row" 5)")
-                        if [ -n "$cu_now" ] && [ "$cu_now" != "$cu_have" ]; then
-                            cu_resolved="$cu_resolved $cu_n=$cu_now"
-                        fi
-                    fi
-                elif [ "$cu_new" != "$cu_have" ]; then
-                    cu_out="$cu_out $cu_n"
-                fi
-                ;;
-            *)
-                [ "$cu_new" = "$cu_have" ] || cu_out="$cu_out $cu_n"
-                ;;
-        esac
-    done
-
-    if [ "$cu_check" = 1 ] && [ "$cu_tsv" = 1 ]; then
-        for cu_n in $cu_out; do
-            cu_row=$(row "$cu_n")
-            cu_note=""
-            [ "$(field "$cu_row" 2)" = file ] && cu_note=config-asks
-            printf '%s\t%s\t%s\t%s\n' "$cu_n" \
-                "$(installed_version "$cu_n")" "$(field "$cu_row" 3)" "$cu_note"
-        done
-        for cu_nv in $cu_resolved; do
-            printf '%s\t%s\t%s\t%s\n' "${cu_nv%%=*}" "$(installed_version "${cu_nv%%=*}")" "${cu_nv#*=}" latest
-        done
-        # No line for a retired item: it is hidden, so the store UI could
-        # count it but never show or run it (snapshot retires it instead).
-        return 0
-    fi
-
+    PLAN_CHECK="$cu_check"
+    PLAN_OFFLINE="$cu_offline"
+    PLAN_TSV="$cu_tsv"
+    # shellcheck disable=SC2086  # a list of names, split on purpose
+    plan_build update $cu_names || return 1
     if [ "$cu_check" = 1 ]; then
-        for cu_nv in $cu_resolved; do
-            say "${cu_nv%%=*} ${cu_nv#*=} is available; you have $(installed_version "${cu_nv%%=*}")"
-        done
-        for cu_n in $cu_retired; do
-            say "$cu_n was retired; update will remove it"
-        done
-        if [ -z "$(printf '%s%s%s' "$cu_out" "$cu_resolved" "$cu_retired" | tr -d ' ')" ]; then
-            say "Everything is up to date."
+        if [ "$cu_tsv" = 1 ]; then
+            plan_tsv
         else
-            for cu_n in $cu_out; do
-                cu_row=$(row "$cu_n")
-                if [ "$(field "$cu_row" 2)" = file ]; then
-                    say "$cu_n has a new version; update shows the change and asks"
-                else
-                    say "$cu_n $(field "$cu_row" 3) is available; you have $(installed_version "$cu_n")"
-                fi
-            done
-        fi
-        [ -z "$(printf '%s' "$cu_pkgs" | tr -d ' ')" ] || say "Packages are checked by the package manager when you update."
-        [ "$cu_dry" = 0 ] || say "Nothing was changed."
-        if [ "$cu_offline" = 1 ]; then
-            for cu_n in $cu_latest; do
-                say "$cu_n is checked against its source when you update."
-            done
+            plan_show
         fi
         return 0
     fi
-
-    if [ -n "$(printf '%s' "$cu_pkgs" | tr -d ' ')" ]; then
-        say "Updating packages"
-        # shellcheck disable=SC2086
-        upgrade_pkg $cu_pkgs || FAILED=1
+    if [ -z "$(plan_names install)$(plan_names retire)" ]; then
+        say "Everything is up to date."
+        return 0
     fi
-    cu_out="$cu_out $cu_latest"
-    if [ -z "$(printf '%s%s' "$cu_out" "$cu_retired" | tr -d ' ')" ]; then
-        [ -n "$(printf '%s' "$cu_pkgs" | tr -d ' ')" ] || say "Everything is up to date."
-    else
-        if [ -n "$(printf '%s' "$cu_out" | tr -d ' ')" ]; then
-            add_build_tools "$cu_out" 1 || return 1
-            for cu_n in $cu_out; do
-                if [ "$PROGRESS" = 1 ]; then
-                    CANCEL_ITEM="$cu_n"
-                    PROGRESS_AT=0
-                    progress_stage 10 fetched
-                    PROGRESS_NOTE=""
-                    if install_item "$cu_n" 1; then
-                        progress_stage 60 "signature checked"
-                        progress_stage 90 "putting files in place"
-                        progress_stage 100 ready
-                        progress_done "$cu_n" ok "${PROGRESS_NOTE:-updated}"
-                    else
-                        FAILED=1
-                        progress_done "$cu_n" failed "could not update $cu_n"
-                    fi
-                    CANCEL_ITEM=""
-                else
-                    install_item "$cu_n" 1 || FAILED=1
-                fi
-            done
-            drop_build_tools
-        fi
-        for cu_n in $cu_retired; do
-            if [ "$PROGRESS" = 1 ]; then
-                CANCEL_ITEM="$cu_n"
-                progress_line step "$cu_n" 30 fetched
-                if retire_item "$cu_n"; then
-                    progress_line step "$cu_n" 75 "putting files in place"
-                    progress_line step "$cu_n" 100 ready
-                    progress_done "$cu_n" ok retired
-                else
-                    FAILED=1
-                    progress_done "$cu_n" failed "could not retire $cu_n"
-                fi
-                CANCEL_ITEM=""
-            else
-                retire_item "$cu_n" || FAILED=1
-            fi
-        done
-    fi
-    [ "$FAILED" = 0 ] || return 1
-    return 0
+    plan_apply
 }
 
 cmd_update() {
