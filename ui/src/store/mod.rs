@@ -30,7 +30,9 @@ use crate::picture::{self, FileKey, Lookup, Picture, Pictures};
 use crate::render::Frame;
 use crate::term::{Event, Key};
 
-use data::{parse_progress, parse_self_check, parse_updates, AssetKind, Catalog, Progress, Snapshot, STEPS};
+use data::{
+    parse_progress, parse_self_check, parse_updates, AssetKind, Catalog, Channels, Progress, Snapshot, STEPS,
+};
 use decode::{Decoder, Done as Answer, Job as DecodeJob};
 use paint::{draw_keys, draw_notice, Facts, Paint, Slots, A_HOME, A_KEY0};
 use proc::{parse_prefetch, Env, Fetch, Task, TaskKind};
@@ -332,6 +334,9 @@ pub struct Store {
     pub notice_until: Option<Instant>,
     /// A newer store, as the startup check reports it.
     pub self_update: SelfUpdate,
+    /// What the last check of the item list and of tlstore itself found (the snapshot's
+    /// `channel` lines); Front says so when either could not be checked.
+    pub channels: Channels,
     /// A self-update job has just been started and Installing should be pushed (read once).
     self_update_started: bool,
     /// The self-update went through: the app loop ends then, and `exit` says what follows.
@@ -408,6 +413,7 @@ impl Store {
             notice: None,
             notice_until: None,
             self_update: SelfUpdate::Checking,
+            channels: Channels::default(),
             self_update_started: false,
             quit_at: None,
             exit: Rc::new(RefCell::new(None)),
@@ -524,6 +530,7 @@ impl Store {
                 self.fetched.insert(Fetch::Readme(it.name.clone()), Got::Failed(2));
             }
         }
+        self.channels = snap.channels.clone();
         self.cat.apply(snap);
         if let Some(u) = self.refreshed_updates.take() {
             self.cat.updates = u;
@@ -690,12 +697,18 @@ impl Store {
     }
 
     /// The check's answer landed: a newer store starts installing itself at once, unless a
-    /// job is already running (then it waits for the next launch).
+    /// job is already running (then it waits for the next launch). What the check found
+    /// is kept, and a fresh snapshot asked for, so the self channel shows without waiting
+    /// for the next launch.
     fn on_self_check(&mut self, code: i32, lines: Vec<String>) {
-        let offered = match code {
-            0 => parse_self_check(&lines.join("\n")).filter(|c| c.available),
+        let check = match code {
+            0 => parse_self_check(&lines.join("\n")),
             _ => None,
         };
+        if let Some(ch) = check.as_ref().and_then(|c| c.channel.clone()) {
+            self.channels.tlstore = Some(ch);
+        }
+        let offered = check.filter(|c| c.available);
         match offered {
             Some(c) if !self.job_running() => {
                 self.self_update = SelfUpdate::Offered { have: c.have, new: c.new };
@@ -705,6 +718,7 @@ impl Store {
             }
             _ => self.self_update = SelfUpdate::NotOffered,
         }
+        self.take_snapshot();
     }
 
     /// Fds the app loop should watch.

@@ -8,7 +8,7 @@ use crate::picture::shapes;
 use crate::render::{text_width, Rect, Sizing, Style, Underline};
 use crate::term::{Event, Key, MouseKind};
 
-use super::data::{Info, Item};
+use super::data::{Channels, Info, Item};
 use super::paint::{
     self, draw_header, HeaderContent, Masthead, Paint, Slot, Slots, A_ALL, A_CONTEXT, A_HEADER, A_HOME,
 };
@@ -22,6 +22,16 @@ const A_ROW: u32 = 200;
 
 /// The cursor pill's alpha over the surface.
 const PILL_ALPHA: f32 = 0.18;
+
+/// What Front's notice row says about the signed channels: `Couldn't check for updates:
+/// <reason>` when the item list or tlstore could not be verified or was refused, and only
+/// while no other notice and no selection bar is there. Offline says nothing.
+pub(super) fn channel_notice(notice: Option<&str>, selecting: bool, channels: &Channels) -> Option<String> {
+    if notice.is_some() || selecting {
+        return None;
+    }
+    channels.problem().map(|r| format!("Couldn't check for updates: {r}"))
+}
 
 pub struct Front {
     /// Index into the shown list.
@@ -303,6 +313,10 @@ impl View for Front {
             let line = layout::fit_line(&text, hdr.content.w);
             p.text(El::Notice, hdr.gutter, hdr.notice, &line, pal.dim_s());
         }
+        // Otherwise, a channel that could not be checked.
+        if let Some(text) = channel_notice(st.notice.as_deref(), !self.sel.is_empty(), &st.channels) {
+            paint::draw_notice(p, &hdr, &text);
+        }
     }
 
     fn keys(&self, st: &mut Store) -> Slots {
@@ -402,5 +416,42 @@ impl View for Front {
     fn refresh(&mut self, st: &Store) {
         self.sel.retain(|n| st.cat.item(n).is_some());
         self.clamp(st);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::data::Channel;
+    use super::*;
+
+    fn channels(catalog: (&str, &str), tlstore: (&str, &str)) -> Channels {
+        Channels {
+            catalog: Some(Channel::new(catalog.0, catalog.1)),
+            tlstore: Some(Channel::new(tlstore.0, tlstore.1)),
+        }
+    }
+
+    #[test]
+    fn channel_notice_says_why_updates_could_not_be_checked() {
+        let no_minisign = channels(("cannot-verify", "minisign is not installed (pkg install minisign)"), ("current", "-"));
+        assert_eq!(
+            channel_notice(None, false, &no_minisign).as_deref(),
+            Some("Couldn't check for updates: minisign is not installed (pkg install minisign)")
+        );
+        let refused = channels(("current", "-"), ("refused", "the tlstore that was offered is not signed by the launcher"));
+        assert_eq!(
+            channel_notice(None, false, &refused).as_deref(),
+            Some("Couldn't check for updates: the tlstore that was offered is not signed by the launcher")
+        );
+    }
+
+    #[test]
+    fn channel_notice_stays_out_of_the_way() {
+        let offline = channels(("offline", "the release could not be reached"), ("offline", "the release could not be reached"));
+        assert_eq!(channel_notice(None, false, &offline), None, "offline is normal on a phone");
+        assert_eq!(channel_notice(None, false, &Channels::default()), None, "nothing checked yet");
+        let refused = channels(("refused", "the item list that was offered is older than the one you have"), ("newer", "-"));
+        assert_eq!(channel_notice(Some("tlstore updated to 0.12"), false, &refused), None, "another notice wins");
+        assert_eq!(channel_notice(None, true, &refused), None, "so does the selection bar");
     }
 }

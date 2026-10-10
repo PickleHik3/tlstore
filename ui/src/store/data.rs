@@ -174,8 +174,56 @@ impl AssetKind {
     }
 }
 
+/// What the last check of one signed channel (the item list, or tlstore itself) found:
+/// `newer`, `current`, `offline`, `cannot-verify` or `refused`, and why (empty for none).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Channel {
+    pub outcome: String,
+    pub reason: String,
+}
+
+impl Channel {
+    /// The engine's words as they come; a `-` reason is none.
+    pub fn new(outcome: &str, reason: &str) -> Channel {
+        let reason = reason.trim();
+        Channel {
+            outcome: outcome.trim().to_string(),
+            reason: if reason == "-" { String::new() } else { reason.to_string() },
+        }
+    }
+
+    /// The check could not be trusted: nothing to verify with, or what was offered was
+    /// refused. Offline is normal on a phone and does not count.
+    pub fn failed(&self) -> bool {
+        matches!(self.outcome.as_str(), "cannot-verify" | "refused")
+    }
+}
+
+/// Both channels, as the snapshot's `channel` lines (and the self-check) report them.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Channels {
+    pub catalog: Option<Channel>,
+    /// tlstore itself (`self` in the engine's words).
+    pub tlstore: Option<Channel>,
+}
+
+impl Channels {
+    /// Why updates could not be checked, when either channel failed: the item list's
+    /// reason first, then tlstore's. None while both are fine or merely offline.
+    pub fn problem(&self) -> Option<String> {
+        [&self.catalog, &self.tlstore].into_iter().flatten().find(|c| c.failed()).map(|c| {
+            if c.reason.is_empty() {
+                "what was offered could not be verified".to_string()
+            } else {
+                c.reason.clone()
+            }
+        })
+    }
+}
+
 /// Everything `tlstore snapshot --tsv` says, parsed: the list, every item's info, the
-/// offline updates, and the assets whose verified copy is already on disk.
+/// offline updates, the assets whose verified copy is already on disk, and what the last
+/// check of each signed channel found.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Snapshot {
     pub items: Vec<Item>,
@@ -183,12 +231,14 @@ pub struct Snapshot {
     pub updates: Vec<Update>,
     /// `(name, kind, path)`; only pictures, demos and readmes appear here.
     pub cached: Vec<(String, AssetKind, PathBuf)>,
+    pub channels: Channels,
 }
 
 impl Snapshot {
     /// Reads the line-typed stream. Comment lines (`#`) and unknown types are skipped; an
     /// `item` line is the `list --tsv` row after the type word, a `field` line one
-    /// `info --tsv` row for its item, an `update` line one `update --check --tsv` row.
+    /// `info --tsv` row for its item, an `update` line one `update --check --tsv` row, a
+    /// `channel` line `catalog|self`, its outcome and its reason.
     pub fn parse(text: &str) -> Snapshot {
         let mut s = Snapshot::default();
         for line in text.lines() {
@@ -213,6 +263,14 @@ impl Snapshot {
                 "cached" if f.len() >= 4 => {
                     if let Some(kind) = AssetKind::parse(f[2]).filter(|k| *k != AssetKind::Asset) {
                         s.cached.push((f[1].to_string(), kind, PathBuf::from(f[3])));
+                    }
+                }
+                "channel" if f.len() >= 3 => {
+                    let c = Channel::new(f[2], f.get(3).copied().unwrap_or(""));
+                    match f[1] {
+                        "catalog" => s.channels.catalog = Some(c),
+                        "self" => s.channels.tlstore = Some(c),
+                        _ => {}
                     }
                 }
                 _ => {}
@@ -285,15 +343,18 @@ impl Catalog {
 }
 
 /// What `tlstore self-update --check --tsv` said: the version in place, the newest one
-/// offered (`-` when none could be read), and whether the update can be had.
+/// offered (`-` when none could be read), whether the update can be had, and (from an
+/// engine that says it) what the check of the channel found.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SelfCheck {
     pub have: String,
     pub new: String,
     pub available: bool,
+    /// Fields 5 and 6, outcome and reason; None from an older engine's four fields.
+    pub channel: Option<Channel>,
 }
 
-/// Parses the one line `self\t<installed>\t<latest>\t<available 0|1>`.
+/// Parses the one line `self\t<installed>\t<latest>\t<available 0|1>[\t<outcome>\t<reason>]`.
 pub fn parse_self_check(text: &str) -> Option<SelfCheck> {
     text.lines().find_map(|l| {
         let f: Vec<&str> = l.split('\t').collect();
@@ -301,6 +362,10 @@ pub fn parse_self_check(text: &str) -> Option<SelfCheck> {
             have: f[1].to_string(),
             new: f[2].to_string(),
             available: f[3].trim() == "1",
+            channel: f
+                .get(4)
+                .filter(|o| !o.trim().is_empty())
+                .map(|o| Channel::new(o, f.get(5).copied().unwrap_or(""))),
         })
     })
 }
@@ -430,17 +495,82 @@ mod tests {
         assert_eq!(parse_progress("Installing: kitten"), None);
         assert_eq!(
             parse_self_check("self\t0.6\t0.7\t1\n"),
-            Some(SelfCheck { have: "0.6".into(), new: "0.7".into(), available: true })
+            Some(SelfCheck { have: "0.6".into(), new: "0.7".into(), available: true, channel: None })
         );
         let refused = "tlstore: the tlstore that was offered is not signed\nself\t0.6\t-\t0";
         assert_eq!(
             parse_self_check(refused),
-            Some(SelfCheck { have: "0.6".into(), new: "-".into(), available: false })
+            Some(SelfCheck { have: "0.6".into(), new: "-".into(), available: false, channel: None })
         );
         assert_eq!(parse_self_check("self\t0.6\n"), None);
         assert_eq!(parse_self_check(""), None);
         assert_eq!(step_word(0), "fetching…");
         assert_eq!(step_word(2), "placing…");
         assert_eq!(step_word(4), "ready");
+    }
+
+    #[test]
+    fn snapshot_reads_channel_lines() {
+        let text = "# tlstore snapshot\tkey=abc\n\
+                    item\tdawn\tavailable\t0.1.3\t\tbinary\ta quiet place\tNote taking\t1\n\
+                    channel\tcatalog\tcannot-verify\tminisign is not installed (pkg install minisign)\n\
+                    channel\tself\tcurrent\t-\n\
+                    channel\tsomething\trefused\tnot a channel\n";
+        let s = Snapshot::parse(text);
+        assert_eq!(s.items.len(), 1, "a channel line is not an item");
+        assert_eq!(
+            s.channels.catalog,
+            Some(Channel {
+                outcome: "cannot-verify".into(),
+                reason: "minisign is not installed (pkg install minisign)".into()
+            })
+        );
+        assert_eq!(s.channels.tlstore, Some(Channel { outcome: "current".into(), reason: String::new() }));
+        assert_eq!(s.channels.problem().as_deref(), Some("minisign is not installed (pkg install minisign)"));
+        let none = Snapshot::parse("item\tdawn\tavailable\t1\t\tbinary\t-\t-\t0\n");
+        assert_eq!(none.channels, Channels::default());
+    }
+
+    #[test]
+    fn channel_problems_leave_offline_alone() {
+        let ch = |o: &str, r: &str| Some(Channel::new(o, r));
+        let mut c = Channels { catalog: ch("offline", "the release could not be reached"), tlstore: ch("current", "-") };
+        assert_eq!(c.problem(), None, "offline is normal on a phone");
+        c.tlstore = ch("refused", "the tlstore that was offered is not signed by the launcher");
+        assert_eq!(c.problem().as_deref(), Some("the tlstore that was offered is not signed by the launcher"));
+        c.catalog = ch("cannot-verify", "the trusted key is missing — reopen the app to put it back");
+        assert_eq!(
+            c.problem().as_deref(),
+            Some("the trusted key is missing — reopen the app to put it back"),
+            "the item list's reason comes first"
+        );
+        c.catalog = ch("newer", "-");
+        c.tlstore = ch("refused", "-");
+        assert_eq!(c.problem().as_deref(), Some("what was offered could not be verified"));
+        assert_eq!(Channels::default().problem(), None);
+    }
+
+    #[test]
+    fn self_check_reads_the_channel_fields() {
+        let six = "self\t0.11\t-\t0\tcannot-verify\tminisign is not installed (pkg install minisign)\n";
+        assert_eq!(
+            parse_self_check(six),
+            Some(SelfCheck {
+                have: "0.11".into(),
+                new: "-".into(),
+                available: false,
+                channel: Some(Channel {
+                    outcome: "cannot-verify".into(),
+                    reason: "minisign is not installed (pkg install minisign)".into()
+                }),
+            })
+        );
+        let newer = parse_self_check("self\t0.11\t0.12\t1\tnewer\t-").unwrap();
+        assert!(newer.available);
+        assert_eq!(newer.channel, Some(Channel { outcome: "newer".into(), reason: String::new() }));
+        let four = parse_self_check("self\t0.11\t0.11\t0\n").unwrap();
+        assert_eq!((four.new.as_str(), four.available, four.channel), ("0.11", false, None));
+        let five = parse_self_check("self\t0.11\t-\t0\toffline").unwrap();
+        assert_eq!(five.channel, Some(Channel { outcome: "offline".into(), reason: String::new() }));
     }
 }
