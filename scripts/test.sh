@@ -964,7 +964,10 @@ run_suite() {
 
     # --- fetch first (Revision 13, step 3): every payload is fetched and checked before any row
     # is applied ---
-    STAGE="$TESTHOME/.cache/tlstore/stage"
+    # Each run stages under stage.<pid>; none may be left behind.
+    no_stage() {
+        if compgen -G "$TESTHOME/.cache/tlstore/stage*" >/dev/null; then fail "$1" "a staging directory is still there"; else pass; fi
+    }
     JOURNAL="$TESTHOME/.local/share/tlstore/journal"
     UCAT="$TESTHOME/.local/share/tlstore/catalog.tsv"
     rm -f "$ROOT/ucat.keep"
@@ -999,7 +1002,7 @@ run_suite() {
     fi
     expect_no_file "fetch first: the bad one's target never appeared" "$TESTHOME/.local/bin/badsum"
     if grep -q "twin.bin" "$ROOT/curl.log"; then fail "fetch first: what will be skipped is never fetched" "$(tr '\n' '|' < "$ROOT/curl.log")"; else pass; fi
-    expect_no_file "fetch first: the staging directory is gone afterwards" "$STAGE"
+    no_stage "fetch first: the staging directory is gone afterwards"
     expect_no_file "fetch first: and so is the journal" "$JOURNAL"
     if grep -q "^needsbad${T}\|^badsum${T}" "$PSTATE"; then fail "fetch first: neither is recorded" "$(cat "$PSTATE")"; else pass; fi
 
@@ -1014,7 +1017,7 @@ run_suite() {
     expect_status "fetch first: a changed config file updates" 0
     expect_content "fetch first: from the staged copy" "$TESTHOME/.config/hello.conf" "greeting from the catalog"
     if [ "$(grep -c "hello.conf" "$ROOT/curl.log")" = 1 ]; then pass; else fail "fetch first: one fetch for the payload" "$(tr '\n' '|' < "$ROOT/curl.log")"; fi
-    expect_no_file "fetch first: and no staging directory after it" "$STAGE"
+    no_stage "fetch first: and no staging directory after it"
     # The same file as yours: recorded, from the one fetch too.
     write_catalog "$UCAT" 2026099992 3 fakebin-3
     : > "$ROOT/curl.log"
@@ -2667,7 +2670,7 @@ EOF
     else
         pass
     fi
-    expect_no_file "the staged payloads are dropped on cancel" "$TESTHOME/.cache/tlstore/stage"
+    no_stage "the staged payloads are dropped on cancel"
     # Every payload is fetched before any row is applied (Revision 13), so a cancel during
     # slow's download lands before hello, fetched already, was put in place: nothing changed.
     if printf '%s' "$CANCEL_TXT" | grep -q "$(printf 'done\thello\t')"; then

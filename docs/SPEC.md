@@ -808,7 +808,9 @@ refuses the whole command.
    is `ok` only when all its packages are present, and otherwise fails with the reason
    `the package manager could not install <packages>`.
 3. Fetches and verifies the payload of every `binary`, `file` and `file-once` row into
-   `$CACHE_DIR/stage/` before any row is applied. A row whose payload does not arrive fails at
+   `$CACHE_DIR/stage.<pid>/` before any row is applied. Each process has its own, because the
+   store app and a terminal can be installing at the same time. A `file-once` whose file is
+   already there is not fetched, and neither is a row that will be skipped. A row whose payload does not arrive fails at
    this point. The npm kinds still fetch while they apply.
 4. Applies the rows in order. A row that requires a row that failed or was skipped is skipped,
    with the reason `needs <x>, which did not install`. The rows around it carry on.
@@ -829,9 +831,18 @@ Remove plans run in reverse install order and also take:
 - installed items recorded as `auto` that nothing installed will still need afterwards
   (`only <x> needed it`).
 
+A `pkg` item being forgotten takes nothing with it, since its package stays installed. A member
+or part that something staying still needs is kept. Only the parts that the removed items
+required are taken; other leftovers stay.
+
 An update plan is the update decisions as before (holds, retired items, versions, npm `latest`).
 It adds an `install` row for any requirement the newer list gives an item that is not installed
-yet.
+yet. The unavailable rule applies only to those new rows: an item that is already installed keeps
+updating. An update keeps each item's recorded `by`.
+
+Under `--progress`, an `unavailable` row ends `ok` with its reason, and a skipped row ends `failed`
+with its reason, so the done line keeps its shape. A cancel leaves the journal behind, so the next
+run reports what did not finish.
 
 `rollback` still installs its one item directly through `install_item`. A confirm screen in
 tlstore-ui built on the plan (a `--dry-run --tsv`) is left for later. `TLSTORE_VERSION` moves to

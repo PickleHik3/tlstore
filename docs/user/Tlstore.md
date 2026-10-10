@@ -88,6 +88,16 @@ An exit status of 0 means done, 1 means something failed and 2 means a mistake i
 Removing a package-based item only tells tlstore to stop tracking it — the package itself stays
 installed, the way `apt`/`pacman` already manage it. Everything else tlstore put down is deleted.
 
+Removing an item also takes what needs it, and the parts it pulled in that nothing else needs. A
+part you installed by name stays. `--dry-run` lists all of it, with the reason for each, before
+anything changes.
+
+An install works in stages. It decides everything first, then makes one call to the package
+manager, then downloads and checks every file, and only then puts anything in place. When one item
+fails, the items that need it are skipped and the rest carry on; the exit status is 1, and each
+failure gives its reason. If an install is cut short (the phone died, the app was killed), the next
+install and `tlstore doctor` say which items did not finish.
+
 ## Your config files are never replaced silently
 
 When tlstore is about to write a config file you already have and yours is different, it shows you
@@ -204,13 +214,17 @@ What cannot go back: package items (Termux's repositories keep only the newest p
 like anything else, but you are still shown the change and asked before yours is replaced.
 
 `tlstore self-update` exits 1 when a newer tlstore was offered but could not be taken (a bad
-signature, a download that does not match); `tlstore update` does too.
+signature, a download that does not match); `tlstore update` does too. It also exits 1 when it
+could not check at all, and says why. Checking needs minisign (`pkg install minisign`):
+without it, neither tlstore nor the item list can be updated, and `tlstore update`, `self-update`,
+`doctor` and the store app all say so instead of reporting "up to date".
 
 ## Doctor
 
 `tlstore doctor` looks over your setup — where things are installed, whether your shell finds them
 before Termux's own copies, which tools tlstore's items need, and whether anything it installed has
-gone missing — and tells you what, if anything, needs attention.
+gone missing, whether the last checks for a newer item list and a newer tlstore worked, and whether
+an install was cut short. It then tells you what, if anything, needs attention.
 
 ## Claude Code
 

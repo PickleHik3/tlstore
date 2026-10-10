@@ -49,7 +49,7 @@
 
 set -u
 
-TLSTORE_VERSION=0.11
+TLSTORE_VERSION=0.12
 
 # The store program that pairs with this script, one digest per processor.
 # Empty in the source tree: scripts/release.sh --prepare fills them in from
@@ -95,8 +95,9 @@ SU_QUIET="$DATA_DIR/self-update-quiet"
 # is still here. Nothing else reads it, and nothing is resumed from it.
 JOURNAL="$DATA_DIR/journal"
 # Where plan_apply's fetch phase keeps each payload it downloaded and checked,
-# until its row is applied.
-STAGE_DIR="$CACHE_DIR/stage"
+# until its row is applied. One per process: the store app and a terminal can
+# each be installing at once, and each wipes its own when it is done.
+STAGE_DIR="$CACHE_DIR/stage.$$"
 
 # The app writes this when it puts tlstore down (a hand install writes
 # .standalone instead, with the address it came from inside it; nothing here
@@ -4046,7 +4047,14 @@ plan_show_remove() {
         [ "$ps_why" = "-" ] || sw_note="  ($ps_why)"
         case "$ps_action" in
             absent) say "  $ps_name  (not installed, nothing to do)"; continue ;;
-            forget) say "  $ps_name  (only forgotten; the package stays installed)$sw_note"; continue ;;
+            forget)
+                if [ "$ps_why" = "-" ]; then
+                    say "  $ps_name  (only forgotten; the package stays installed)"
+                else
+                    say "  $ps_name  ($ps_why; only forgotten, the package stays installed)"
+                fi
+                continue
+                ;;
         esac
         say "  $ps_name$sw_note"
         sw_row=$(state_row "$ps_name" 2>/dev/null || true)
