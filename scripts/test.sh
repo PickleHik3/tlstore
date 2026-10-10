@@ -287,8 +287,12 @@ EOF
     cat > "$FIXBIN/pacman" <<EOF
 #!/bin/sh
 echo "\$@" >> "$ROOT/pkg.log"
-# A failed install, while the test has dropped this marker: a package it cannot find.
+# A failed install, while the test has dropped this marker: packages it cannot find, which are
+# then not there either.
 if [ "\${1:-}" = -Sy ] && [ -e "$ROOT/pacman-fails" ]; then echo "error: target not found"; exit 1; fi
+if [ "\${1:-}" = -Q ] && [ -e "$ROOT/pacman-fails" ]; then
+    case "\${2:-}" in demo-one|demo-two) exit 1 ;; esac
+fi
 if [ "\${1:-}" = -S ] || [ "\${1:-}" = -Sy ]; then
     # What the real one prints with no terminal, so --progress has lines to read.
     echo ":: Synchronizing package databases..."
@@ -983,7 +987,7 @@ exec \"$TESTHOME/.local/bin/tl-priv\" run \"$TESTHOME/.local/lib/tlstore/priv/pr
     tl install pkgkit -y
     rm -f "$ROOT/pacman-fails"
     expect_status "a bundle with a member that failed fails" 1
-    expect_out "and names the member" "pkgkit is not complete: demo-pkg did not install"
+    expect_out "and is skipped, naming the member" "skipped pkgkit: needs demo-pkg, which did not install"
     if grep -q "^pkgkit$(printf '\t')" "$TESTHOME/.local/share/tlstore/installed.tsv"; then fail "the bundle is not recorded"; else pass; fi
     tl install pkgkit -y
     expect_status "installed again once the package can be found, it lands" 0
@@ -2270,7 +2274,7 @@ EOF
 
     tl install badsum --progress
     expect_status "a failing --progress install still exits nonzero" 1
-    expect_out "the done line, failed" $'^done\tbadsum\tfailed\tcould not install badsum$'
+    expect_out "the done line, failed, with the real reason" $'^done\tbadsum\tfailed\tbadsum does not match what the list expects — nothing was installed$'
     expect_no_out "a failed item never claims to be ready" $'^step\tbadsum\t100\tready$'
 
     write_catalog "$TESTHOME/.local/share/tlstore/catalog.tsv" 2026090699 9 fakebin-3
