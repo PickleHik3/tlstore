@@ -154,6 +154,11 @@ write_catalog() {
         printf 'pkgkit\tbundle\t-\t*\t-\t-\t-\tdemo-pkg\t-\tA bundle of one package.\t%s\n' "$R5_NONE"
         printf 'phantomshell\tbundle\t-\t*\t-\t-\t-\tsecret\tlogin-shell=nosuchsh\tA shell that is not there.\t%s\n' "$R5_NONE"
         printf 'secret\tfile\t1\t*\tfile://%s/mine.conf\t%s\t~/.config/secret.conf\t-\thidden=1\tA part of something else.\t%s\n' "$FX" "$(sha "$FX/mine.conf")" "$R5_NONE"
+        # A part only another edition has (no row here), an item that needs it, and a bundle with
+        # both in it: the bundle installs without them, the item cannot be installed at all.
+        printf 'elsewhere\tfile\t1\tio.vaj.tl\tfile://%s/mine.conf\t%s\t~/.config/elsewhere.conf\t-\thidden=1\tA part only another edition has.\t%s\n' "$FX" "$(sha "$FX/mine.conf")" "$R5_NONE"
+        printf 'reacher\tfile\t1\t*\tfile://%s/mine.conf\t%s\t~/.config/reacher.conf\telsewhere\t-\tNeeds what this edition does not have.\t%s\n' "$FX" "$(sha "$FX/mine.conf")" "$R5_NONE"
+        printf 'farkit\tbundle\t-\t*\t-\t-\t-\thello,elsewhere,reacher\t-\tA bundle with parts from another edition.\t%s\n' "$R5_NONE"
         printf 'launcheronly\tbinary\t1\t*\tfile://%s/twin.bin\t%s\t~/.local/bin/launcheronly\t-\thost=launcher\tOnly where the launcher runs it.\t%s\n' "$FX" "$(sha "$FX/twin.bin")" "$R5_NONE"
         printf 'termuxonly\tbinary\t1\t*\tfile://%s/other.bin\t%s\t~/.local/bin/termuxonly\t-\thost=termux\tOnly in the plain app.\t%s\n' "$FX" "$(sha "$FX/other.bin")" "$R5_NONE"
         printf 'recentonly\tbinary\t1\t*\tfile://%s/twin.bin\t%s\t~/.local/bin/recentonly\t-\tmin-launcher=0.3.0\tWants a recent app.\t%s\n' "$FX" "$(sha "$FX/twin.bin")" "$R5_NONE"
@@ -822,6 +827,140 @@ run_suite() {
     expect_out "a launcher that does not say its version sees it" "recentonly"
     tl list
     expect_out "and so does the plain app" "recentonly"
+
+    # --- the plan (Revision 13): plan_build called directly, PLAN read back ---
+    T=$'\t'
+    PSTATE="$TESTHOME/.local/share/tlstore/installed.tsv"
+    # plan_rows <code> — PLAN after <code> (a plan_build call), with its status first as rc=.
+    plan_rows() { tl_fn 'need_catalog; '"$1"'; printf "rc=%s\n%s\n" "$?" "$PLAN"'; }
+    # The names in PLAN, in its order.
+    plan_seq() { printf '%s\n' "$OUT" | awk -F "$T" 'NF == 6 { printf "%s ", $1 }'; }
+    # st_put <name> <kind> <version> [by] — an installed.tsv row; without by, a row from before
+    # column 11.
+    st_put() {
+        mkdir -p "$(dirname "$PSTATE")"
+        if [ $# -ge 4 ]; then
+            printf '%s\t%s\t%s\t20260101-000000\t\t\t\t\t\t\t%s\n' "$1" "$2" "$3" "$4" >> "$PSTATE"
+        else
+            printf '%s\t%s\t%s\t20260101-000000\t\n' "$1" "$2" "$3" >> "$PSTATE"
+        fi
+    }
+    rm -f "$PSTATE"
+
+    plan_rows 'plan_build install fishkit'
+    expect_out "plan: an install plan builds" "^rc=0$"
+    expect_out "plan: a part comes in for its bundle" "^fishfn${T}install${T}file${T}1${T}auto${T}part of fishkit$"
+    expect_out "plan: the part that needs it, after it" "^fishplugs${T}install${T}fisher${T}-${T}auto${T}part of fishkit$"
+    expect_out "plan: the named bundle is requested" "^fishkit${T}install${T}bundle${T}-${T}requested${T}-$"
+    if [ "$(plan_seq)" = "fishfn fishplugs fishkit " ]; then pass; else fail "plan: in install order" "$(plan_seq)"; fi
+    plan_rows 'plan_build install claude-code'
+    expect_out "plan: what an item requires is needed by it" "^musl-loader${T}install${T}binary${T}1${T}auto${T}needed by claude-code$"
+    expect_out "plan: a package item too" "^demo-pkg${T}install${T}pkg${T}-${T}auto${T}needed by claude-code$"
+    expect_out "plan: the named item" "^claude-code${T}install${T}npm-musl${T}latest${T}requested${T}-$"
+    if [ "$(plan_seq)" = "musl-loader demo-pkg claude-code " ]; then pass; else fail "plan: what is needed goes first" "$(plan_seq)"; fi
+
+    st_put fishfn file 1 auto
+    plan_rows 'plan_build install fishkit'
+    expect_out "plan: what is already here is skipped" "^fishfn${T}skip${T}file${T}1${T}auto${T}part of fishkit$"
+    expect_out "plan: and the rest still installs" "^fishplugs${T}install${T}"
+    rm -f "$PSTATE"
+
+    plan_rows 'plan_build install farkit'
+    expect_out "plan: a bundle with a part from another edition still plans" "^rc=0$"
+    expect_out "plan: that part is unavailable" "^elsewhere${T}unavailable${T}-${T}-${T}auto${T}not available on this device$"
+    expect_out "plan: so is what needs it" "^reacher${T}unavailable${T}file${T}-${T}auto${T}needs elsewhere, which is not available on this device$"
+    expect_out "plan: the rest of the bundle installs" "^hello${T}install${T}file${T}1${T}auto${T}part of farkit$"
+    expect_out "plan: and the bundle itself" "^farkit${T}install${T}bundle${T}-${T}requested${T}-$"
+    plan_rows 'plan_build install reacher'
+    expect_out "plan: a named item that needs what is not here is refused" "^rc=1$"
+    expect_out "plan: and says why" "reacher needs elsewhere, which is not available on this device"
+    expect_no_out "plan: with nothing planned" "^reacher${T}"
+    tl install reacher -y
+    expect_status "install refuses an item that needs what is not here" 1
+    expect_no_file "and puts nothing in place" "$TESTHOME/.config/reacher.conf"
+    tl install farkit -n
+    expect_out "the dry run says the part is passed by" "elsewhere  (not available on this device, skipped)"
+    expect_out "and why each part comes in" "hello  1  (part of farkit)"
+    tl install farkit -y
+    expect_status "the bundle installs without them" 0
+    expect_out "and says what it passed by" "reacher needs elsewhere, which is not available on this device"
+    expect_file "with the rest of it in place" "$TESTHOME/.config/hello.conf"
+    tl remove farkit -y
+    expect_status "remove takes the bundle" 0
+    expect_out "and the part it brought in" "removed hello"
+    expect_no_file "with its file" "$TESTHOME/.config/hello.conf"
+
+    st_put fishkit bundle - requested
+    st_put fishfn file 1 requested
+    st_put fishplugs fisher - auto
+    plan_rows 'plan_build remove fishkit'
+    expect_out "plan: remove takes a member the bundle brought in" "^fishplugs${T}remove${T}fisher${T}-${T}auto${T}part of fishkit$"
+    expect_no_out "plan: but not one you asked for yourself" "^fishfn${T}"
+    if [ "$(plan_seq)" = "fishkit fishplugs " ]; then pass; else fail "plan: remove runs in the reverse install order" "$(plan_seq)"; fi
+    rm -f "$PSTATE"
+    st_put claude-code npm-musl 1.0.0 requested
+    st_put musl-loader binary 1 auto
+    st_put demo-pkg pkg - auto
+    plan_rows 'plan_build remove musl-loader'
+    expect_out "plan: remove takes what needs the item" "^claude-code${T}remove${T}npm-musl${T}1.0.0${T}auto${T}needs musl-loader$"
+    expect_out "plan: and what only that one needed" "^demo-pkg${T}forget${T}pkg${T}-${T}auto${T}only claude-code needed it$"
+    expect_out "plan: and the item itself" "^musl-loader${T}remove${T}binary${T}1${T}requested${T}-$"
+    if [ "$(plan_seq)" = "claude-code demo-pkg musl-loader " ]; then pass; else fail "plan: what needs another goes first" "$(plan_seq)"; fi
+    rm -f "$PSTATE"
+    st_put claude-code npm-musl 1.0.0 requested
+    st_put musl-loader binary 1
+    st_put demo-pkg pkg - auto
+    st_put kit bundle - requested
+    st_put secret file 1
+    plan_rows 'plan_build remove claude-code'
+    expect_out "plan: remove of one item" "^claude-code${T}remove${T}"
+    expect_no_out "plan: a row from before column 11 is never taken as a leftover" "^musl-loader${T}"
+    expect_no_out "plan: nor a part something staying still needs" "^demo-pkg${T}"
+    plan_rows 'plan_build remove kit'
+    expect_out "plan: a member from before column 11 goes with its bundle" "^secret${T}remove${T}file${T}1${T}auto${T}part of kit$"
+    expect_no_out "plan: a member something staying needs stays" "^demo-pkg${T}"
+    rm -f "$PSTATE"
+
+    st_put claude-code npm-musl 1.0.0 requested
+    st_put musl-loader binary 1 auto
+    plan_rows 'PLAN_CHECK=1; PLAN_OFFLINE=1; plan_build update'
+    expect_out "plan: update plans a part the list now asks for" "^demo-pkg${T}install${T}pkg${T}-${T}auto${T}needed by claude-code$"
+    expect_out "plan: an item pinned to latest waits for its source" "^claude-code${T}skip${T}npm-musl${T}latest${T}requested${T}follows latest$"
+    expect_out "plan: what is current is skipped" "^musl-loader${T}skip${T}binary${T}1${T}auto${T}-$"
+    if [ "$(plan_seq)" = "musl-loader demo-pkg claude-code " ]; then pass; else fail "plan: the new part before what needs it" "$(plan_seq)"; fi
+    tl update --check --offline
+    expect_out "update --check names the new part" "demo-pkg is needed by claude-code; update will install it"
+    tl update --check --tsv --offline
+    expect_no_out "update --check --tsv has no line for it" "^demo-pkg${T}"
+    rm -f "$PSTATE"
+
+    # --- the plan applied: one call to the package manager, and a failure stops what needs it ---
+    : > "$ROOT/pkg.log"
+    tl install demo-pkg retiree-pkg claude-code -y
+    expect_status "a plan with several package items installs" 0
+    if [ "$(grep -c -- '^-Sy' "$ROOT/pkg.log")" = 1 ]; then pass; else fail "the package manager is called once for the whole plan" "$(cat "$ROOT/pkg.log")"; fi
+    if grep -qx -- "-Sy --needed --noconfirm demo-build demo-one demo-two demo-retiree" "$ROOT/pkg.log"; then pass; else fail "with the build tool and every package in it" "$(cat "$ROOT/pkg.log")"; fi
+    if head -1 "$PSTATE" | grep -q "${T}prev_digest${T}by$"; then pass; else fail "installed.tsv names column 11" "$(head -1 "$PSTATE")"; fi
+    if awk -F "$T" '$1 == "claude-code" && $11 == "requested"' "$PSTATE" | grep -q .; then pass; else fail "column 11: a named item is requested" "$(cat "$PSTATE")"; fi
+    if awk -F "$T" '$1 == "musl-loader" && $11 == "auto"' "$PSTATE" | grep -q .; then pass; else fail "column 11: a part it pulled in is auto" "$(cat "$PSTATE")"; fi
+    tl install musl-loader -y
+    expect_out "naming a part that is here" "musl-loader is already installed"
+    if awk -F "$T" '$1 == "musl-loader" && $11 == "requested"' "$PSTATE" | grep -q .; then pass; else fail "makes it requested" "$(cat "$PSTATE")"; fi
+    tl remove claude-code demo-pkg musl-loader retiree-pkg -y
+    expect_status "and they all go again" 0
+
+    touch "$ROOT/pacman-fails"
+    tl_stdout install claude-code --progress
+    rm -f "$ROOT/pacman-fails"
+    expect_status "a part that failed fails the install" 1
+    expect_out "its done line carries the real reason" $'^done\tdemo-pkg\tfailed\tthe package manager could not install demo-one, demo-two$'
+    expect_out "what needs it is skipped, and says why" $'^done\tclaude-code\tfailed\tneeds demo-pkg, which did not install$'
+    expect_no_out "and never starts" $'^step\tclaude-code\t'
+    expect_out "a part that does not need it still installs" $'^done\tmusl-loader\tok\tinstalled$'
+    if grep -q "^claude-code${T}" "$PSTATE"; then fail "the skipped item is not recorded"; else pass; fi
+    expect_no_file "nor put in place" "$TESTHOME/.local/bin/claude"
+    rm -rf "$PSTATE" "$TESTHOME/.local/bin" "$TESTHOME/.local/lib" "$TESTHOME/.config"
+    : > "$ROOT/pkg.log"
 
     # --- a file, where there is none yet ---
     mkdir -p "$TESTHOME/.config"
