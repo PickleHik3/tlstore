@@ -962,6 +962,93 @@ run_suite() {
     rm -rf "$PSTATE" "$TESTHOME/.local/bin" "$TESTHOME/.local/lib" "$TESTHOME/.config"
     : > "$ROOT/pkg.log"
 
+    # --- fetch first (Revision 13, step 3): every payload is fetched and checked before any row
+    # is applied ---
+    STAGE="$TESTHOME/.cache/tlstore/stage"
+    JOURNAL="$TESTHOME/.local/share/tlstore/journal"
+    UCAT="$TESTHOME/.local/share/tlstore/catalog.tsv"
+    rm -f "$ROOT/ucat.keep"
+    [ ! -f "$UCAT" ] || cp "$UCAT" "$ROOT/ucat.keep"
+    # The list as shipped, plus an item that needs badsum (whose digest never matches).
+    write_catalog "$UCAT" 2026099990 1 fakebin-1
+    printf 'needsbad\tbinary\t1\t*\tfile://%s/twin.bin\t%s\t~/.local/bin/needsbad\tbadsum\t-\tNeeds the one that never installs.\t%s\n' \
+        "$FX" "$(sha "$FX/twin.bin")" "$R5_NONE" >> "$UCAT"
+    : > "$ROOT/curl.log"
+    tl_stdout install fakebin needsbad --progress
+    expect_status "fetch first: a payload that does not match fails the install" 1
+    expect_out "fetch first: it fails with the download's own reason" $'^done\tbadsum\tfailed\tbadsum does not match what the list expects — nothing was installed$'
+    expect_out "fetch first: what needs it is skipped" $'^done\tneedsbad\tfailed\tneeds badsum, which did not install$'
+    expect_out "fetch first: the row around it carries on" $'^done\tfakebin\tok\tinstalled$'
+    expect_file "fetch first: and is in place" "$TESTHOME/.local/bin/fakebin"
+    fb_bad=$(printf '%s\n' "$OUT" | grep -n $'^done\tbadsum\t' | cut -d: -f1)
+    fb_placed=$(printf '%s\n' "$OUT" | grep -n $'^step\tfakebin\t90\t' | cut -d: -f1)
+    if [ -n "$fb_bad" ] && [ -n "$fb_placed" ] && [ "$fb_bad" -lt "$fb_placed" ]; then
+        pass
+    else
+        fail "fetch first: the bad payload fails before any row is put in place" "$(printf '%s' "$OUT" | tr '\n' '|')"
+    fi
+    got=$(printf '%s\n' "$OUT" | awk -F '\t' '$1 == "step" && $2 == "fakebin" { print $3 }' | tr '\n' ' ')
+    case "$got" in
+        "10 "*"55 60 90 100 ") pass ;;
+        *) fail "fetch first: the apply carries on from where the fetch left off" "$got" ;;
+    esac
+    if ls -A "$TESTHOME/.local/bin" | grep -q badsum; then
+        fail "fetch first: nothing of the bad one ever reached its target, not even a part file" "$(ls -A "$TESTHOME/.local/bin" | tr '\n' ' ')"
+    else
+        pass
+    fi
+    expect_no_file "fetch first: the bad one's target never appeared" "$TESTHOME/.local/bin/badsum"
+    if grep -q "twin.bin" "$ROOT/curl.log"; then fail "fetch first: what will be skipped is never fetched" "$(tr '\n' '|' < "$ROOT/curl.log")"; else pass; fi
+    expect_no_file "fetch first: the staging directory is gone afterwards" "$STAGE"
+    expect_no_file "fetch first: and so is the journal" "$JOURNAL"
+    if grep -q "^needsbad${T}\|^badsum${T}" "$PSTATE"; then fail "fetch first: neither is recorded" "$(cat "$PSTATE")"; else pass; fi
+
+    # A config file you changed, updated: the staged copy is the one shown and put in place,
+    # so the payload is fetched once.
+    tl install hello -y
+    expect_status "fetch first: a config file installs" 0
+    printf 'the users own greeting\n' > "$TESTHOME/.config/hello.conf"
+    write_catalog "$UCAT" 2026099991 2 fakebin-2
+    : > "$ROOT/curl.log"
+    tl update hello --offline --configs -y
+    expect_status "fetch first: a changed config file updates" 0
+    expect_content "fetch first: from the staged copy" "$TESTHOME/.config/hello.conf" "greeting from the catalog"
+    if [ "$(grep -c "hello.conf" "$ROOT/curl.log")" = 1 ]; then pass; else fail "fetch first: one fetch for the payload" "$(tr '\n' '|' < "$ROOT/curl.log")"; fi
+    expect_no_file "fetch first: and no staging directory after it" "$STAGE"
+    # The same file as yours: recorded, from the one fetch too.
+    write_catalog "$UCAT" 2026099992 3 fakebin-3
+    : > "$ROOT/curl.log"
+    tl update hello --offline -y
+    expect_status "fetch first: a config file that is the same as yours" 0
+    if [ "$(grep -c "hello.conf" "$ROOT/curl.log")" = 1 ]; then pass; else fail "fetch first: one fetch for it as well" "$(tr '\n' '|' < "$ROOT/curl.log")"; fi
+    if awk -F "$T" '$1 == "hello" && $3 == "3"' "$PSTATE" | grep -q .; then pass; else fail "fetch first: and it is recorded" "$(cat "$PSTATE")"; fi
+    # A file-once whose file is already there needs nothing fetched.
+    printf 'my own settings\n' > "$TESTHOME/.config/mine.conf"
+    : > "$ROOT/curl.log"
+    tl install mine -y
+    expect_out "fetch first: a file-once you have is kept" "kept your mine.conf"
+    if grep -q "mine.conf" "$ROOT/curl.log"; then fail "fetch first: and never fetched" "$(tr '\n' '|' < "$ROOT/curl.log")"; else pass; fi
+
+    # --- the journal (Revision 13, step 1): a run that was cut short is said the next time ---
+    rm -f "$PSTATE"
+    printf 'verb\tinstall\nrow\tsecret\tinstall\tfile\t1\tauto\tpart of kit\nrow\tfakebin\tinstall\tbinary\t1\tauto\tpart of kit\nrow\tkit\tinstall\tbundle\t-\trequested\t-\ndone\tsecret\tok\n' > "$JOURNAL"
+    tl doctor
+    expect_status "journal: doctor fails while one is left" 1
+    expect_out "journal: and names what did not finish" "^Interrupted  *install: fakebin, kit did not finish$"
+    tl install hello -y
+    expect_status "journal: the next install still runs" 0
+    expect_out "journal: and says the last one was interrupted" "^The last install was interrupted; fakebin, kit did not finish\.$"
+    expect_no_file "journal: which is gone afterwards" "$JOURNAL"
+    tl doctor
+    expect_no_out "journal: doctor says nothing of it then" "^Interrupted"
+    tl install hello -y
+    expect_no_out "journal: a run after a normal one hears nothing" "interrupted"
+    expect_no_file "journal: and leaves none" "$JOURNAL"
+
+    if [ -f "$ROOT/ucat.keep" ]; then mv "$ROOT/ucat.keep" "$UCAT"; else rm -f "$UCAT"; fi
+    rm -rf "$PSTATE" "$TESTHOME/.local/bin" "$TESTHOME/.local/lib" "$TESTHOME/.config"
+    : > "$ROOT/curl.log"
+
     # --- a file, where there is none yet ---
     mkdir -p "$TESTHOME/.config"
     tl install hello -y
@@ -2575,19 +2662,28 @@ EOF
     else
         fail "the cancelled item gets a done/failed/Cancelled line" "$CANCEL_TXT"
     fi
-    if [ -e "$CANCEL_PART" ]; then
+    if [ -e "$CANCEL_PART" ] || ls -A "$TESTHOME/.local/bin" 2>/dev/null | grep -q slow; then
         fail "the half-written part file was left behind"
     else
         pass
     fi
-    if printf '%s' "$CANCEL_TXT" | grep -q "$(printf 'done\thello\tok')"; then
+    expect_no_file "the staged payloads are dropped on cancel" "$TESTHOME/.cache/tlstore/stage"
+    # Every payload is fetched before any row is applied (Revision 13), so a cancel during
+    # slow's download lands before hello, fetched already, was put in place: nothing changed.
+    if printf '%s' "$CANCEL_TXT" | grep -q "$(printf 'done\thello\t')"; then
+        fail "a cancel in the fetch phase applies nothing, so hello has no done line" "$CANCEL_TXT"
+    else
+        pass
+    fi
+    expect_no_file "nor its file" "$TESTHOME/.config/hello.conf"
+    tl list -i
+    expect_no_out "the cancelled item was never recorded as installed" "slow"
+    if grep -q "^row${T}slow${T}" "$JOURNAL" && ! grep -q "^done" "$JOURNAL"; then
         pass
     else
-        fail "an item that finished before the cancel still gets its own done line" "$CANCEL_TXT"
+        fail "the journal is left behind, with nothing done in it" "$(tr '\n' '|' < "$JOURNAL" 2>/dev/null)"
     fi
-    tl list -i
-    expect_out "the item that finished before the cancel stays installed" "hello"
-    expect_no_out "the cancelled item was never recorded as installed" "slow"
+    rm -f "$JOURNAL"
     forget_state
     rm -rf "$TESTHOME/.config/hello.conf" "$TESTHOME/.local/bin"
 
