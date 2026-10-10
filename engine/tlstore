@@ -1722,64 +1722,216 @@ retire_pending() {
 }
 
 # ---------------------------------------------------------------------------
+# The signed channel
+# ---------------------------------------------------------------------------
+
+# What the newest release offers, for the item list (catalog) or for tlstore
+# itself (self), and what came of checking it. channel_fetch is the only place
+# that fetches either and checks its signature; refresh_catalog and
+# su_fetch_script are its callers. It sets:
+#   CH_OUTCOME  newer | current | offline | cannot-verify | refused
+#   CH_REASON   one sentence, naming the fix where there is one (empty for
+#               newer and current)
+#   CH_VERSION  the serial or version that was read, when one was
+# and keeps the answer in CHANNEL_FILE, one line per channel:
+#   catalog|self <TAB> outcome <TAB> when (UTC) <TAB> reason (- for none)
+CH_OUTCOME=""
+CH_REASON=""
+CH_VERSION=""
+CHANNEL_FILE="$DATA_DIR/channel.tsv"
+
+# channel_paths catalog|self — where the offer comes from (cn_url, with
+# cn_url.minisig beside it), where it lands in the cache (cn_new, cn_sig),
+# and what a person calls it (cn_what).
+channel_paths() {
+    case "$1" in
+        catalog)
+            cn_url="$CATALOG_URL"
+            cn_new="$CACHE_DIR/catalog.tsv"
+            cn_what="item list"
+            ;;
+        *)
+            cn_url="$RELEASE_BASE/tlstore"
+            cn_new="$CACHE_DIR/tlstore.new"
+            cn_what="tlstore"
+            ;;
+    esac
+    cn_sig="$cn_new.minisig"
+}
+
+channel_set() {
+    CH_OUTCOME="$1"
+    CH_REASON="${2:-}"
+}
+
+# channel_check catalog|self — the pair already in the cache, checked against
+# the trusted key and compared with what is here. Needs minisign and the key;
+# sets CH_OUTCOME, CH_REASON and CH_VERSION, and removes nothing. 0 for newer.
+channel_check() {
+    channel_paths "$1"
+    CH_VERSION=""
+    if ! minisign -Q -V -p "$PUBKEY" -x "$cn_sig" -m "$cn_new" >/dev/null 2>&1; then
+        channel_set refused "the $cn_what that was offered is not signed by the launcher"
+        return 1
+    fi
+    if [ "$1" = catalog ]; then
+        CH_VERSION=$(serial_of "$cn_new" 2>/dev/null || true)
+        case "$CH_VERSION" in
+            ''|*[!0-9]*)
+                CH_VERSION=""
+                channel_set refused "the item list that was offered has no readable serial"
+                return 1
+                ;;
+        esac
+        if [ -n "$CATALOG_SERIAL" ] && [ "$CH_VERSION" -lt "$CATALOG_SERIAL" ]; then
+            channel_set refused "the item list that was offered is older than the one you have"
+        elif [ -n "$CATALOG_SERIAL" ] && [ "$CH_VERSION" -eq "$CATALOG_SERIAL" ]; then
+            channel_set current
+        else
+            channel_set newer
+        fi
+    else
+        CH_VERSION=$(sed -n 's/^TLSTORE_VERSION=\([0-9][0-9.]*\)$/\1/p' "$cn_new" | head -1)
+        if [ -z "$CH_VERSION" ]; then
+            channel_set refused "the tlstore that was offered has no readable version"
+        elif version_newer "$CH_VERSION" "$TLSTORE_VERSION"; then
+            channel_set newer
+        else
+            # The same version, or an older one (a copy built ahead of the
+            # release): either way there is nothing newer to take.
+            channel_set current
+        fi
+    fi
+    [ "$CH_OUTCOME" = newer ]
+}
+
+# channel_record catalog|self — this answer replaces the channel's line in
+# CHANNEL_FILE. tlstore-ui checks both channels at once, so the rewrite is
+# done holding a lock directory; one that will not come free is taken over.
+channel_record() {
+    mkdir -p "$DATA_DIR" 2>/dev/null || return 0
+    cn_lock="$CHANNEL_FILE.lock"
+    cn_try=0
+    while ! mkdir "$cn_lock" 2>/dev/null; do
+        cn_try=$((cn_try + 1))
+        [ "$cn_try" -le 3 ] || break
+        sleep 1
+    done
+    cn_when=$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || printf -)
+    cn_tmp="$CHANNEL_FILE.$$.new"
+    {
+        [ ! -f "$CHANNEL_FILE" ] || awk -F "$TAB" -v c="$1" '$1 != c' "$CHANNEL_FILE"
+        printf '%s\t%s\t%s\t%s\n' "$1" "$CH_OUTCOME" "$cn_when" "${CH_REASON:--}"
+    } > "$cn_tmp" 2>/dev/null && mv "$cn_tmp" "$CHANNEL_FILE" 2>/dev/null
+    rm -f "$cn_tmp"
+    rmdir "$cn_lock" 2>/dev/null
+    return 0
+}
+
+# channel_fetch catalog|self — fetch what the newest release offers, with its
+# signature, and check it (see the top of this section). On newer the
+# verified file and its signature stay in the cache (cn_new, cn_sig) for the
+# caller to take; on anything else nothing is left there. 0 for newer.
+channel_fetch() {
+    channel_paths "$1"
+    CH_VERSION=""
+    if ! have minisign; then
+        channel_set cannot-verify "minisign is not installed (pkg install minisign)"
+    elif [ ! -f "$PUBKEY" ]; then
+        channel_set cannot-verify "the trusted key is missing — reopen the app to put it back"
+    elif ! have curl; then
+        channel_set offline "curl is not installed (pkg install curl)"
+    elif ! mkdir -p "$CACHE_DIR" 2>/dev/null; then
+        channel_set offline "$CACHE_DIR could not be made"
+    else
+        rm -f "$cn_new" "$cn_sig"
+        if [ "$1" = self ]; then
+            # Inside a --progress stream this download is the first share of
+            # the bar (su_fetch_script says how far it goes).
+            curl_to "$cn_url" "$cn_new" 2>/dev/null
+        else
+            curl -fsL --connect-timeout 5 --max-time 60 -o "$cn_new" "$cn_url" 2>/dev/null
+        fi
+        cn_got=$?
+        if [ "$cn_got" != 0 ] ||
+           ! curl -fsL --connect-timeout 5 --max-time 60 -o "$cn_sig" "$cn_url.minisig" 2>/dev/null; then
+            channel_set offline "the release could not be reached"
+        else
+            channel_check "$1"
+        fi
+    fi
+    [ "$CH_OUTCOME" = newer ] || rm -f "$cn_new" "$cn_sig"
+    channel_record "$1"
+    [ "$CH_OUTCOME" = newer ]
+}
+
+# ---------------------------------------------------------------------------
 # Refresh
 # ---------------------------------------------------------------------------
 
-# refresh_catalog <quiet> — 0 took a newer list, 1 kept the one we had, 2 refused
-# what was offered.
+# refresh_catalog <quiet> [ask] — 0 took a newer list, 1 kept the one we had,
+# 2 refused what was offered; CH_OUTCOME and CH_REASON say which and why.
+# With minisign missing it first asks to install it: always when not quiet
+# (as `refresh` always has), and when quiet only with [ask] 1 (a plain
+# `update` with someone there to answer, or -y). Quiet, it only says that the
+# list moved; the caller says the rest.
 refresh_catalog() {
     rc_quiet="${1:-0}"
-    if ! have minisign; then
-        [ "$rc_quiet" = 1 ] && return 1
+    rc_ask="${2:-}"
+    if [ -z "$rc_ask" ]; then
+        rc_ask=1
+        [ "$rc_quiet" = 1 ] && rc_ask=0
+    fi
+    if [ "$rc_ask" = 1 ] && ! have minisign; then
         if ask_yn "Updating the list of items needs minisign. Install it?"; then
             install_pkg minisign >/dev/null 2>&1 || true
         fi
-        if ! have minisign; then
-            say "Using the list that came with the app."
+    fi
+    channel_fetch catalog
+    case "$CH_OUTCOME" in
+        newer)
+            if ! mkdir -p "$DATA_DIR" || ! mv "$cn_new" "$USER_CATALOG"; then
+                rm -f "$cn_new" "$cn_sig"
+                return 1
+            fi
+            rm -f "$cn_sig"
+            pick_catalog
+            say "Updated the list of items."
+            return 0
+            ;;
+        current)
+            [ "$rc_quiet" = 1 ] || say "The item list is already up to date."
             return 1
-        fi
-    fi
-    if [ ! -f "$PUBKEY" ]; then
-        [ "$rc_quiet" = 1 ] || say "Using the list that came with the app."
-        return 1
-    fi
-    mkdir -p "$CACHE_DIR"
-    rc_new="$CACHE_DIR/catalog.tsv"
-    rc_sig="$CACHE_DIR/catalog.tsv.minisig"
-    if ! curl -fsL --connect-timeout 5 --max-time 60 -o "$rc_new" "$CATALOG_URL" 2>/dev/null ||
-       ! curl -fsL --connect-timeout 5 --max-time 60 -o "$rc_sig" "$CATALOG_URL.minisig" 2>/dev/null; then
-        rm -f "$rc_new" "$rc_sig"
-        [ "$rc_quiet" = 1 ] || say "Could not reach the item list; using the one you have."
-        return 1
-    fi
-    if ! minisign -Q -V -p "$PUBKEY" -x "$rc_sig" -m "$rc_new" >/dev/null 2>&1; then
-        rm -f "$rc_new" "$rc_sig"
-        err "the downloaded item list is not signed by the launcher — ignoring it"
-        return 2
-    fi
-    rc_serial=$(serial_of "$rc_new" 2>/dev/null || true)
-    case "$rc_serial" in
-        ''|*[!0-9]*)
-            rm -f "$rc_new" "$rc_sig"
-            err "the downloaded item list is unreadable — ignoring it"
+            ;;
+        refused)
+            [ "$rc_quiet" = 1 ] || err "$CH_REASON — ignoring it"
             return 2
             ;;
     esac
-    if [ -n "$CATALOG_SERIAL" ] && [ "$rc_serial" -lt "$CATALOG_SERIAL" ]; then
-        rm -f "$rc_new" "$rc_sig"
-        err "the downloaded item list is older than the one you have — ignoring it"
-        return 2
+    [ "$rc_quiet" = 1 ] || say "Could not check for a newer item list: $CH_REASON. Using the one you have."
+    return 1
+}
+
+# update_refresh — the refresh `update` starts with (update_items reads its
+# cu_* flags). One line when the list could not be checked; --tsv keeps its
+# stdout to update rows (a refused list is still said, on stderr), and only a
+# plain update, with someone there or -y, asks to install a missing minisign.
+update_refresh() {
+    ur_ask=0
+    if [ "${cu_check:-0}" = 0 ] && [ "${cu_tsv:-0}" = 0 ] && [ "$PROGRESS" != 1 ]; then
+        if [ "$ASSUME_YES" = 1 ] || interactive; then
+            ur_ask=1
+        fi
     fi
-    if [ -n "$CATALOG_SERIAL" ] && [ "$rc_serial" -eq "$CATALOG_SERIAL" ]; then
-        rm -f "$rc_new" "$rc_sig"
-        [ "$rc_quiet" = 1 ] || say "The item list is already up to date."
-        return 1
+    refresh_catalog 1 "$ur_ask" && return 0
+    case "$CH_OUTCOME" in
+        newer|current) return 0 ;;
+    esac
+    if [ "${cu_tsv:-0}" = 1 ]; then
+        [ "$CH_OUTCOME" != refused ] || err "$CH_REASON — ignoring it"
+    else
+        say "Could not check for a newer item list: $CH_REASON."
     fi
-    mkdir -p "$DATA_DIR"
-    mv "$rc_new" "$USER_CATALOG" || return 1
-    rm -f "$rc_sig"
-    pick_catalog
-    say "Updated the list of items."
     return 0
 }
 
@@ -2779,13 +2931,25 @@ readme_first_image() {
 # ---------------------------------------------------------------------------
 
 # snapshot_key — what `snapshot` reads: the catalog and the installed list
-# (by name, mtime and size), the cache's stamp, and everything rows() filters
-# on. When none of it changed, neither did the answer.
+# (by name, mtime and size), the cache's stamp, the channel answers, and
+# everything rows() filters on. When none of it changed, neither did the
+# answer.
 snapshot_key() {
-    printf 'v=%s;serial=%s;catalog=%s:%s;state=%s;held=%s;cache=%s;host=%s;arch=%s;pkg=%s;lver=%s;home=%s;prefix=%s' \
+    printf 'v=%s;serial=%s;catalog=%s:%s;state=%s;held=%s;cache=%s;channel=%s;host=%s;arch=%s;pkg=%s;lver=%s;home=%s;prefix=%s' \
         "$TLSTORE_VERSION" "$CATALOG_SERIAL" "$CATALOG" "$(file_stamp "$CATALOG")" \
         "$(file_stamp "$STATE")" "$(file_stamp "$HELD")" "$(file_stamp "$CACHE_DIR/.changed")" \
+        "$(file_stamp "$CHANNEL_FILE")" \
         "$HOST" "$ARCH" "$APP_PACKAGE" "$LAUNCHER_VERSION" "$HOME" "$PREFIX"
+}
+
+# snapshot_channels — a `channel` line per channel CHANNEL_FILE has an
+# answer for: catalog|self, the outcome, and the reason (- for none).
+snapshot_channels() {
+    [ -f "$CHANNEL_FILE" ] || return 0
+    awk -F "$TAB" -v OFS="$TAB" '
+        ($1 == "catalog" || $1 == "self") && $2 != "" {
+            print "channel", $1, $2, ($4 == "" ? "-" : $4)
+        }' "$CHANNEL_FILE"
 }
 
 # snapshot_rows — one awk pass over every row that applies here and the
@@ -2983,6 +3147,8 @@ snapshot_cached() {
 #   field   name key value             (the info --tsv rows, one per line)
 #   update  name installed available note
 #   cached  name picture|demo|readme path   (a verified copy already here)
+#   channel catalog|self outcome reason     (the last check of each, see
+#                                            channel_fetch; reason - for none)
 # The answer is kept under CACHE_DIR/snapshot.tsv with its key (snapshot_key)
 # on the first line, and served from there while nothing it reads has moved.
 cmd_snapshot() {
@@ -3008,6 +3174,7 @@ cmd_snapshot() {
     {
         printf '%s\n' "$sn_head"
         snapshot_rows | snapshot_cached
+        snapshot_channels
     } > "$sn_tmp" || { rm -f "$sn_tmp"; return 1; }
     mv "$sn_tmp" "$sn_file" || { rm -f "$sn_tmp"; return 1; }
     cat "$sn_file"
@@ -3488,7 +3655,7 @@ update_items() {
         esac
     done
     need_catalog
-    [ "$cu_offline" = 1 ] || refresh_catalog 1 || true
+    [ "$cu_offline" = 1 ] || update_refresh
     need_catalog
 
     # Named on the command line, an item is updated even when it is held.
@@ -3896,60 +4063,57 @@ su_paths() {
     su_ui_new="$CACHE_DIR/tlstore-ui.new"
 }
 
-# su_ready — something to replace, and the tools to check what is offered.
+# su_ready — something here to replace. The tools that check what is offered
+# are channel_fetch's to look for, so it can say which one is missing.
 su_ready() {
     su_paths
     [ -f "$su_target" ] || return 1
-    have curl || return 1
-    have minisign || return 1
-    [ -f "$PUBKEY" ] || return 1
     mkdir -p "$CACHE_DIR" 2>/dev/null || return 1
     return 0
 }
 
-# su_verified — the script in the cache checks out against the trusted key
-# and is ahead of this one; su_version is its version (set whenever one
-# could be read, so a caller can name the version that was refused).
+# su_verified — the script `self-update --check` left in the cache still
+# checks out against the trusted key and is ahead of this one: 0 yes, 2
+# refused (channel_check says why), 1 anything else. su_version is its
+# version (set whenever one could be read, so a caller can name it).
 su_verified() {
     su_version=""
     [ -f "$su_new" ] && [ -f "$su_sig" ] || return 1
-    minisign -Q -V -p "$PUBKEY" -x "$su_sig" -m "$su_new" >/dev/null 2>&1 || return 2
-    su_version=$(sed -n 's/^TLSTORE_VERSION=\([0-9][0-9.]*\)$/\1/p' "$su_new" | head -1)
-    [ -n "$su_version" ] || return 1
-    version_newer "$su_version" "$TLSTORE_VERSION"
+    have minisign && [ -f "$PUBKEY" ] || return 1
+    channel_check self
+    su_version=$CH_VERSION
+    case "$CH_OUTCOME" in
+        newer) return 0 ;;
+        refused) return 2 ;;
+    esac
+    return 1
 }
 
 # su_fetch_script <use cache 0|1> — the newest release's script and its
-# signature into the cache, verified. With 1, a copy `self-update --check`
-# left there is taken as it is when it still verifies and is still newer.
+# signature into the cache, verified (channel_fetch self). With 1, a copy
+# `self-update --check` left there is taken as it is when it still verifies
+# and is still newer. 0 newer; 1 nothing to take (current, offline, cannot
+# verify: CH_OUTCOME says which, SU_NOTE why); 2 refused (SU_NOTE says why).
 # The cache is emptied whenever this returns 1 or 2.
 su_fetch_script() {
     SU_NOTE=""
     if [ "$1" = 1 ] && su_verified; then
         return 0
     fi
-    rm -f "$su_new" "$su_sig"
     # Inside a --progress stream the script's own download is the first,
     # small share of the bar; it may well jump straight to the end of it.
     PROGRESS_FETCH_END=8
-    if ! curl_to "$RELEASE_BASE/tlstore" "$su_new" 2>/dev/null ||
-       ! curl -fsL --connect-timeout 5 --max-time 60 -o "$su_sig" "$RELEASE_BASE/tlstore.minisig" 2>/dev/null; then
-        rm -f "$su_new" "$su_sig"
-        return 1
-    fi
-    su_verified
-    case $? in
-        0) return 0 ;;
-        2)
-            rm -f "$su_new" "$su_sig"
-            SU_NOTE="the tlstore that was offered is not signed by the launcher — ignoring it"
+    channel_fetch self
+    su_version=$CH_VERSION
+    case "$CH_OUTCOME" in
+        newer) return 0 ;;
+        refused)
+            SU_NOTE="$CH_REASON — ignoring it"
             return 2
             ;;
-        *)
-            rm -f "$su_new" "$su_sig"
-            return 1
-            ;;
     esac
+    SU_NOTE="$CH_REASON"
+    return 1
 }
 
 # su_ui_digest_named — where a store program is in place, the digest the
@@ -4031,11 +4195,17 @@ su_place() {
 }
 
 # self_update_try <use cache 0|1> — the whole thing, quietly. 0 updated
-# (su_version says to what), 1 nothing to do, 2 refused (SU_NOTE says why);
-# after 1 or 2 both old files are where they were.
+# (su_version says to what), 1 nothing to do (CH_OUTCOME current, or SU_NOTE
+# says why it could not check), 2 refused (SU_NOTE says why); after 1 or 2
+# both old files are where they were.
 self_update_try() {
     SU_NOTE=""
-    su_ready || return 1
+    CH_OUTCOME=""
+    CH_REASON=""
+    if ! su_ready; then
+        SU_NOTE="there is no tlstore at $su_target to replace"
+        return 1
+    fi
     # What a cancel has to drop, beyond the download in flight: the cached
     # script pair, the program, and (from su_place on) the staged copies.
     CANCEL_EXTRA="$su_new $su_sig $su_ui_new"
@@ -4055,8 +4225,9 @@ self_update_try() {
 }
 
 # The self-update `self-update` runs: one line when something moved, the
-# reason when something was refused, nothing otherwise. su_moved says it did.
-# With 1 a script the offer already fetched and verified is taken from the cache.
+# reason when something was refused, nothing otherwise (cmd_self_update says
+# the rest). su_moved says it did. With 1 a script the offer already fetched
+# and verified is taken from the cache.
 self_update() {
     su_moved=0
     self_update_try "${1:-0}"
@@ -4079,7 +4250,9 @@ su_reply() {
 }
 
 # The self-update `update` runs: ask before taking a newer tlstore. Nothing
-# newer, offline, or the user said never: silence. -y takes it unasked; with
+# newer, offline, cannot verify (the item list's own line, just before, has
+# already said why: both channels need the same minisign and key), or the
+# user said never: silence. -y takes it unasked; with
 # nobody to ask it says so on one line and leaves it. The script is fetched
 # and verified first, so a bad signature is refused the same way as ever.
 self_update_offer() {
@@ -4128,37 +4301,51 @@ self_update_offer() {
 }
 
 # tlstore self-update --check --tsv — for tlstore-ui, when it starts: one
-# line, `self <installed> <latest> <available 0|1>`. Only the signed script
-# is fetched and verified; when it is newer (and, where a store program is
-# in place, names one for this processor) it stays in the cache for the
-# --progress run that follows, so it is not fetched twice. Offline, refused
-# or nothing newer: available 0, latest `-` when no version could be read,
-# and nothing is left behind.
+# line, `self <installed> <latest> <available 0|1> <outcome> <reason>` (an
+# older UI reads the first four; the reason is `-` when there is none). Only
+# the signed script is fetched and verified; when it is newer (and, where a
+# store program is in place, names one for this processor) it stays in the
+# cache for the --progress run that follows, so it is not fetched twice.
+# Offline, refused or nothing newer: available 0, latest `-` when no version
+# could be read, and nothing is left behind. Without --tsv it says the same
+# to a person, and never "up to date" unless the release said so.
 self_update_check() {
     su_avail=0
     su_latest="-"
-    if su_ready; then
-        su_fetch_script 0
-        case $? in
-            0)
-                su_latest=$su_version
-                if su_ui_digest_named; then
-                    su_avail=1
-                else
-                    rm -f "$su_new" "$su_sig"
-                    err "$SU_NOTE"
-                fi
-                ;;
-            2) err "$SU_NOTE" ;;
-            *) [ -z "${su_version:-}" ] || su_latest=$su_version ;;
-        esac
-    fi
+    su_paths
+    su_fetch_script 0
+    su_rc=$?
+    [ -z "${su_version:-}" ] || su_latest=$su_version
+    su_outcome=$CH_OUTCOME
+    su_why=$CH_REASON
+    case "$su_rc" in
+        0)
+            if [ ! -f "$su_target" ]; then
+                rm -f "$su_new" "$su_sig"
+                su_why="there is no tlstore at $su_target to replace"
+            elif su_ui_digest_named; then
+                su_avail=1
+            else
+                rm -f "$su_new" "$su_sig"
+                su_why=$SU_NOTE
+            fi
+            ;;
+    esac
     if [ "${cs_tsv:-0}" = 1 ]; then
-        printf 'self\t%s\t%s\t%s\n' "$TLSTORE_VERSION" "$su_latest" "$su_avail"
+        # The reasons are for a person; tlstore-ui reads them from the
+        # line, and stderr still carries a refusal as it always has.
+        [ "$su_rc" = 0 ] || [ "$su_outcome" != refused ] || err "$SU_NOTE"
+        [ "$su_rc" != 0 ] || [ "$su_avail" = 1 ] || err "$su_why"
+        printf 'self\t%s\t%s\t%s\t%s\t%s\n' "$TLSTORE_VERSION" "$su_latest" "$su_avail" \
+            "$su_outcome" "${su_why:--}"
     elif [ "$su_avail" = 1 ]; then
         say "tlstore $su_latest is available; you have $TLSTORE_VERSION."
-    else
+    elif [ "$su_outcome" = newer ]; then
+        say "tlstore $su_latest cannot be taken here: $su_why."
+    elif [ "$su_outcome" = current ]; then
         say "tlstore is up to date."
+    else
+        say "Could not check for a newer tlstore: $su_why."
     fi
     return 0
 }
@@ -4183,11 +4370,13 @@ self_update_progress() {
             progress_stage 100 ready
             progress_done tlstore ok "updated to $su_version"
             ;;
-        2)
-            progress_done tlstore failed "$SU_NOTE"
-            ;;
         *)
-            progress_done tlstore failed "no newer tlstore was offered"
+            # The real reason: refused, offline, cannot verify; only a
+            # release that is simply not ahead has none of its own.
+            if [ "$su_rc" = 1 ] && [ "$CH_OUTCOME" = current ]; then
+                SU_NOTE="no newer tlstore was offered"
+            fi
+            progress_done tlstore failed "${SU_NOTE:-no newer tlstore was offered}"
             ;;
     esac
     CANCEL_ITEM=""
@@ -4214,12 +4403,47 @@ cmd_self_update() {
         self_update_progress
     else
         self_update || return 1
-        # Asking for it by hand is the way back from "never".
-        [ "$su_moved" = 0 ] || su_quiet_off
+        if [ "$su_moved" = 1 ]; then
+            # Asking for it by hand is the way back from "never".
+            su_quiet_off
+            return 0
+        fi
+        if [ "$CH_OUTCOME" = current ]; then
+            say "tlstore is up to date."
+            return 0
+        fi
+        say "Could not check for a newer tlstore: $SU_NOTE."
+        return 1
     fi
 }
 
 cd_line() { printf '%-13s %s\n' "$1" "$2"; }
+
+# doctor_channel catalog|self <what> — a Channel line: what the last check of
+# that channel found, when, and why when it found nothing it could take.
+doctor_channel() {
+    dc_row=""
+    [ ! -f "$CHANNEL_FILE" ] || dc_row=$(awk -F "$TAB" -v c="$1" '$1 == c { r = $0 } END { print r }' "$CHANNEL_FILE")
+    if [ -z "$dc_row" ]; then
+        cd_line Channel "$2: not checked yet"
+        return 0
+    fi
+    dc_out=$(field "$dc_row" 2)
+    dc_when=$(field "$dc_row" 3)
+    dc_why=$(field "$dc_row" 4)
+    case "$dc_out" in
+        newer) dc_said="a newer one was found" ;;
+        current) dc_said="up to date" ;;
+        offline) dc_said="could not check" ;;
+        cannot-verify) dc_said="could not check" ;;
+        refused) dc_said="refused what was offered" ;;
+        *) dc_said="$dc_out" ;;
+    esac
+    if [ -n "$dc_why" ] && [ "$dc_why" != - ]; then
+        dc_said="$dc_said: $dc_why"
+    fi
+    cd_line Channel "$2 $dc_said ($dc_out, $dc_when)"
+}
 
 cmd_doctor() {
     [ $# -eq 0 ] || { bad_arg doctor "$1"; return 2; }
@@ -4260,11 +4484,16 @@ cmd_doctor() {
             cd_bad=1
         fi
     done
+    # Nothing can be updated without minisign: neither the item list nor
+    # tlstore itself is taken unchecked.
     if have minisign; then
         cd_line minisign ready
     else
-        cd_line minisign "not installed (needed to refresh the item list)"
+        cd_line minisign "not installed — nothing can be updated without it (pkg install minisign)"
+        cd_bad=1
     fi
+    doctor_channel catalog "item list"
+    doctor_channel self tlstore
 
     if [ -n "$CATALOG" ]; then
         cd_line "Item list" "$CATALOG_SERIAL, $CATALOG_FROM"

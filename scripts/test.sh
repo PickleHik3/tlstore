@@ -419,6 +419,15 @@ EOF
         RUNPATH="$RUNPATH:$(dirname "$(command -v minisign)")"
     fi
     RUNPATH="$RUNPATH:/usr/bin:/bin"
+
+    # The same tools with minisign left out, for the "cannot verify" tests:
+    # a phone without it never moves the item list or tlstore, and says so.
+    # (A duplicate name from a merged /bin is refused and the first one kept.)
+    NOMINI="$ROOT/nomini"
+    mkdir -p "$NOMINI"
+    ln -s /usr/bin/* /bin/* "$NOMINI/" 2>/dev/null
+    rm -f "$NOMINI/minisign"
+    NOMINI_PATH="$FIXBIN:$NOMINI"
 }
 
 # ---------------------------------------------------------------------------
@@ -541,6 +550,18 @@ tl_fn() {
     return 0
 }
 
+# ch_fetch catalog|self — channel_fetch called directly (tl_fn): what it
+# returned and set, which verified file it left in the cache, and the
+# channel.tsv it kept.
+ch_fetch() {
+    tl_fn 'pick_catalog; channel_fetch '"$1"'; r=$?
+        printf "rc=%s\noutcome=%s\nreason=%s\nversion=%s\n" "$r" "$CH_OUTCOME" "$CH_REASON" "$CH_VERSION"
+        for f in "$CACHE_DIR/catalog.tsv" "$CACHE_DIR/tlstore.new"; do
+            [ ! -f "$f" ] || echo "left=${f##*/}"
+        done
+        cat "$CHANNEL_FILE"'
+}
+
 expect_status() {
     if [ "$ST" = "$2" ]; then pass; else fail "$1" "expected exit $2, got $ST"; fi
 }
@@ -584,6 +605,73 @@ run_suite() {
     expect_status "sourcing the engine runs nothing" 0
     expect_out "a sourced engine answers a function call" "^plan=fishfn fishplugs fishkit$"
     expect_no_out "a sourced engine prints no list" "Run 'tlstore install'"
+
+    # --- the signed channel: channel_fetch, called directly, once per outcome ---
+    T=$'\t'
+    PUB="$TPREFIX/libexec/termux-launcher/tlstore/trusted.pub"
+    if [ "$HAVE_MINISIGN" = 1 ]; then
+        # A signed copy of the list the app ships: the same serial.
+        cp "$TPREFIX/libexec/termux-launcher/tlstore/catalog.tsv" "$FX/same.tsv"
+        minisign -S -s "$ROOT/key.sec" -x "$FX/same.tsv.minisig" -m "$FX/same.tsv" >/dev/null 2>&1
+
+        CATALOG_URL="file://$FX/newer.tsv"
+        ch_fetch catalog
+        expect_out "channel_fetch catalog: a newer signed list returns 0" "^rc=0$"
+        expect_out "channel_fetch catalog: and is newer" "^outcome=newer$"
+        expect_out "channel_fetch catalog: with no reason" "^reason=$"
+        expect_out "channel_fetch catalog: and its serial" "^version=2026090602$"
+        expect_out "channel_fetch catalog: the verified list waits in the cache" "^left=catalog.tsv$"
+        expect_out "channel_fetch catalog: the answer is kept, with when" "^catalog${T}newer${T}[0-9-]*T[0-9:]*Z${T}-$"
+        expect_no_out "channel_fetch catalog: and nothing is put in place" "^Updated the list"
+
+        CATALOG_URL="file://$FX/same.tsv"
+        ch_fetch catalog
+        expect_out "channel_fetch catalog: the same serial returns 1" "^rc=1$"
+        expect_out "channel_fetch catalog: and is current" "^outcome=current$"
+        expect_out "channel_fetch catalog: with no reason" "^reason=$"
+        expect_no_out "channel_fetch catalog: and nothing is left in the cache" "^left="
+        expect_out "channel_fetch catalog: the kept answer is replaced" "^catalog${T}current${T}"
+        expect_no_out "channel_fetch catalog: not added to" "^catalog${T}newer${T}"
+
+        CATALOG_URL="file://$FX/no-such.tsv"
+        ch_fetch catalog
+        expect_out "channel_fetch catalog: an unreachable release returns 1" "^rc=1$"
+        expect_out "channel_fetch catalog: and is offline" "^outcome=offline$"
+        expect_out "channel_fetch catalog: and says so" "^reason=the release could not be reached$"
+        expect_no_out "channel_fetch catalog: offline leaves nothing" "^left="
+
+        CATALOG_URL="file://$FX/older.tsv"
+        ch_fetch catalog
+        expect_out "channel_fetch catalog: an older list returns 1" "^rc=1$"
+        expect_out "channel_fetch catalog: and is refused" "^outcome=refused$"
+        expect_out "channel_fetch catalog: as older" "^reason=the item list that was offered is older than the one you have$"
+        expect_no_out "channel_fetch catalog: a refused list is not kept" "^left="
+
+        CATALOG_URL="file://$FX/tampered.tsv"
+        ch_fetch catalog
+        expect_out "channel_fetch catalog: a broken signature is refused" "^outcome=refused$"
+        expect_out "channel_fetch catalog: as not signed" "^reason=the item list that was offered is not signed by the launcher$"
+        expect_out "channel_fetch catalog: and the kept answer says why" "^catalog${T}refused${T}[^${T}]*${T}the item list that was offered is not signed by the launcher$"
+
+        CATALOG_URL="file://$FX/newer.tsv"
+        mv "$PUB" "$PUB.away"
+        ch_fetch catalog
+        mv "$PUB.away" "$PUB"
+        expect_out "channel_fetch catalog: no trusted key returns 1" "^rc=1$"
+        expect_out "channel_fetch catalog: and cannot verify" "^outcome=cannot-verify$"
+        expect_out "channel_fetch catalog: and names the fix" "^reason=the trusted key is missing — reopen the app to put it back$"
+        expect_no_out "channel_fetch catalog: nothing unchecked is left" "^left="
+
+        RUNPATH_SAVED="$RUNPATH"; RUNPATH="$NOMINI_PATH"
+        ch_fetch catalog
+        RUNPATH="$RUNPATH_SAVED"
+        expect_out "channel_fetch catalog: no minisign cannot verify" "^outcome=cannot-verify$"
+        expect_out "channel_fetch catalog: and names the fix" "^reason=minisign is not installed (pkg install minisign)$"
+        if [ "$(printf '%s\n' "$OUT" | grep -c "^catalog${T}")" = 1 ]; then pass; else fail "channel.tsv keeps one line per channel" "$OUT"; fi
+        CATALOG_URL="file://$FX/newer.tsv"
+    else
+        skip "channel_fetch catalog tests" "minisign is not installed"
+    fi
 
     tl help; expect_status "help" 0; expect_out "help lists commands" "install \[name"
     expect_out "help has a usage line" "Usage: tlstore"
@@ -1111,6 +1199,61 @@ y
         tl refresh
         expect_status "refreshing again is fine" 0
         expect_out "and says there is nothing new" "up to date"
+        tl update
+        expect_no_out "an item list that is up to date is not mentioned by update" "Could not check"
+
+        # Could not check: refresh and update both say so, and why.
+        CATALOG_URL="file://$FX/no-such.tsv"
+        tl refresh
+        expect_status "refresh with the release out of reach" 0
+        expect_out "says it could not check, and why" "Could not check for a newer item list: the release could not be reached"
+        tl update
+        expect_status "update with the release out of reach" 0
+        expect_out "update says so in one line" "^Could not check for a newer item list: the release could not be reached\.$"
+        tl update --check
+        expect_out "and so does update --check" "^Could not check for a newer item list: the release could not be reached\.$"
+        tl_stdout update --check --tsv
+        expect_status "update --check --tsv with the release out of reach" 0
+        expect_no_out "update --check --tsv keeps it out of its rows" "Could not check"
+        CATALOG_URL="file://$FX/tampered.tsv"
+        tl update
+        expect_out "update says a refused list was refused" "^Could not check for a newer item list: the item list that was offered is not signed by the launcher\.$"
+        tl update --check --tsv
+        expect_out "under --tsv the refusal is still said, on stderr" "not signed by the launcher — ignoring it"
+        tl_stdout update --check --tsv
+        expect_no_out "and never on stdout" "not signed"
+
+        # No minisign: refresh asks to install it as it always has; update
+        # asks only with someone there, -y installs it, and --check, --tsv
+        # and --progress never do.
+        touch "$ROOT/pkg.log"
+        RUNPATH_SAVED="$RUNPATH"; RUNPATH="$NOMINI_PATH"
+        CATALOG_URL="file://$FX/newest.tsv"
+        pk_seen=$(wc -l < "$ROOT/pkg.log")
+        tl refresh
+        expect_out "refresh without minisign asks to install it" "needs minisign. Install it?"
+        expect_out "and, still without it, names the fix" "Could not check for a newer item list: minisign is not installed (pkg install minisign)"
+        if tail -n "+$((pk_seen + 1))" "$ROOT/pkg.log" | grep -q minisign; then pass; else fail "refresh asked the package manager for minisign"; fi
+        pk_seen=$(wc -l < "$ROOT/pkg.log")
+        tl update
+        expect_status "update without minisign" 0
+        expect_out "update without minisign says why in one line" "^Could not check for a newer item list: minisign is not installed (pkg install minisign)\.$"
+        expect_no_out "with nobody there update does not ask" "Install it?"
+        TTY_KNOB=1; STDIN_TEXT=$'n\n'
+        tl update
+        expect_out "with someone there update asks" "needs minisign. Install it?"
+        if tail -n "+$((pk_seen + 1))" "$ROOT/pkg.log" | grep -q minisign; then fail "nobody there, or no: minisign is not installed"; else pass; fi
+        tl update -y
+        expect_out "update -y still says why when it is still missing" "^Could not check for a newer item list: minisign is not installed"
+        if tail -n "+$((pk_seen + 1))" "$ROOT/pkg.log" | grep -q minisign; then pass; else fail "update -y installs minisign"; fi
+        pk_seen=$(wc -l < "$ROOT/pkg.log")
+        tl update --check -y
+        expect_no_out "update --check never asks" "Install it?"
+        tl_stdout update --check --tsv -y
+        tl_stdout update --progress
+        if tail -n "+$((pk_seen + 1))" "$ROOT/pkg.log" | grep -q minisign; then fail "--check, --tsv and --progress never install minisign"; else pass; fi
+        RUNPATH="$RUNPATH_SAVED"
+        CATALOG_URL="file://$FX/newer.tsv"
     else
         skip "catalog signature tests" "minisign is not installed"
     fi
@@ -1127,9 +1270,21 @@ y
 
     # --- doctor ---
     tl doctor
-    expect_status "doctor" 0
+    # A missing minisign is a doctor failure (Revision 13): nothing updates.
+    if command -v minisign >/dev/null 2>&1; then expect_status "doctor" 0; else expect_status "doctor" 1; fi
     expect_out "doctor names the prefix" "$TPREFIX"
     expect_out "doctor names the item list" "Item list"
+    expect_out "doctor has a Channel line for the item list" "^Channel  *item list "
+    expect_out "and one for tlstore" "^Channel  *tlstore[ :]"
+    if [ "$HAVE_MINISIGN" = 1 ]; then
+        expect_out "the item list's says what the last check found, and when" \
+            "^Channel  *item list could not check: minisign is not installed (pkg install minisign) (cannot-verify, [0-9-]*T[0-9:]*Z)$"
+        RUNPATH_SAVED="$RUNPATH"; RUNPATH="$NOMINI_PATH"
+        tl doctor
+        RUNPATH="$RUNPATH_SAVED"
+        expect_status "doctor fails without minisign" 1
+        expect_out "and says why" "^minisign  *not installed — nothing can be updated without it (pkg install minisign)$"
+    fi
     expect_out "doctor names the app it is running in" "^App *Termux (com.termux)"
     TP_KNOB=termux-launcher
     TPV_KNOB=0.2.40
@@ -1505,6 +1660,15 @@ y
     tl_stdout snapshot --tsv
     expect_no_out "a change to the installed list makes a new one" "^nudged\$"
     expect_out "with the same content" "^item${T}hello${T}installed${T}"
+    # The channel answers are part of the snapshot, and of its key.
+    printf 'nudged\n' >> "$SNAP_FILE"
+    printf 'catalog\tcannot-verify\t2026-10-10T00:00:00Z\tminisign is not installed (pkg install minisign)\nself\tcurrent\t2026-10-10T00:00:01Z\t-\n' \
+        > "$TESTHOME/.local/share/tlstore/channel.tsv"
+    tl_stdout snapshot --tsv
+    expect_no_out "a new channel answer makes a new snapshot" "^nudged\$"
+    expect_out "a channel line for the item list, with the reason" "^channel${T}catalog${T}cannot-verify${T}minisign is not installed (pkg install minisign)\$"
+    expect_out "and one for tlstore" "^channel${T}self${T}current${T}-\$"
+    expect_out "the key names channel.tsv" "^# tlstore snapshot${T}key=.*;channel=[0-9]"
     tl snapshot
     expect_status "snapshot without --tsv is refused" 2
     write_catalog "$TESTHOME/.local/share/tlstore/catalog.tsv" 2026090603 2 fakebin-2
@@ -1758,6 +1922,52 @@ EOF
             expect_no_file "$1: no UI record is written" "$store/.tlstore-ui-sha256"
         }
 
+        # --- channel_fetch self, called directly, once per outcome ---
+        RELEASE_KNOB="file://$FX/release-new"
+        ch_fetch self
+        expect_out "channel_fetch self: a newer signed tlstore returns 0" "^rc=0$"
+        expect_out "channel_fetch self: and is newer" "^outcome=newer$"
+        expect_out "channel_fetch self: with no reason" "^reason=$"
+        expect_out "channel_fetch self: and its version" "^version=9.9$"
+        expect_out "channel_fetch self: the verified script waits in the cache" "^left=tlstore.new$"
+        expect_out "channel_fetch self: the answer is kept" "^self${T}newer${T}[0-9-]*T[0-9:]*Z${T}-$"
+        expect_out "channel_fetch self: beside the item list's" "^catalog${T}"
+
+        RELEASE_KNOB="file://$FX/release-same"
+        ch_fetch self
+        expect_out "channel_fetch self: the same version returns 1" "^rc=1$"
+        expect_out "channel_fetch self: and is current" "^outcome=current$"
+        expect_no_out "channel_fetch self: and leaves nothing" "^left="
+
+        ch_fetch self
+        expect_out "channel_fetch self: no release returns 1" "^rc=1$"
+        expect_out "channel_fetch self: and is offline" "^outcome=offline$"
+        expect_out "channel_fetch self: and says so" "^reason=the release could not be reached$"
+
+        RELEASE_KNOB="file://$FX/release-bad"
+        ch_fetch self
+        expect_out "channel_fetch self: a broken signature returns 1" "^rc=1$"
+        expect_out "channel_fetch self: and is refused" "^outcome=refused$"
+        expect_out "channel_fetch self: as not signed" "^reason=the tlstore that was offered is not signed by the launcher$"
+        expect_no_out "channel_fetch self: a refused script is not kept" "^left="
+
+        mv "$PUB" "$PUB.away"
+        RELEASE_KNOB="file://$FX/release-new"
+        ch_fetch self
+        mv "$PUB.away" "$PUB"
+        expect_out "channel_fetch self: no trusted key cannot verify" "^outcome=cannot-verify$"
+        expect_out "channel_fetch self: and names the fix" "^reason=the trusted key is missing — reopen the app to put it back$"
+        expect_no_out "channel_fetch self: nothing unchecked is left" "^left="
+
+        RUNPATH_SAVED="$RUNPATH"; RUNPATH="$NOMINI_PATH"
+        RELEASE_KNOB="file://$FX/release-new"
+        ch_fetch self
+        RUNPATH="$RUNPATH_SAVED"
+        expect_out "channel_fetch self: no minisign returns 1" "^rc=1$"
+        expect_out "channel_fetch self: and cannot verify" "^outcome=cannot-verify$"
+        expect_out "channel_fetch self: and names the fix" "^reason=minisign is not installed (pkg install minisign)$"
+        expect_out "channel_fetch self: and the kept answer says so" "^self${T}cannot-verify${T}[^${T}]*${T}minisign is not installed (pkg install minisign)$"
+
         su_reset
         RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"
         tl update -y
@@ -1843,7 +2053,7 @@ EOF
         RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"
         tl_stdout self-update --check --tsv
         expect_status "self-update --check --tsv, a newer release" 0
-        expect_out "one self line: installed, latest, available" $'^self\t'"$cur_ver"$'\t9.9\t1$'
+        expect_out "one self line: installed, latest, available, outcome, reason" $'^self\t'"$cur_ver"$'\t9.9\t1\tnewer\t-$'
         expect_file "the verified script waits in the cache for the install" "$su_cache/tlstore.new"
         expect_file "with its signature" "$su_cache/tlstore.new.minisig"
         su_untouched "the check alone"
@@ -1851,18 +2061,48 @@ EOF
         RELEASE_KNOB="file://$FX/release-same"; UI_KNOB="$ui"
         tl_stdout self-update --check --tsv
         expect_status "self-update --check --tsv, the same version" 0
-        expect_out "names it, not available" $'^self\t'"$cur_ver"$'\t'"$cur_ver"$'\t0$'
+        expect_out "names it, not available, current" $'^self\t'"$cur_ver"$'\t'"$cur_ver"$'\t0\tcurrent\t-$'
         expect_no_file "and keeps nothing in the cache" "$su_cache/tlstore.new"
 
         UI_KNOB="$ui"
         tl_stdout self-update --check --tsv
         expect_status "self-update --check --tsv, offline" 0
-        expect_out "no version, not available" $'^self\t'"$cur_ver"$'\t-\t0$'
+        expect_out "no version, not available, offline and why" $'^self\t'"$cur_ver"$'\t-\t0\toffline\tthe release could not be reached$'
+        tl_stdout snapshot --tsv
+        expect_out "the snapshot carries the self channel the check just found" $'^channel\tself\toffline\tthe release could not be reached$'
+        UI_KNOB="$ui"
+        tl self-update --check
+        expect_status "self-update --check, offline" 0
+        expect_out "says it could not check, and why" "^Could not check for a newer tlstore: the release could not be reached\.$"
+        expect_no_out "and never that it is up to date" "up to date"
+        RELEASE_KNOB="file://$FX/release-same"; UI_KNOB="$ui"
+        tl self-update --check
+        expect_out "self-update --check, the same version, is up to date" "^tlstore is up to date\.$"
+        RUNPATH_SAVED="$RUNPATH"; RUNPATH="$NOMINI_PATH"
+        RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"
+        tl self-update --check
+        expect_out "self-update --check without minisign says why" "^Could not check for a newer tlstore: minisign is not installed (pkg install minisign)\.$"
+        expect_no_out "and not that it is up to date" "up to date"
+        RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"
+        tl_stdout self-update --check --tsv
+        expect_out "self-update --check --tsv without minisign cannot verify" $'^self\t'"$cur_ver"$'\t-\t0\tcannot-verify\tminisign is not installed (pkg install minisign)$'
+        RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"
+        tl self-update
+        expect_status "self-update without minisign exits 1" 1
+        expect_out "and says why" "^Could not check for a newer tlstore: minisign is not installed (pkg install minisign)\.$"
+        su_untouched "self-update, no minisign"
+        su_reset
+        RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"
+        tl_stdout self-update --progress
+        expect_status "without minisign the --progress self-update fails" 1
+        expect_out "with the real reason on the done line" $'^done\ttlstore\tfailed\tminisign is not installed (pkg install minisign)$'
+        su_untouched "--progress, no minisign"
+        RUNPATH="$RUNPATH_SAVED"
 
         RELEASE_KNOB="file://$FX/release-bad"; UI_KNOB="$ui"
         tl_stdout self-update --check --tsv
         expect_status "self-update --check --tsv, a bad signature" 0
-        expect_out "no version, not available" $'^self\t'"$cur_ver"$'\t-\t0$'
+        expect_out "no version, not available, refused and why" $'^self\t'"$cur_ver"$'\t-\t0\trefused\tthe tlstore that was offered is not signed by the launcher$'
         expect_no_file "a refused script is not kept" "$su_cache/tlstore.new"
         su_untouched "the check, bad signature"
 
@@ -1914,7 +2154,7 @@ EOF
         UI_KNOB="$ui"
         tl_stdout self-update --progress
         expect_status "offline, the --progress self-update fails" 1
-        expect_out "and says so on the stream" $'^done\ttlstore\tfailed\t'
+        expect_out "and says why on the stream" $'^done\ttlstore\tfailed\tthe release could not be reached$'
         su_untouched "--progress, offline"
 
         su_reset
@@ -1940,6 +2180,7 @@ EOF
         RELEASE_KNOB="file://$FX/release-same"; UI_KNOB="$ui"
         tl self-update
         expect_status "self-update exits 0 when already current" 0
+        expect_out "and says so" "^tlstore is up to date\.$"
         su_reset
         RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"
         tl self-update
@@ -1947,7 +2188,9 @@ EOF
         su_reset
         UI_KNOB="$ui"
         tl self-update
-        expect_status "self-update exits 0 when offline" 0
+        expect_status "self-update exits 1 when it could not check" 1
+        expect_out "and says why" "^Could not check for a newer tlstore: the release could not be reached\.$"
+        expect_no_out "never that it is up to date" "up to date"
 
         su_reset
         RELEASE_KNOB="file://$FX/release-badui"; UI_KNOB="$ui"
