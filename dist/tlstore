@@ -47,7 +47,7 @@
 
 set -u
 
-TLSTORE_VERSION=0.10
+TLSTORE_VERSION=0.11
 
 # The store program that pairs with this script, one digest per processor.
 # Empty in the source tree: scripts/release.sh --prepare fills them in from
@@ -914,10 +914,12 @@ pm_run() {
     [ "$pr_status" = 0 ]
 }
 
+# -Sy as Termux's own pkg does on pacman: a fresh bootstrap has never synced its
+# package lists, and a plain -S finds nothing in them ("target not found").
 install_pkg() {
     if have pacman; then
         # shellcheck disable=SC2068
-        pm_run pacman -S --needed --noconfirm $@
+        pm_run pacman -Sy --needed --noconfirm $@
     elif have pkg; then
         # shellcheck disable=SC2068
         pm_run pkg install -y $@
@@ -930,7 +932,7 @@ install_pkg() {
 upgrade_pkg() {
     if have pacman; then
         # shellcheck disable=SC2068
-        pm_run pacman -S --needed --noconfirm $@
+        pm_run pacman -Sy --needed --noconfirm $@
     elif have apt; then
         # shellcheck disable=SC2068
         pm_run apt-get install -y -qq --only-upgrade $@
@@ -1071,7 +1073,19 @@ already_here() {
     [ -n "$ah_row" ] || return 1
     is_installed "$1" || return 1
     case "$(field "$ah_row" 2)" in
-        pkg|bundle|fisher) return 0 ;;
+        # A package counts only while it is really there: one taken away behind
+        # tlstore's back (pkg uninstall) is still in the state, and trusting that
+        # would skip it on every install from then on.
+        pkg)
+            for ah_p in $(field "$ah_row" 5); do
+                pkg_present "$ah_p" || return 1
+            done
+            return 0
+            ;;
+        # A bundle's own step is never skipped: it is cheap, and login-shell=
+        # has to happen again when the shell was changed or not there last time.
+        bundle) return 1 ;;
+        fisher) return 0 ;;
     esac
     [ "$(installed_version "$1")" = "$(field "$ah_row" 3)" ]
 }
@@ -1169,7 +1183,11 @@ install_item() {
         PROGRESS_NOTE="already installed"
         return 0
     fi
-    conflict_check "$ii_name" || return 1
+    # An installed bundle comes through here every time (already_here never skips one); as in
+    # cmd_install, what is already installed is not refused afterwards.
+    if [ "$ii_kind" != bundle ] || ! is_installed "$ii_name"; then
+        conflict_check "$ii_name" || return 1
+    fi
 
     case "$ii_kind" in
         pkg) do_pkg ;;
@@ -1328,6 +1346,19 @@ do_fisher() {
 }
 
 do_bundle() {
+    # A member that did not install fails the bundle, rather than the bundle
+    # standing as installed around it. One with no row here (another edition's,
+    # or not built for this processor) was skipped on purpose and does not count.
+    db_missing=""
+    for db_m in $(commas "$(field "$(row "$ii_name")" 8)"); do
+        [ "$db_m" = "-" ] && continue
+        [ -n "$(row "$db_m")" ] || continue
+        is_installed "$db_m" || db_missing="$db_missing $db_m"
+    done
+    if [ -n "$db_missing" ]; then
+        err "$ii_name is not complete: $(words_list "${db_missing# }") did not install"
+        return 1
+    fi
     state_record "$ii_name" bundle "$ii_version"
     db_shell=$(opt "$ii_options" login-shell)
     [ -n "$db_shell" ] && set_login_shell "$ii_name" "$db_shell"
@@ -1341,18 +1372,24 @@ do_bundle() {
 set_login_shell() {
     sls_item="$1"
     sls_shell="$2"
+    # The note is what tlstore-ui shows on the item's closing line; err alone
+    # goes to a stderr the store does not show.
     if ! have "$sls_shell"; then
         err "$sls_item could not make $sls_shell your login shell: $sls_shell is not installed"
+        PROGRESS_NOTE="$sls_shell is not installed, so it is not your login shell"
         return 0
     fi
     if ! have chsh; then
         err "$sls_item could not make $sls_shell your login shell: chsh is missing. Run: chsh -s $sls_shell"
+        PROGRESS_NOTE="installed; run chsh -s $sls_shell to start sessions in it"
         return 0
     fi
     if chsh -s "$sls_shell" </dev/null >/dev/null 2>&1; then
         say "$sls_shell is now your login shell: new sessions start in it"
+        PROGRESS_NOTE="new sessions start in $sls_shell"
     else
         err "$sls_item could not make $sls_shell your login shell. Run: chsh -s $sls_shell"
+        PROGRESS_NOTE="installed; run chsh -s $sls_shell to start sessions in it"
     fi
     return 0
 }
@@ -1568,19 +1605,42 @@ remove_item() {
     fi
     ri_kind=$(field "$ri_row" 2)
     ri_files=$(field "$ri_row" 5)
+    ri_digest=$(field "$ri_row" 7)
     if [ "$ri_kind" = fisher ]; then
         ri_item=$(row "$ri_name")
         if [ -n "$ri_item" ] && have fish; then
-            fish -c "fisher remove $(field "$ri_item" 5)" </dev/null >/dev/null 2>&1 || true
+            if ! fish -c "fisher remove $(field "$ri_item" 5)" </dev/null >/dev/null 2>&1; then
+                err "fisher could not remove $(field "$ri_item" 5); their files stay in ~/.config/fish"
+            fi
         fi
     fi
     for ri_f in $ri_files; do
+        # A config file that is no longer what tlstore wrote holds the person's
+        # edits (or is their own, kept when they declined ours): it is set
+        # aside beside the target rather than deleted. It is moved out of the
+        # .bak-* names first, so restore_backup puts back the file that was
+        # there before the install, not this one.
+        ri_edited=""
+        case "$ri_kind" in
+            file|file-once)
+                if [ -f "$ri_f" ] && [ -n "$ri_digest" ] && [ "$ri_digest" != "-" ] &&
+                    [ "$(file_digest "$ri_f")" != "$ri_digest" ]; then
+                    ri_edited="$(dirname "$ri_f")/.$(basename "$ri_f").edited.$$"
+                    mv "$ri_f" "$ri_edited" || return 1
+                fi
+                ;;
+        esac
         if [ -d "$ri_f" ]; then
             rm -rf "$ri_f"
         else
             rm -f "$ri_f"
         fi
         restore_backup "$ri_f" && say "  put your own $(basename "$ri_f") back"
+        if [ -n "$ri_edited" ]; then
+            ri_copy="$ri_f.bak-$(timestamp)"
+            mv "$ri_edited" "$ri_copy" || return 1
+            say "  kept your changed $(basename "$ri_f") as $(basename "$ri_copy")"
+        fi
     done
     state_forget "$ri_name"
     case "$ri_kind" in
@@ -3227,7 +3287,17 @@ dry_remove() {
             continue
         fi
         say "  $dr_n"
+        dr_digest=$(field "$dr_row" 7)
         for dr_f in $(field "$dr_row" 5); do
+            case "$(field "$dr_row" 2)" in
+                file|file-once)
+                    if [ -f "$dr_f" ] && [ -n "$dr_digest" ] && [ "$dr_digest" != "-" ] &&
+                        [ "$(file_digest "$dr_f")" != "$dr_digest" ]; then
+                        say "    $dr_f  (changed since it was installed; kept beside it as a .bak)"
+                        continue
+                    fi
+                    ;;
+            esac
             say "    $dr_f"
         done
     done
@@ -3353,6 +3423,20 @@ cmd_remove() {
             in_list "$cr_all" "$cr_m" || cr_all="$cr_all $cr_m"
         done
     done
+    # The reverse of the install order: what needs another item goes first,
+    # so fish-plugins is taken away while the fisher it needs is still there.
+    # Without a list (or with a retired name in it) the order stays as it is.
+    # shellcheck disable=SC2086  # a list of names, split on purpose
+    if [ -n "$CATALOG" ] && cr_plan=$(plan_for $cr_all 2>/dev/null); then
+        cr_order=""
+        for cr_n in $cr_plan; do
+            in_list "$cr_all" "$cr_n" && cr_order="$cr_n $cr_order"
+        done
+        for cr_n in $cr_all; do
+            in_list "$cr_order" "$cr_n" || cr_order="$cr_order $cr_n"
+        done
+        cr_all="$cr_order"
+    fi
 
     if [ "$DRY_RUN" = 1 ]; then
         dry_remove "$cr_all"
