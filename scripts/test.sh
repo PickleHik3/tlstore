@@ -1811,7 +1811,13 @@ y
     expect_no_out "a new channel answer makes a new snapshot" "^nudged\$"
     expect_out "a channel line for the item list, with the reason" "^channel${T}catalog${T}cannot-verify${T}minisign is not installed (pkg install minisign)\$"
     expect_out "and one for tlstore" "^channel${T}self${T}current${T}-\$"
-    expect_out "the key names channel.tsv" "^# tlstore snapshot${T}key=.*;channel=[0-9]"
+    expect_out "the key names the channel answers" "^# tlstore snapshot${T}key=.*;channel=catalog:cannot-verify:"
+    # A check that finds the same thing again only moves the time.
+    printf 'nudged\n' >> "$SNAP_FILE"
+    printf 'catalog\tcannot-verify\t2026-10-11T00:00:00Z\tminisign is not installed (pkg install minisign)\nself\tcurrent\t2026-10-11T00:00:01Z\t-\n' \
+        > "$TESTHOME/.local/share/tlstore/channel.tsv"
+    tl_stdout snapshot --tsv
+    expect_out "the same answer at a later time keeps the snapshot" "^nudged\$"
     tl snapshot
     expect_status "snapshot without --tsv is refused" 2
     write_catalog "$TESTHOME/.local/share/tlstore/catalog.tsv" 2026090603 2 fakebin-2
