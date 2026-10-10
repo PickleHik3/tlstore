@@ -89,6 +89,14 @@ STATE="$DATA_DIR/installed.tsv"
 HELD="$DATA_DIR/held"
 # Present when the user answered "never" to update's offer of a newer tlstore.
 SU_QUIET="$DATA_DIR/self-update-quiet"
+# What an install, update or remove that was cut short leaves behind: its verb,
+# its plan, and a line for each row that finished. plan_apply writes it and
+# removes it when it returns; the next plan_apply, and doctor, report one that
+# is still here. Nothing else reads it, and nothing is resumed from it.
+JOURNAL="$DATA_DIR/journal"
+# Where plan_apply's fetch phase keeps each payload it downloaded and checked,
+# until its row is applied.
+STAGE_DIR="$CACHE_DIR/stage"
 
 # The app writes this when it puts tlstore down (a hand install writes
 # .standalone instead, with the address it came from inside it; nothing here
@@ -192,6 +200,14 @@ LAST_ERR=""
 CANCEL_TMP=""
 CANCEL_EXTRA=""
 CANCEL_ITEM=""
+# 1 while plan_apply keeps payloads in STAGE_DIR (a cancel drops the lot), and
+# the names this run staged there: only those are ever taken from it, so a copy
+# some other run left behind is never put in place unchecked.
+PA_STAGING=0
+PA_STAGED=""
+# 1 while download is staging a payload: it stops short of the "putting files
+# in place" step, which belongs to the row's apply.
+DL_STAGE=0
 
 # ---------------------------------------------------------------------------
 # Output
@@ -272,6 +288,7 @@ on_cancel() {
     for oc_p in $CANCEL_EXTRA; do
         rm -rf "$oc_p"
     done
+    [ "$PA_STAGING" != 1 ] || rm -rf "$STAGE_DIR"
     if [ "$PROGRESS" = 1 ] && [ -n "$CANCEL_ITEM" ]; then
         progress_done "$CANCEL_ITEM" failed "Cancelled."
     fi
@@ -840,8 +857,36 @@ download() {
             return 1
         fi
     fi
-    progress_stage 90 "putting files in place"
+    [ "$DL_STAGE" = 1 ] || progress_stage 90 "putting files in place"
     mv "$dl_tmp" "$dl_dest" || { CANCEL_TMP=""; return 1; }
+    CANCEL_TMP=""
+    return 0
+}
+
+# payload_to <url> <destination> <sha256 or -> — an item's payload, put at the
+# destination: the copy plan_apply's fetch phase already downloaded and checked
+# for ii_name when this run staged one, otherwise a download as before (a
+# rollback, which installs straight through install_item, always downloads).
+# The staged copy goes the way a download does: beside the destination as a
+# part file first, then one mv, so the destination is never seen half written.
+payload_to() {
+    pt_staged="$STAGE_DIR/${ii_name:-}"
+    if [ "$PA_STAGING" != 1 ] || ! in_list "$PA_STAGED" "${ii_name:-}" || [ ! -f "$pt_staged" ]; then
+        download "$1" "$2" "$3"
+        return
+    fi
+    pt_dir=$(dirname "$2")
+    mkdir -p "$pt_dir" || return 1
+    pt_tmp="$pt_dir/.$(basename "$2").$$.part"
+    CANCEL_TMP="$pt_tmp"
+    if ! mv "$pt_staged" "$pt_tmp"; then
+        rm -f "$pt_tmp"
+        CANCEL_TMP=""
+        err "could not put $(basename "$2") in place"
+        return 1
+    fi
+    progress_stage 90 "putting files in place"
+    mv "$pt_tmp" "$2" || { rm -f "$pt_tmp"; CANCEL_TMP=""; return 1; }
     CANCEL_TMP=""
     return 0
 }
@@ -1293,7 +1338,7 @@ do_binary() {
     say "installing $ii_name"
     mkdir -p "$(dirname "$db_dest")"
     backup_existing "$db_dest"
-    download "$(source_url "$ii_source")" "$db_dest" "$ii_digest" || return 1
+    payload_to "$(source_url "$ii_source")" "$db_dest" "$ii_digest" || return 1
     chmod "$db_mode" "$db_dest"
     if [ "$(opt "$ii_options" priv)" = shizuku ]; then
         # The program stays off PATH. What the user runs is a wrapper that hands
@@ -1366,7 +1411,7 @@ do_file() {
     if [ "$df_once" = 0 ] && [ -e "$df_dest" ]; then
         mkdir -p "$CACHE_DIR"
         df_new="$CACHE_DIR/$ii_name.new"
-        download "$(source_url "$ii_source")" "$df_new" "$ii_digest" || return 1
+        payload_to "$(source_url "$ii_source")" "$df_new" "$ii_digest" || return 1
         if same_file "$df_dest" "$df_new"; then
             rm -f "$df_new"
             state_record "$ii_name" file "$ii_version" "$df_dest"
@@ -1390,7 +1435,7 @@ do_file() {
     say "installing $ii_name"
     mkdir -p "$(dirname "$df_dest")"
     backup_existing "$df_dest"
-    download "$(source_url "$ii_source")" "$df_dest" "$ii_digest" || return 1
+    payload_to "$(source_url "$ii_source")" "$df_dest" "$ii_digest" || return 1
     chmod "$df_mode" "$df_dest"
     if [ "$df_once" = 1 ]; then
         state_record "$ii_name" file-once "$ii_version" "$df_dest"
@@ -4212,8 +4257,14 @@ plan_apply() {
     pa_pkg_at=0
     pa_pkg_bad=""
     pa_tools_bad=""
+    pa_fetch_bad=""
+    pa_fetch_at=" "
+    journal_open
     case "$PLAN_VERB" in
-        install|update) plan_packages ;;
+        install|update)
+            plan_packages
+            plan_fetch
+            ;;
     esac
     pa_ifs="$IFS"
     IFS="$NL"
@@ -4227,6 +4278,7 @@ plan_apply() {
         pa_why="$ps_why"
         LAST_ERR=""
         PROGRESS_NOTE=""
+        pa_outcome=ok
         case "$pa_action" in
             install) plan_apply_install ;;
             skip)
@@ -4249,10 +4301,120 @@ plan_apply() {
             remove|forget|absent) plan_apply_remove ;;
             retire) plan_apply_retire ;;
         esac
+        journal_done "$pa_n" "$pa_outcome"
     done
     IFS="$pa_ifs"
+    [ "$PA_STAGING" != 1 ] || rm -rf "$STAGE_DIR"
+    PA_STAGING=0
+    PA_STAGED=""
     drop_build_tools
+    rm -f "$JOURNAL"
     return "$pa_rc"
+}
+
+# plan_fetch — step 3 of plan_apply: the payload of every binary, file and
+# file-once row the plan installs, downloaded and checked into STAGE_DIR before
+# any row is applied. One that does not arrive, or does not match its digest,
+# fails its row there and then, with the download's own reason, and goes in
+# pa_bad so what needs it is skipped; nothing on disk has changed by then. A
+# file-once whose file is already there needs nothing (do_file keeps yours), a
+# file with nowhere to go is left to do_file to refuse, and a row that will be
+# skipped for what it needs is not fetched at all. The npm kinds fetch while
+# they apply. Under --progress each row's own step lines run while its download
+# does, up to the checksum; pa_fetch_at keeps where each got to, so its apply
+# carries on from there.
+plan_fetch() {
+    pf_doomed="$pa_bad $pa_pkg_bad"
+    PA_STAGING=1
+    PA_STAGED=""
+    rm -rf "$STAGE_DIR"
+    pf_ifs="$IFS"
+    IFS="$NL"
+    for pf_line in $PLAN; do
+        IFS="$pf_ifs"
+        plan_split "$pf_line"
+        [ "$ps_action" = install ] || continue
+        pf_n="$ps_name"
+        pf_kind="$ps_kind"
+        pb_row "$pf_n"
+        pf_skip=0
+        for pf_d in $(commas "$prw_deps"); do
+            if in_list "$pf_doomed" "$pf_d"; then
+                pf_skip=1
+                break
+            fi
+        done
+        if [ "$pf_skip" = 1 ]; then
+            pf_doomed="$pf_doomed $pf_n"
+            continue
+        fi
+        case "$pf_kind" in
+            binary|file|file-once) ;;
+            *) continue ;;
+        esac
+        load_item "$pf_n" || continue
+        if [ "$pf_kind" != binary ]; then
+            pf_dest=$(item_targets "$pf_n" file "$it_target")
+            [ -n "$pf_dest" ] || continue
+            [ "$pf_kind" = file ] || [ ! -e "$pf_dest" ] || continue
+        fi
+        say "fetching $pf_n"
+        LAST_ERR=""
+        CANCEL_ITEM="$pf_n"
+        PROGRESS_AT=0
+        progress_stage 10 fetched
+        DL_STAGE=1
+        if download "$(source_url "$it_source")" "$STAGE_DIR/$pf_n" "$it_digest"; then
+            PA_STAGED="$PA_STAGED $pf_n"
+            pa_fetch_at="$pa_fetch_at$pf_n=$PROGRESS_AT "
+        else
+            pa_bad="$pa_bad $pf_n"
+            pa_fetch_bad="$pa_fetch_bad $pf_n"
+            pf_doomed="$pf_doomed $pf_n"
+            pa_rc=1
+            [ "$PROGRESS" != 1 ] || progress_done "$pf_n" failed "${LAST_ERR:-could not download $pf_n}"
+        fi
+        DL_STAGE=0
+        CANCEL_ITEM=""
+    done
+    IFS="$pf_ifs"
+}
+
+# journal_read — what JOURNAL says: jn_verb, and jn_names, the rows of its plan
+# with no done line, in plan order, as a comma list.
+journal_read() {
+    jn_verb=$(awk -F "$TAB" '$1 == "verb" { print $2; exit }' "$JOURNAL" 2>/dev/null)
+    [ -n "$jn_verb" ] || jn_verb=run
+    jn_names=$(awk -F "$TAB" '
+        $1 == "row" { n[++c] = $2 }
+        $1 == "done" { d[$2] = 1 }
+        END { for (i = 1; i <= c; i++) if (!(n[i] in d)) s = s " " n[i]; print s }' "$JOURNAL" 2>/dev/null)
+    jn_names=$(words_list "$jn_names")
+}
+
+# journal_open — step 1 of plan_apply, which only runs once the dry run and the
+# question are behind it: says what an earlier run that was cut short did not
+# finish, then starts this run's journal.
+journal_open() {
+    if [ -f "$JOURNAL" ]; then
+        journal_read
+        if [ -n "$jn_names" ]; then
+            say "The last $jn_verb was interrupted; $jn_names did not finish."
+        else
+            say "The last $jn_verb was interrupted."
+        fi
+        rm -f "$JOURNAL"
+    fi
+    mkdir -p "$DATA_DIR" 2>/dev/null || return 0
+    {
+        printf 'verb\t%s\n' "$PLAN_VERB"
+        printf '%s\n' "$PLAN" | awk -v t="$TAB" 'NF { print "row" t $0 }'
+    } > "$JOURNAL" 2>/dev/null || rm -f "$JOURNAL"
+}
+
+# journal_done <name> <outcome> — a row finished: ok, failed or skipped.
+journal_done() {
+    [ ! -f "$JOURNAL" ] || printf 'done\t%s\t%s\n' "$1" "$2" >> "$JOURNAL" 2>/dev/null || true
 }
 
 # A held item named on update's command line: updating it lets go of the hold.
@@ -4286,6 +4448,12 @@ plan_apply_install() {
         pa_word=updated
         pa_fail="could not update $pa_n"
     fi
+    # Its payload did not arrive in the fetch phase, which already failed it
+    # and said why.
+    if in_list "$pa_fetch_bad" "$pa_n"; then
+        pa_outcome=failed
+        return 0
+    fi
     pb_row "$pa_n"
     pa_reason=""
     for pa_d in $(commas "$prw_deps"); do
@@ -4297,13 +4465,18 @@ plan_apply_install() {
     if [ -n "$pa_reason" ]; then
         pa_bad="$pa_bad $pa_n"
         pa_rc=1
+        pa_outcome=skipped
         err "skipped $pa_n: $pa_reason"
         [ "$PROGRESS" != 1 ] || progress_done "$pa_n" failed "$pa_reason"
         return 0
     fi
     CANCEL_ITEM="$pa_n"
+    # The steps its package-manager call or its fetch already reported are not
+    # reported again: the bar carries on from there.
     if [ "$pa_n" = "$pa_first_pkg" ]; then
         PROGRESS_AT="$pa_pkg_at"
+    elif map_get "$pa_fetch_at" "$pa_n"; then
+        PROGRESS_AT="$mg_v"
     else
         PROGRESS_AT=0
     fi
@@ -4338,6 +4511,7 @@ plan_apply_install() {
     else
         pa_bad="$pa_bad $pa_n"
         pa_rc=1
+        pa_outcome=failed
         [ "$PROGRESS" != 1 ] || progress_done "$pa_n" failed "${LAST_ERR:-$pa_fail}"
     fi
     CANCEL_ITEM=""
@@ -4359,6 +4533,7 @@ plan_apply_remove() {
     else
         pa_bad="$pa_bad $pa_n"
         pa_rc=1
+        pa_outcome=failed
         [ "$PROGRESS" != 1 ] || progress_done "$pa_n" failed "${LAST_ERR:-could not remove $pa_n}"
     fi
     CANCEL_ITEM=""
@@ -4378,6 +4553,7 @@ plan_apply_retire() {
     else
         pa_bad="$pa_bad $pa_n"
         pa_rc=1
+        pa_outcome=failed
         [ "$PROGRESS" != 1 ] || progress_done "$pa_n" failed "${LAST_ERR:-could not retire $pa_n}"
     fi
     CANCEL_ITEM=""
@@ -5193,6 +5369,18 @@ cmd_doctor() {
     done
     if [ -n "$(printf '%s' "$cd_missing" | tr -d ' ')" ]; then
         cd_line "Missing" "$(printf '%s' "$cd_missing" | sed 's/^ *//') — install them again"
+        cd_bad=1
+    fi
+
+    # An install, update or remove that was cut short (a killed process, a
+    # phone that died) left its journal behind.
+    if [ -f "$JOURNAL" ]; then
+        journal_read
+        if [ -n "$jn_names" ]; then
+            cd_line Interrupted "$jn_verb: $jn_names did not finish"
+        else
+            cd_line Interrupted "$jn_verb"
+        fi
         cd_bad=1
     fi
 
