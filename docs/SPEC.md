@@ -186,6 +186,13 @@ shipped file itself moves; `update --check` reports those as
 `<name> has a new version; update shows the change and asks`. Replacing still leaves the timestamped
 `.bak`.
 
+`remove` deletes a `file` or `file-once` target only while it is still what tlstore wrote (its
+digest matches the recorded one). One that changed (edited, or the person's own file kept when they
+declined ours) is set aside as `<file>.bak-<timestamp>` after the pre-install `.bak` is put back,
+and remove says `kept your changed <basename> as <copy>`; `--dry-run` marks it. Removal runs in the
+reverse of the install order (dependents first), so a `fisher` item's `fisher remove` runs while
+`fisher.fish` is still there; a `fisher remove` that fails is said, and the remove still goes through.
+
 ### Build tools
 
 Before installing, tlstore notes which `build=` packages are missing (`pacman -Q`, else `dpkg -s`,

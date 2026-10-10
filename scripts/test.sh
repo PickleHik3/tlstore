@@ -144,6 +144,10 @@ write_catalog() {
         printf 'shimset\tbundle\t-\t*\t-\t-\t-\tshimpart\tconflicts=termux-api\tA bundle that owns commands a package owns.\t%s\n' "$R5_NONE"
         printf 'shimpart\tfile\t1\t*\tfile://%s/hello.conf\t%s\t~/.config/shimpart.conf\t-\thidden=1;conflicts=termux-api\tA part that owns a command a package owns.\t%s\n' "$FX" "$(sha "$FX/hello.conf")" "$R5_NONE"
         printf 'plug\tfisher\t-\t*\tdemo/one demo/two\t-\t-\t-\t-\tPlugins for the shell.\t%s\n' "$R5_NONE"
+        # The fish-shell shape: plugins that need the fisher file, in a bundle that lists the file first.
+        printf 'fishkit\tbundle\t-\t*\t-\t-\t-\tfishfn,fishplugs\t-\tA shell plugin manager and its plugins.\t%s\n' "$R5_NONE"
+        printf 'fishfn\tfile\t1\t*\tfile://%s/mine.conf\t%s\t~/.config/fish/functions/fisher.fish\t-\thidden=1\tThe plugin manager.\t%s\n' "$FX" "$(sha "$FX/mine.conf")" "$R5_NONE"
+        printf 'fishplugs\tfisher\t-\t*\tdemo/three\t-\t-\tfishfn\thidden=1\tPlugins the manager fetches.\t%s\n' "$R5_NONE"
         # login-shell=: a bundle that makes its shell the one new sessions start in, the way
         # fish-shell does, and takes that back on remove.
         printf 'shellkit\tbundle\t-\t*\t-\t-\t-\tsecret\tlogin-shell=fish\tA shell and its setup.\t%s\n' "$R5_NONE"
@@ -303,10 +307,13 @@ exit 0
 EOF
     chmod +x "$FIXBIN/pacman"
 
-    # A fake fish, so the plugin manager's install and remove can be seen.
+    # A fake fish, so the plugin manager's install and remove can be seen: each call is logged
+    # with whether fisher.fish was there to run it, and fails while the test drops fish-fails.
     cat > "$FIXBIN/fish" <<EOF
 #!/bin/sh
-echo "\$@" >> "$ROOT/fish.log"
+if [ -e "\$HOME/.config/fish/functions/fisher.fish" ]; then fn=yes; else fn=no; fi
+echo "\$@ fisher=\$fn" >> "$ROOT/fish.log"
+[ -e "$ROOT/fish-fails" ] && exit 1
 exit 0
 EOF
     chmod +x "$FIXBIN/fish"
@@ -974,6 +981,53 @@ y
     tl remove hello -y
     expect_status "removing something twice is not an error" 0
     expect_out "removing something twice says so" "not installed"
+
+    # --- remove sets a changed config aside instead of deleting it ---
+    # A file-once you already had was never ours, so remove leaves it where it is.
+    tl remove mine -y
+    expect_content "remove leaves a file-once you already had" "$TESTHOME/.config/mine.conf" "already mine"
+    rm -f "$TESTHOME/.config/mine.conf"
+    tl install mine -y
+    printf 'my own line\n' >> "$TESTHOME/.config/mine.conf"
+    tl remove mine --dry-run
+    expect_out "the dry run says the changed file is kept" "changed since it was installed"
+    tl remove mine -y
+    expect_status "remove an edited file-once" 0
+    expect_out "remove says the edited file was kept" "kept your changed mine.conf as mine.conf.bak-"
+    expect_no_file "the edited file-once is no longer in place" "$TESTHOME/.config/mine.conf"
+    if cat "$TESTHOME/.config/mine.conf".bak-* 2>/dev/null | grep -qx "my own line"; then pass; else fail "the edits are in the copy beside it"; fi
+    rm -f "$TESTHOME/.config/mine.conf".bak-*
+    # A config kept when the shipped one was declined is the person's own: set aside, not deleted.
+    hb_before=$(ls "$TESTHOME/.config/hello.conf".bak-* 2>/dev/null)
+    tl install hello -y
+    expect_out "the config is kept at install" "kept your hello.conf"
+    tl remove hello -y
+    expect_out "remove sets the kept config aside" "kept your changed hello.conf as hello.conf.bak-"
+    hb_new=""
+    for hb_f in "$TESTHOME/.config/hello.conf".bak-*; do
+        printf '%s\n' "$hb_before" | grep -qxF "$hb_f" || hb_new="$hb_f"
+    done
+    expect_content "the copy holds the persons config" "$hb_new" "changed again"
+    mv "$hb_new" "$TESTHOME/.config/hello.conf"
+
+    # --- a bundle is removed in the reverse of its install order ---
+    tl install fishkit -y
+    expect_status "install a plugin bundle" 0
+    tl remove fishkit -y
+    expect_status "remove a plugin bundle" 0
+    if grep -q -- "-c fisher remove demo/three fisher=yes" "$ROOT/fish.log"; then pass; else fail "the plugins were removed while fisher.fish was still there"; fi
+    if printf '%s\n' "$OUT" | awk '/removed fishplugs/ { p = NR } /removed fishfn/ { f = NR } END { exit !(p && f && p < f) }'; then
+        pass
+    else
+        fail "the plugins go before the file they need" "$OUT"
+    fi
+    # fisher failing is said, and the remove still goes through.
+    tl install fishkit -y
+    touch "$ROOT/fish-fails"
+    tl remove fishkit -y
+    rm -f "$ROOT/fish-fails"
+    expect_status "a failing fisher does not fail the remove" 0
+    expect_out "a failing fisher is said" "fisher could not remove demo/three"
 
     # --- update ---
     # Put a config item back first, from the catalog the app ships, so the

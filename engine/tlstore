@@ -1605,19 +1605,42 @@ remove_item() {
     fi
     ri_kind=$(field "$ri_row" 2)
     ri_files=$(field "$ri_row" 5)
+    ri_digest=$(field "$ri_row" 7)
     if [ "$ri_kind" = fisher ]; then
         ri_item=$(row "$ri_name")
         if [ -n "$ri_item" ] && have fish; then
-            fish -c "fisher remove $(field "$ri_item" 5)" </dev/null >/dev/null 2>&1 || true
+            if ! fish -c "fisher remove $(field "$ri_item" 5)" </dev/null >/dev/null 2>&1; then
+                err "fisher could not remove $(field "$ri_item" 5); their files stay in ~/.config/fish"
+            fi
         fi
     fi
     for ri_f in $ri_files; do
+        # A config file that is no longer what tlstore wrote holds the person's
+        # edits (or is their own, kept when they declined ours): it is set
+        # aside beside the target rather than deleted. It is moved out of the
+        # .bak-* names first, so restore_backup puts back the file that was
+        # there before the install, not this one.
+        ri_edited=""
+        case "$ri_kind" in
+            file|file-once)
+                if [ -f "$ri_f" ] && [ -n "$ri_digest" ] && [ "$ri_digest" != "-" ] &&
+                    [ "$(file_digest "$ri_f")" != "$ri_digest" ]; then
+                    ri_edited="$(dirname "$ri_f")/.$(basename "$ri_f").edited.$$"
+                    mv "$ri_f" "$ri_edited" || return 1
+                fi
+                ;;
+        esac
         if [ -d "$ri_f" ]; then
             rm -rf "$ri_f"
         else
             rm -f "$ri_f"
         fi
         restore_backup "$ri_f" && say "  put your own $(basename "$ri_f") back"
+        if [ -n "$ri_edited" ]; then
+            ri_copy="$ri_f.bak-$(timestamp)"
+            mv "$ri_edited" "$ri_copy" || return 1
+            say "  kept your changed $(basename "$ri_f") as $(basename "$ri_copy")"
+        fi
     done
     state_forget "$ri_name"
     case "$ri_kind" in
@@ -3264,7 +3287,17 @@ dry_remove() {
             continue
         fi
         say "  $dr_n"
+        dr_digest=$(field "$dr_row" 7)
         for dr_f in $(field "$dr_row" 5); do
+            case "$(field "$dr_row" 2)" in
+                file|file-once)
+                    if [ -f "$dr_f" ] && [ -n "$dr_digest" ] && [ "$dr_digest" != "-" ] &&
+                        [ "$(file_digest "$dr_f")" != "$dr_digest" ]; then
+                        say "    $dr_f  (changed since it was installed; kept beside it as a .bak)"
+                        continue
+                    fi
+                    ;;
+            esac
             say "    $dr_f"
         done
     done
@@ -3390,6 +3423,20 @@ cmd_remove() {
             in_list "$cr_all" "$cr_m" || cr_all="$cr_all $cr_m"
         done
     done
+    # The reverse of the install order: what needs another item goes first,
+    # so fish-plugins is taken away while the fisher it needs is still there.
+    # Without a list (or with a retired name in it) the order stays as it is.
+    # shellcheck disable=SC2086  # a list of names, split on purpose
+    if [ -n "$CATALOG" ] && cr_plan=$(plan_for $cr_all 2>/dev/null); then
+        cr_order=""
+        for cr_n in $cr_plan; do
+            in_list "$cr_all" "$cr_n" && cr_order="$cr_n $cr_order"
+        done
+        for cr_n in $cr_all; do
+            in_list "$cr_order" "$cr_n" || cr_order="$cr_order $cr_n"
+        done
+        cr_all="$cr_order"
+    fi
 
     if [ "$DRY_RUN" = 1 ]; then
         dry_remove "$cr_all"
