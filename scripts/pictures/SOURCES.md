@@ -22,5 +22,9 @@ does not print black. `[0]` on the source file selects a GIF's first frame.)
 | `btop.jpg` | a frame of the same screen recording as `hero/btop.png`: this build of btop running on a phone through the privileged lane | btop is Apache-2.0 licensed; the screenshot is this repository's own |
 | `herdr.jpg` | `assets/screenshot.png` in [herdrdev/herdr](https://github.com/herdrdev/herdr) at `7b116c05bfda646af39d2524c54e70c751f57ee8` (tag `v0.9.3`), cropped to the terminal window (`-crop 1566x980+177+48` on the 1920x1080 original) before the usual conversion, since the desktop around it is wasted width on a phone | herdr is Apache-2.0 licensed |
 
-`fish-shell` has no picture: it is the launcher's own setup, not one upstream project, so there is
-no single README to take a hero image from.
+`fish-shell.jpg` is this repository's own: a screenshot of the store's prompt in the launcher's
+terminal on a phone, cropped to the terminal (`-crop 1036x648+22+712` on the 1080x2412 screen)
+before the usual conversion. `hero/fish-shell.png` is four such screenshots, one second each
+(home, a merge conflict, a repository with changes, a failed build), written straight to a
+four-frame APNG with `ffmpeg -framerate 1 -i f%d.png -vf scale=600:-2 -plays 0 -f apng`, since
+`scripts/make-hero.sh` would repeat each still twelve times a second.

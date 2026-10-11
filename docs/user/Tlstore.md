@@ -33,14 +33,13 @@ Ten items, and each one brings whatever it needs along with it.
 | `codex` | [Codex](https://github.com/openai/codex), OpenAI's coding agent for the terminal, as built for Android by [codex-termux](https://github.com/DioNanos/codex-termux). About 275 MB. |
 | `dawn` | A writing pad for the terminal: your markdown takes shape as you type, headings and all. |
 | `fastfetch` | System information beside an animated logo. It brings the layout; drop any GIF of yours at `~/Pictures/gif/skel.gif` and it plays there, otherwise you get text. |
-| `fish-shell` | The fish shell with the launcher's setup: the wallpaper prompt, `eza`, `zoxide`, and the plugins below. |
+| `fish-shell` | The fish shell with the launcher's setup: a Pure-style prompt with icons in your wallpaper's colours, `eza`, `zoxide`, and the plugins below. |
 | `kitten` | Kitty's companion tool, for showing images and sending files from the terminal. |
 | `opencode` | [opencode](https://opencode.ai), an open source coding agent for the terminal. About 200 MB. |
 | `sigye` | A clock for the terminal. |
 | `termux-api-shims` | The `termux-clipboard-get`, `termux-notification`, `termux-toast`, `termux-battery-status` and other Termux:API commands, working without the Termux:API app. See "The termux-api commands" below. |
 
-The wallpaper-matching oh-my-posh prompt theme and the Neovim colour scheme are set up from
-Settings › Look now, not from tlstore.
+The Neovim colour scheme is set up from Settings › Look, not from tlstore.
 
 Ask about any one of them first with `tlstore info <name>`.
 
@@ -141,8 +140,8 @@ ones it added and clear what it downloaded. Say no and they simply stay.
 ## The fish setup
 
 `tlstore install fish-shell` installs fish itself, the launcher's
-`config.fish`, a `conf.d/personal.fish` that is yours to edit, the `oh-my-posh` package, `eza`,
-`zoxide`, and [fisher](https://github.com/jorgebucaran/fisher) with two plugins:
+`config.fish`, a `conf.d/personal.fish` that is yours to edit, the store's prompt, `eza`, `zoxide`,
+and [fisher](https://github.com/jorgebucaran/fisher) with two plugins:
 
 - [`puffer-fish`](https://github.com/nickeb96/puffer-fish) — type `...` and get `../..`, and other
   small text expansions.
@@ -153,8 +152,14 @@ Fisher fetches those plugins from GitHub itself, so installing them needs a netw
 Keeping them current is fisher's job rather than tlstore's — `tlstore update` leaves them alone,
 and `fisher update` in a fish shell brings them forward.
 
-The wallpaper-matching prompt theme itself, and a matching Neovim colour scheme, come from
-Settings › Look's "Tools that follow the terminal colours" instead of tlstore.
+The prompt (`conf.d/launcher-prompt.fish`) is two lines in the style of
+[Pure](https://github.com/sindresorhus/pure): where you are and the state of its git repository,
+with icons from the launcher's bundled Nerd Font, then the `❯` you type at. It uses only the
+terminal's sixteen colours, which the launcher takes from the wallpaper, so it follows the
+wallpaper and **Terminal contrast** without any setup, and earlier prompts in the scrollback
+recolour with it. Each earlier prompt folds to its folder and the `❯`. The item's
+page in the store lists every part of the prompt and the `tl_prompt_*` settings you can put in
+`personal.fish`; defining your own `fish_prompt` there replaces it.
 
 ## The termux-api commands
 
@@ -352,7 +357,7 @@ under `recipes/cross` and `recipes/termux`; run one
 yourself to reproduce a binary and compare it against what tlstore installed.
 
 Everything else in the store is unmodified: `claude-code`, `opencode` and `codex` (the codex-termux package) come straight from npm,
-and the packages behind `fish-shell` (`fish`, `eza`, `zoxide`, `oh-my-posh`) come straight from Termux's
+and the packages behind `fish-shell` (`fish`, `eza`, `zoxide`) come straight from Termux's
 own package repository.
 
 ## For maintainers
