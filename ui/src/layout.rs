@@ -11,6 +11,13 @@ pub const BASE_ROWS: u16 = 26;
 /// [`PICTURE_MIN_ROWS`] (its rows go to the body instead).
 pub const PICTURE_MAX_ROWS: u16 = 12;
 pub const PICTURE_MIN_ROWS: u16 = 4;
+/// Rows the picture is kept ahead of the body: a long body (the Front list, a README) gives
+/// these up to the picture, as long as it keeps [`BODY_MIN_ROWS`]; the body scrolls, the
+/// picture does not. A target, not a threshold: a picture shorter than this by its
+/// own height still shows, down to [`PICTURE_MIN_ROWS`].
+pub const PICTURE_RESERVE_ROWS: u16 = 6;
+/// Rows the body keeps however much the picture wants.
+pub const BODY_MIN_ROWS: u16 = 4;
 
 /// Layout tier from the live grid height.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -19,7 +26,7 @@ pub enum Tier {
     Tall,
     /// 26–39 rows (the baseline): single-line rows.
     Base,
-    /// Under 26 rows: no picture, the name two rows tall.
+    /// Under 26 rows: the name two rows tall and no blank above the picture.
     Compact,
 }
 
@@ -104,9 +111,17 @@ fn below_masthead(t: Tier) -> u16 {
 /// its rows; Item and Installing: a first look at the body); `pic_rows` is `None` when the
 /// screen has no picture to show and otherwise the picture's own height in rows
 /// (`u16::MAX` when unknown). The picture takes what is spare after the fixed rows and the
-/// body, at most [`PICTURE_MAX_ROWS`] and its own height; under [`PICTURE_MIN_ROWS`] it is not
-/// drawn. Never panics on tiny grids (rects may be empty).
+/// body, and at least [`PICTURE_RESERVE_ROWS`] of the body's rows while the body keeps
+/// [`BODY_MIN_ROWS`] (see [`picture_rows`]); at most [`PICTURE_MAX_ROWS`] and its own height;
+/// under [`PICTURE_MIN_ROWS`] it is not drawn. Never panics on tiny grids (rects may be empty).
 pub fn header(cols: u16, rows: u16, body_need: u16, pic_rows: Option<u16>) -> Header {
+    header_keeping(cols, rows, body_need, BODY_MIN_ROWS, pic_rows)
+}
+
+/// [`header`] for a body that keeps at least `body_min` rows before the picture's reserve
+/// (Installing, which does not scroll, keeps all it needs: the picture only takes what is
+/// spare).
+pub fn header_keeping(cols: u16, rows: u16, body_need: u16, body_min: u16, pic_rows: Option<u16>) -> Header {
     let t = tier(cols, rows);
     let nar = narrow(cols);
     let g = gutter(cols);
@@ -114,12 +129,10 @@ pub fn header(cols: u16, rows: u16, body_need: u16, pic_rows: Option<u16>) -> He
     let line = |y: u16| y.min(rows.saturating_sub(1));
     let name_rows: u16 = if t == Tier::Compact { 2 } else { 3 };
 
-    let spare = rows.saturating_sub(fixed_rows(t) + 1 + body_need);
     let pic_h = match pic_rows {
-        Some(own) if t != Tier::Compact => spare.min(PICTURE_MAX_ROWS).min(own),
-        _ => 0,
+        Some(own) => picture_rows(rows.saturating_sub(fixed_rows(t) + 1), body_need, body_min, own),
+        None => 0,
     };
-    let pic_h = if pic_h >= PICTURE_MIN_ROWS { pic_h } else { 0 };
 
     let mut y = below_masthead(t);
     let picture = (pic_h > 0).then(|| {
@@ -151,6 +164,21 @@ pub fn header(cols: u16, rows: u16, body_need: u16, pic_rows: Option<u16>) -> He
         body,
         notice,
         keys,
+    }
+}
+
+/// The picture's rows when `room` rows are shared between the picture and the body (the
+/// blank under the picture already taken out): what the body leaves of what it wants, or the
+/// reserve when that is more and the body keeps `body_min`; clamped to the cap and the
+/// picture's own height, and 0 under [`PICTURE_MIN_ROWS`].
+fn picture_rows(room: u16, body_need: u16, body_min: u16, own: u16) -> u16 {
+    let spare = room.saturating_sub(body_need);
+    let reserve = PICTURE_RESERVE_ROWS.min(room.saturating_sub(body_min));
+    let h = spare.max(reserve).min(PICTURE_MAX_ROWS).min(own);
+    if h >= PICTURE_MIN_ROWS {
+        h
+    } else {
+        0
     }
 }
 
@@ -309,8 +337,9 @@ mod tests {
         assert_eq!(h.body.y, 3 + 6 + 1 + 3 + 3);
         // Spare rows the picture cannot use stay blank before the notice row.
         assert!(h.body.h > 7);
-        // Under four spare rows there is no picture and the body starts higher.
-        let h = header(53, 26, 12, Some(u16::MAX));
+        // A body that keeps what it needs leaves under four spare rows: no picture, and the
+        // body starts higher.
+        let h = header_keeping(53, 26, 12, 12, Some(u16::MAX));
         assert_eq!(h.picture, None);
         assert_eq!(h.name.y, 3);
         assert_eq!(h.body, Rect::new(2, 9, 49, 15));
@@ -319,8 +348,8 @@ mod tests {
     }
 
     #[test]
-    fn compact_has_no_picture_and_a_two_row_name() {
-        let h = header(40, 24, 7, Some(u16::MAX));
+    fn compact_has_a_two_row_name_and_no_blank_above_the_picture() {
+        let h = header(40, 24, 7, None);
         assert_eq!(h.tier, Tier::Compact);
         assert!(h.narrow && h.gutter == 1);
         assert_eq!(h.picture, None);
@@ -330,6 +359,57 @@ mod tests {
         assert_eq!(h.body, Rect::new(1, 7, 38, 15));
         assert_eq!(h.notice, 22);
         assert_eq!(h.keys, 23);
+        // With a picture: right under the masthead's two rows, a blank under it, then the name.
+        let h = header(40, 24, 7, Some(u16::MAX));
+        assert_eq!(h.picture, Some(Rect::new(1, 2, 38, 7)));
+        assert_eq!(h.name, Rect::new(1, 10, 38, 2));
+        assert_eq!(h.standfirst, 12);
+        assert_eq!(h.facts, 13);
+        assert_eq!(h.body, Rect::new(1, 15, 38, 7));
+        assert_eq!(h.notice, 22);
+    }
+
+    /// (picture rows, body rows) for a grid, a body need and the default body minimum.
+    fn split(cols: u16, rows: u16, need: u16) -> (u16, u16) {
+        let h = header(cols, rows, need, Some(u16::MAX));
+        (h.picture.map_or(0, |p| p.h), h.body.h)
+    }
+
+    #[test]
+    fn a_long_body_gives_the_picture_its_reserve() {
+        // Front with 30 items, then Item (a first look of 7 rows), at ordinary sizes.
+        assert_eq!(split(53, 26, 30), (PICTURE_RESERVE_ROWS, 8));
+        assert_eq!(split(53, 26, 7), (7, 7));
+        assert_eq!(split(80, 24, 30), (PICTURE_RESERVE_ROWS, 8));
+        assert_eq!(split(80, 24, 7), (7, 7));
+        assert_eq!(split(53, 40, 30 * 3 - 1), (PICTURE_RESERVE_ROWS, 22));
+        // Short grids: the body keeps its minimum, and under that the picture drops.
+        assert_eq!(split(53, 20, 30), (6, BODY_MIN_ROWS));
+        assert_eq!(split(53, 20, 7), (6, BODY_MIN_ROWS));
+        assert_eq!(split(53, 18, 30), (PICTURE_MIN_ROWS, BODY_MIN_ROWS));
+        assert_eq!(split(53, 16, 30), (0, 7));
+        assert_eq!(split(53, 16, 7), (0, 7));
+        // Spare rows past the reserve still go to the picture, up to the cap.
+        assert_eq!(split(53, 26, 3), (11, 3));
+        assert_eq!(split(53, 60, 30), (PICTURE_MAX_ROWS, 36));
+        // A picture shorter than the reserve keeps its own height, down to the minimum.
+        assert_eq!(header(53, 26, 30, Some(5)).picture.map(|p| p.h), Some(5));
+        assert_eq!(header(53, 26, 30, Some(3)).picture, None);
+        // A body that keeps all it needs (Installing) leaves the picture only what is spare.
+        assert_eq!(header_keeping(53, 22, 7, 7, Some(u16::MAX)).picture.map(|p| p.h), Some(5));
+        assert_eq!(header_keeping(53, 20, 7, 7, Some(u16::MAX)).picture, None);
+        assert_eq!(header_keeping(53, 20, 7, 7, Some(u16::MAX)).body.h, 11);
+    }
+
+    #[test]
+    fn no_picture_lays_out_whatever_the_body_needs() {
+        for (c, r) in [(53, 26), (53, 40), (80, 24), (53, 20), (53, 16), (40, 24)] {
+            let want = header(c, r, 7, None);
+            for need in [0, 1, 7, 30, 89] {
+                assert_eq!(header(c, r, need, None), want, "{c}x{r} need {need}");
+                assert_eq!(header_keeping(c, r, need, need, None), want, "{c}x{r} need {need}");
+            }
+        }
     }
 
     #[test]

@@ -1102,6 +1102,38 @@ fn no_picture_means_no_picture_rows_on_item() {
 }
 
 #[test]
+fn short_grids_keep_the_header_picture_its_reserve() {
+    // 53×20: the seven-row list gives up rows to a six-row picture and pages.
+    let mut h = H::new(53, 20, Opts { caps: true, ..Opts::default() });
+    let hdr = layout::header(53, 20, 7, Some(u16::MAX));
+    assert_eq!(hdr.picture.map(|p| (p.y, p.h)), Some((2, layout::PICTURE_RESERVE_ROWS)));
+    assert_eq!(hdr.body.h, layout::BODY_MIN_ROWS);
+    let scene = h.r().scene.clone();
+    assert!(scene.get(El::Picture).is_some_and(|e| e.picture.is_some() && e.rect.y == 2), "{}", h.text);
+    assert!(scene.get(El::Name).is_some_and(|e| e.rect.y == hdr.name.y), "{}", h.text);
+    assert!(h.has("‹ ● ○"), "the list pages:\n{}", h.text);
+    // A classic 80×24 terminal shows it too.
+    let mut h = H::new(80, 24, Opts { caps: true, ..Opts::default() });
+    let hdr = layout::header(80, 24, 7, Some(u16::MAX));
+    assert!(hdr.picture.is_some_and(|p| p.h >= layout::PICTURE_RESERVE_ROWS));
+    assert!(h.r().scene.get(El::Picture).is_some_and(|e| e.picture.is_some()), "{}", h.text);
+    // Installing does not scroll: at 53×20 it keeps its progress line and drops the picture.
+    let mut h = H::new(53, 20, Opts { caps: true, ..Opts::default() });
+    std::fs::write(h.dir.join("hold"), "").unwrap();
+    go_to(&mut h, "sigye");
+    h.key(Key::Char('i'));
+    h.pump(|r| r.st.job.as_ref().is_some_and(|j| j.pct >= 60));
+    h.settle();
+    let scene = h.r().scene.clone();
+    assert!(scene.get(El::Picture).is_none(), "{}", h.text);
+    let hdr = layout::header(53, 20, 7, None);
+    assert!(scene.get(El::Block(5)).is_some_and(|e| e.rect.y == hdr.body.y + 5), "{}", h.text);
+    h.key(Key::Char('x'));
+    h.settle();
+    std::fs::remove_file(h.dir.join("hold")).unwrap();
+}
+
+#[test]
 fn script_name_needs_a_known_cell_size() {
     let mut h = H::new(53, 26, Opts { caps: true, ..Opts::default() });
     h.ctx.cell_known = false;

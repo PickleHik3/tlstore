@@ -98,7 +98,7 @@ impl View for ItemView {
         }
         let readme = if setup { Readme::NoUpstream } else { st.readme(&self.name) };
 
-        let (hdr, pic) = header_for(p, st, &self.name, 7, !setup, false, true);
+        let (hdr, pic) = header_for(p, st, &self.name, 7, layout::BODY_MIN_ROWS, !setup, false, true);
         let state = st.job.as_ref().and_then(|j| {
             if j.running() && j.current.as_deref() == Some(self.name.as_str()) {
                 Some(j.verb.ing())

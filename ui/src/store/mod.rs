@@ -1218,11 +1218,15 @@ impl Store {
 /// in the header (nothing is asked for before that). With `animate` (and motion on), an APNG
 /// picture plays: the still is placed first and its frames follow in place
 /// (`Renderer::stream`). Every decode happens on the worker; a frame uses what is there.
+/// `body_need` and `body_min` are [`layout::header_keeping`]'s: a body that scrolls passes
+/// [`layout::BODY_MIN_ROWS`] and gives the picture its reserve.
+#[allow(clippy::too_many_arguments)]
 pub fn header_for(
     p: &mut Paint,
     st: &mut Store,
     name: &str,
     body_need: u16,
+    body_min: u16,
     readme_first: bool,
     reserve: bool,
     animate: bool,
@@ -1230,20 +1234,20 @@ pub fn header_for(
     let (cols, rows) = (p.f.cols(), p.f.rows());
     let (cw, ch) = p.cell();
     if name.is_empty() {
-        return (layout::header(cols, rows, body_need, None), None);
+        return (layout::header_keeping(cols, rows, body_need, body_min, None), None);
     }
     st.header_shown(name);
     if !p.f.ctx.caps.kitty_graphics {
-        return (layout::header(cols, rows, body_need, None), None);
+        return (layout::header_keeping(cols, rows, body_need, body_min, None), None);
     }
     let animate = animate && p.f.ctx.motion;
     let rested = st.header_rested(name, p.f.ctx.motion);
     let (path, pending) = st.header_picture_path(name, readme_first, animate, rested);
     let Some(path) = path else {
         let pic_rows = (pending || reserve).then_some(u16::MAX);
-        return (layout::header(cols, rows, body_need, pic_rows), None);
+        return (layout::header_keeping(cols, rows, body_need, body_min, pic_rows), None);
     };
-    let probe_hdr = layout::header(cols, rows, body_need, Some(u16::MAX));
+    let probe_hdr = layout::header_keeping(cols, rows, body_need, body_min, Some(u16::MAX));
     let box_w = probe_hdr.content.w as u32 * cw as u32;
     let box_h = PICTURE_MAX_ROWS as u32 * ch as u32;
     // The probe is a still: it only measures, and may never be placed.
@@ -1252,14 +1256,16 @@ pub fn header_for(
     let probe = match st.picture(&mut p.f.ctx.pics, probe_key) {
         Lookup::Have(pic) => pic,
         // Being decoded: its rows are kept so nothing jumps when it lands.
-        Lookup::Missing => return (layout::header(cols, rows, body_need, Some(u16::MAX)), None),
+        Lookup::Missing => {
+            return (layout::header_keeping(cols, rows, body_need, body_min, Some(u16::MAX)), None)
+        }
         Lookup::Failed => {
             let pic_rows = reserve.then_some(u16::MAX);
-            return (layout::header(cols, rows, body_need, pic_rows), None);
+            return (layout::header_keeping(cols, rows, body_need, body_min, pic_rows), None);
         }
     };
     let own_rows = if reserve { u16::MAX } else { probe.height().div_ceil(ch as u32).max(1) as u16 };
-    let hdr = layout::header(cols, rows, body_need, Some(own_rows));
+    let hdr = layout::header_keeping(cols, rows, body_need, body_min, Some(own_rows));
     let Some(r) = hdr.picture else { return (hdr, None) };
     if !rested {
         return (hdr, None);
