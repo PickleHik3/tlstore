@@ -6,8 +6,9 @@
 #   scripts/test.sh [shell...]
 #
 # With no arguments it runs the whole suite under every POSIX shell it can find
-# (sh, dash, busybox sh, bash --posix) — tlstore has to work under all of them,
-# and dash is what Termux's sh is. Name shells to run only those, e.g.
+# (sh, dash, busybox sh, mksh, bash --posix) — tlstore has to work under all of
+# them: dash is what Termux's sh is, and mksh is Android's /system/bin/sh, which
+# tlstore's shebang names. Name shells to run only those, e.g.
 #   scripts/test.sh /bin/dash "/path/to/busybox sh"
 #
 # Two knobs let the suite exercise phone-only code paths on a Linux host, and
@@ -3372,6 +3373,7 @@ else
     shells+=("/bin/sh")
     command -v dash >/dev/null 2>&1 && shells+=("$(command -v dash)")
     command -v busybox >/dev/null 2>&1 && shells+=("$(command -v busybox) sh")
+    command -v mksh >/dev/null 2>&1 && shells+=("$(command -v mksh)")
     shells+=("/bin/bash --posix")
 fi
 

@@ -49,7 +49,7 @@
 
 set -u
 
-TLSTORE_VERSION=0.13
+TLSTORE_VERSION=0.14
 
 # The store program that pairs with this script, one digest per processor.
 # Empty in the source tree: scripts/release.sh --prepare fills them in from
@@ -3854,10 +3854,10 @@ plan_build_update() {
             continue
         fi
         map_get "$bu_rows" "$bu_n"
-        bu_act="${mg_v%%|*}"
-        bu_rest="${mg_v#*|}"
-        bu_ver="${bu_rest%%|*}"
-        bu_code="${bu_rest#*|}"
+        bu_act="${mg_v%%"|"*}"
+        bu_rest="${mg_v#*"|"}"
+        bu_ver="${bu_rest%%"|"*}"
+        bu_code="${bu_rest#*"|"}"
         case "$bu_code" in
             latest) bu_why="$PLAN_LATEST" ;;
             pkg) bu_why="the package manager checks it" ;;
