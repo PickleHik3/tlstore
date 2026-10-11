@@ -203,7 +203,8 @@ impl Job {
         self.done.iter().any(|d| d.name == name && !d.ok)
     }
 
-    fn feed(&mut self, line: &str) {
+    /// Takes one progress line; returns the name it reported done ok.
+    fn feed(&mut self, line: &str) -> Option<String> {
         match parse_progress(line) {
             Some(Progress::Step { name, pct, words }) => {
                 if self.current.as_deref() != Some(&name) {
@@ -220,10 +221,12 @@ impl Job {
                     self.pct = 100;
                     self.step = STEPS.len();
                 }
-                self.done.push(Done { name, ok, message });
+                self.done.push(Done { name: name.clone(), ok, message });
+                return ok.then_some(name);
             }
             None => {}
         }
+        None
     }
 
     /// Plain sentences for the end of the job: what worked, what did not, kept files.
@@ -734,7 +737,7 @@ impl Store {
     }
 
     /// Reads whatever is behind `fd`: a task's output, or the decode worker's answers (which
-    /// go into `pics`). Returns true when the catalog was reloaded.
+    /// go into `pics`). Returns true when the catalog was reloaded or a job marked an item.
     pub fn on_readable(&mut self, fd: RawFd, pics: &mut Pictures) -> bool {
         if self.decoder.as_ref().is_some_and(|d| d.fd() == fd) {
             self.on_decoded(pics);
@@ -743,14 +746,19 @@ impl Store {
         if let Some(job) = self.job.as_mut() {
             if let Some(t) = job.task.as_mut().filter(|t| t.fd() == Some(fd)) {
                 let out = t.read();
+                // What is done shows at once; the snapshot after the job may take a while.
+                let mut marked = false;
                 for l in &out.lines {
-                    job.feed(l);
+                    if let Some(name) = job.feed(l).filter(|_| job.verb != Verb::SelfUpdate) {
+                        self.cat.mark(&name, job.verb != Verb::Remove);
+                        marked = true;
+                    }
                 }
                 if let Some(code) = out.exit {
                     job.exit = Some(code);
                     self.finish_job();
                 }
-                return false;
+                return marked;
             }
         }
         let Some(i) = self.tasks.iter().position(|t| t.fd() == Some(fd)) else { return false };

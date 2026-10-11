@@ -309,6 +309,18 @@ impl Catalog {
         self.loading = false;
     }
 
+    /// A job reported `name` done: the list says so at once (installed at the catalog's
+    /// version, or not at all; a removed item has no update either) until the snapshot that
+    /// follows the job tells the truth.
+    pub fn mark(&mut self, name: &str, installed: bool) {
+        if let Some(it) = self.items.iter_mut().find(|i| i.name == name) {
+            it.installed = installed.then(|| it.version.clone());
+        }
+        if !installed {
+            self.updates.retain(|u| u.name != name);
+        }
+    }
+
     /// The snapshot could not be read at all.
     pub fn fail(&mut self) {
         self.items.clear();

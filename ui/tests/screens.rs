@@ -865,6 +865,50 @@ fn install_from_item_then_esc_keeps_the_job_and_the_word() {
     std::fs::remove_file(h.dir.join("hold")).unwrap();
 }
 
+/// Presses `key` on the open item page while the snapshot after the job is held back, and
+/// comes back to the page once the job is over: the hold is still on when it is drawn.
+fn job_from_item_with_the_snapshot_held(h: &mut H, key: char) {
+    assert_eq!(h.r().top(), "item", "{}", h.text);
+    std::fs::write(h.dir.join("hold-snapshot"), "").unwrap();
+    h.key(Key::Char(key));
+    assert_eq!(h.r().top(), "installing", "{}", h.text);
+    h.pump(|r| !r.st.job_running());
+    assert!(!h.r().st.job_running(), "the job ended\n{}", h.text);
+    assert!(h.r().st.tasks_pending(), "the snapshot after the job is still out");
+    h.key(Key::Enter);
+    assert_eq!(h.r().top(), "item", "{}", h.text);
+}
+
+#[test]
+fn remove_from_item_shows_install_before_the_snapshot_lands() {
+    let mut h = H::new(53, 26, Opts::default());
+    open_item(&mut h, "kitten");
+    assert!(h.has("r remove") && h.has("u update"), "{}", h.text);
+    job_from_item_with_the_snapshot_held(&mut h, 'r');
+    let facts = layout::header(53, 26, 7, None).facts as usize;
+    assert!(!h.row(facts).contains("installed"), "{}", h.text);
+    assert!(h.has("i install") && !h.has("r remove") && !h.has("u update"), "{}", h.text);
+    std::fs::remove_file(h.dir.join("hold-snapshot")).unwrap();
+    h.settle();
+    assert!(!h.row(facts).contains("installed"), "the snapshot agrees\n{}", h.text);
+    assert!(h.has("i install") && !h.has("u update"), "{}", h.text);
+}
+
+#[test]
+fn install_from_item_shows_remove_before_the_snapshot_lands() {
+    let mut h = H::new(53, 26, Opts::default());
+    open_item(&mut h, "sigye");
+    assert!(h.has("i install"), "{}", h.text);
+    job_from_item_with_the_snapshot_held(&mut h, 'i');
+    let facts = layout::header(53, 26, 7, None).facts as usize;
+    assert!(h.row(facts).starts_with("  installed 0.6.0"), "{}", h.text);
+    assert!(h.has("r remove") && !h.has("i install"), "{}", h.text);
+    std::fs::remove_file(h.dir.join("hold-snapshot")).unwrap();
+    h.settle();
+    assert!(h.row(facts).starts_with("  installed 0.6.0"), "the snapshot agrees\n{}", h.text);
+    assert!(h.has("r remove"), "{}", h.text);
+}
+
 // ---------------------------------------------------------------------------
 // The store updating itself
 // ---------------------------------------------------------------------------
