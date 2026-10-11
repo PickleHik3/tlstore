@@ -4158,7 +4158,9 @@ plan_tsv() {
     for pt_line in $PLAN; do
         IFS="$pt_ifs"
         plan_split "$pt_line"
-        [ "$ps_action" = install ] && [ "$ps_kind" != pkg ] && [ "$ps_why" != "$PLAN_LATEST" ] || continue
+        [ "$ps_action" = install ] || continue
+        [ "$ps_kind" != pkg ] || continue
+        [ "$ps_why" != "$PLAN_LATEST" ] || continue
         is_installed "$ps_name" || continue
         pt_note=""
         [ "$ps_kind" = file ] && pt_note=config-asks
@@ -4168,7 +4170,8 @@ plan_tsv() {
     for pt_line in $PLAN; do
         IFS="$pt_ifs"
         plan_split "$pt_line"
-        [ "$ps_action" = install ] && [ "$ps_why" = "$PLAN_LATEST" ] || continue
+        [ "$ps_action" = install ] || continue
+        [ "$ps_why" = "$PLAN_LATEST" ] || continue
         printf '%s\t%s\t%s\t%s\n' "$ps_name" "$(installed_version "$ps_name")" "$ps_version" latest
     done
     IFS="$pt_ifs"
@@ -4242,7 +4245,8 @@ plan_packages() {
     for pp_line in $PLAN; do
         IFS="$pp_ifs"
         plan_split "$pp_line"
-        [ "$ps_action" = install ] && [ "$ps_kind" = pkg ] || continue
+        [ "$ps_action" = install ] || continue
+        [ "$ps_kind" = pkg ] || continue
         for pp_p in $(field "$(row "$ps_name")" 5); do
             if ! pkg_present "$pp_p"; then
                 pa_pkg_bad="$pa_pkg_bad $ps_name"
