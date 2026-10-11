@@ -23,8 +23,12 @@ does not print black. `[0]` on the source file selects a GIF's first frame.)
 | `herdr.jpg` | `assets/screenshot.png` in [herdrdev/herdr](https://github.com/herdrdev/herdr) at `7b116c05bfda646af39d2524c54e70c751f57ee8` (tag `v0.9.3`), cropped to the terminal window (`-crop 1566x980+177+48` on the 1920x1080 original) before the usual conversion, since the desktop around it is wasted width on a phone | herdr is Apache-2.0 licensed |
 
 `fish-shell.jpg` is this repository's own: a screenshot of the store's prompt in the launcher's
-terminal on a phone, cropped to the terminal (`-crop 1036x648+22+712` on the 1080x2412 screen)
-before the usual conversion. `hero/fish-shell.png` is four such screenshots, one second each
-(home, a merge conflict, a repository with changes, a failed build), written straight to a
-four-frame APNG with `ffmpeg -framerate 1 -i f%d.png -vf scale=600:-2 -plays 0 -f apng`, since
+terminal on a phone, in a demo repository with every state showing (changes of each kind, ahead
+and behind, a stash, a merge conflict), cropped to a band with the prompt at its top
+(`-crop 1036x324+22+478` on the 1080x2412 screen) before the usual conversion. The store fits a
+header picture to the terminal's width and crops its bottom, to at most twelve rows (about 3.2:1
+on a phone) and as few as four, so the prompt has to sit in the top quarter.
+`hero/fish-shell.png` is five such bands, one second each (home, a clean repository, one with
+changes, a failed build, the merge conflict), written straight to a five-frame APNG with
+`ffmpeg -framerate 1 -i k%d.png -vf scale=600:-2 -plays 0 -f apng`, since
 `scripts/make-hero.sh` would repeat each still twelve times a second.
