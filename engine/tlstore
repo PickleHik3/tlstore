@@ -49,7 +49,7 @@
 
 set -u
 
-TLSTORE_VERSION=0.12
+TLSTORE_VERSION=0.13
 
 # The store program that pairs with this script, one digest per processor.
 # Empty in the source tree: scripts/release.sh --prepare fills them in from
