@@ -49,7 +49,7 @@
 
 set -u
 
-TLSTORE_VERSION=0.12
+TLSTORE_VERSION=0.13
 
 # The store program that pairs with this script, one digest per processor.
 # Empty in the source tree: scripts/release.sh --prepare fills them in from
@@ -58,9 +58,9 @@ TLSTORE_VERSION=0.12
 # self_update, which reads them out of the downloaded copy, not this one).
 # Keep these two lines exactly in this shape.
 # shellcheck disable=SC2034
-TLSTORE_UI_SHA256_arm64_v8a=a10ffc577f0db0421ad3a6a697c464f39b413f9b43fa4b034c61d8aa45fa5bd8
+TLSTORE_UI_SHA256_arm64_v8a=5f8e54dd152907aba6399d37e8969f664678162783c0a1cb195876f872fb8a6f
 # shellcheck disable=SC2034
-TLSTORE_UI_SHA256_x86_64=306cf8e02dddb187e591399b7491ba7594c462bc428875c8bacbb0117d9d3da4
+TLSTORE_UI_SHA256_x86_64=06ee034da1e77e2bc3ac1eca299c05a487133a44330b0dd4e6f9cb6c6bbedf1b
 
 PREFIX="${TLSTORE_PREFIX:-${PREFIX:-${HOME%/files/home}/files/usr}}"
 HOME="${HOME:?tlstore needs HOME}"
