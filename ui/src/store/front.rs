@@ -3,7 +3,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::layout::{self, Tier, PICTURE_MIN_ROWS};
+use crate::layout::{self, Tier};
 use crate::picture::shapes;
 use crate::render::{text_width, Rect, Sizing, Style, Underline};
 use crate::term::{Event, Key, MouseKind};
@@ -172,14 +172,13 @@ impl View for Front {
         let tier = layout::tier(cols, rows);
         let tall = tier == Tier::Tall;
         let per_item = layout::item_rows(tier);
-        // The list asks for its rows, but leaves the picture its smallest height when it can.
+        // The list asks for its rows; the header keeps the picture its reserve (the list pages).
         let list_need = (list.len() as u16 * per_item).saturating_sub(u16::from(tall)).max(1);
-        let body_need = list_need.min(rows.saturating_sub(11 + PICTURE_MIN_ROWS)).max(1);
 
         // Header: the item under the cursor.
         let cur = list.get(self.cursor).cloned();
         let name = cur.as_ref().map(|i| i.name.clone()).unwrap_or_default();
-        let (hdr, pic) = header_for(p, st, &name, body_need, false, true, true);
+        let (hdr, pic) = header_for(p, st, &name, list_need, layout::BODY_MIN_ROWS, false, true, true);
         let info = if name.is_empty() { Info::default() } else { st.cat.info(&name).clone() };
         let state = st.job.as_ref().and_then(|j| {
             if j.running() && j.current.as_deref() == Some(name.as_str()) {

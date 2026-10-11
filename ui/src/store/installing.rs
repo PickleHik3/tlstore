@@ -82,8 +82,9 @@ impl View for Installing {
         } else {
             let setup = info.setup();
             let repo = info.upstream().map(str::to_string);
-            // The header picture stays a still here: nothing plays while the script works.
-            let (hdr, pic) = header_for(p, st, &name, 7, !setup, false, false);
+            // The header picture stays a still here: nothing plays while the script works. The
+            // body does not scroll, so it keeps its 7 rows: the picture takes only what is spare.
+            let (hdr, pic) = header_for(p, st, &name, 7, 7, !setup, false, false);
             let facts = st.facts(&name, state);
             (hdr, pic, info.standfirst(), repo, setup, facts)
         };
