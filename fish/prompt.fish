@@ -119,6 +119,8 @@ __tl_prompt_cwd
 # whatever the prompt already showed.
 function __tl_prompt_ran --on-event fish_postexec
     set -g __tlp_ran 1
+    # git init, clone or a removed .git can move the repository under the same folder.
+    string match -qr '^\s*git\b' -- $argv[1]; and set -e __tlp_where_pwd
 end
 function __tl_prompt_new --on-event fish_prompt
     if set -q __tlp_ran
@@ -139,12 +141,17 @@ function __tl_prompt_web -a url
     printf '%s' $url
 end
 
-# The git segment, or nothing outside a repository. Two git calls: where the repository is, then
-# one porcelain v2 status that carries the branch, its distance from upstream and the stash.
+# The git segment, or nothing outside a repository. Where the repository is only changes with the
+# folder (or a git command), so that is asked once per folder; each prompt then costs one porcelain
+# v2 status, which carries the branch, its distance from upstream and the stash.
 function __tl_prompt_git
-    set -l where (command git rev-parse --show-toplevel --absolute-git-dir 2>/dev/null); or return 1
-    set -l top $where[1]
-    set -l gitdir $where[2]
+    if test "$__tlp_where_pwd" != "$PWD"
+        set -g __tlp_where_pwd $PWD
+        set -g __tlp_where (command git rev-parse --show-toplevel --absolute-git-dir 2>/dev/null)
+    end
+    set -q __tlp_where[2]; or return 1
+    set -l top $__tlp_where[1]
+    set -l gitdir $__tlp_where[2]
 
     set -l args --no-optional-locks status --porcelain=v2 --branch --show-stash --ignore-submodules=dirty
     test "$tl_prompt_git_untracked" = 0; and set -a args --untracked-files=no
