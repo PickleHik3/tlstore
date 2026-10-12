@@ -18,7 +18,7 @@ NDK plus a sysroot assembled with `dpkg-deb -x`.
 | `build-btop.sh` | patched btop, fully static, for the launcher's Shizuku lane | NDK + GNU make |
 | `build-tl-priv.sh` | `tl-priv`, the lane's client (`tl-priv/tl-priv.c`), fully static | NDK |
 | `fetch-herdr.sh` | herdr, upstream's own static musl build, digest-pinned (not built) | curl |
-| `build-terminal-browser.sh` | terminal-browser as a `.tar.gz` app tree: upstream's JavaScript, `pixel.node` and `agent-browser` rebuilt for Android, Termux's `electron42` in place of upstream's Electron | rustup `<arch>-linux-android` + NDK, GNU tar |
+| `build-terminal-browser.sh` | terminal-browser as a `.tar.gz` app tree: upstream's JavaScript, `pixel.node` and `agent-browser` rebuilt for Android, Termux's `electron42` in place of upstream's Electron, plus `terminal-browser/launcher-terminal.js` (the launcher's panes for `--split`) | rustup `<arch>-linux-android` + NDK, GNU tar |
 
 `btop` and `tl-priv` are edition-agnostic: both are linked `-static` against the NDK's Bionic
 `libc.a`, have no interpreter, no `NEEDED` entries and no prefix baked in. They have to be — the
@@ -226,10 +226,10 @@ Device-verified 2026-08-16 on Pong (A065, Android 16), running inside the launch
 **terminal-browser**
 
 - The asset is a gzipped tar of the app root (`bin/`, `cli/`, `browser/`, `agent-browser/`,
-  `assets/`, `skills/`, `scripts/`, `electron/pixel`, `TLSTORE-BUILD`), not a single binary; the
-  catalog unpacks it and runs `bin/terminal-browser`. Names are sorted, every mtime is the pinned
-  commit's, owners are numeric 0 and gzip stores no name or time, so the same inputs give the same
-  archive.
+  `assets/`, `skills/`, `scripts/`, `electron/pixel`, `tlstore/`, `TLSTORE-BUILD`), not a single
+  binary; the catalog unpacks it and runs `bin/terminal-browser`. Names are sorted, every mtime is
+  the pinned commit's, owners are numeric 0 and gzip stores no name or time, so the same inputs give
+  the same archive.
 - Runs on Termux's `electron42` (42.x, x11 repository), not upstream's patched Electron 44, which is
   glibc. `electron/pixel` is a two-line script that execs `$PREFIX/lib/electron42/electron`.
 - `pixel.node` carries `0001-terminal-browser-pixel-android.patch`: no clipboard image paste (arboard

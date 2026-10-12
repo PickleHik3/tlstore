@@ -34,6 +34,21 @@ terminal-browser open ./report.html
 `terminal-browser ls` lists the browsers that are open, and `terminal-browser help` lists every
 command.
 
+## Agents
+
+A coding agent running in the launcher's terminal (Claude Code, Codex, ...) can open the browser
+in a pane beside itself and then drive it:
+
+```sh
+terminal-browser open --split right localhost:3000
+terminal-browser action -- snapshot
+```
+
+This needs **Let programs and agents control panes** turned on in the launcher's settings (it is
+on unless you turned it off). Where the pane goes and how big it is follow `--split` and `--size`
+when your launcher's pane API supports placing panes; on an older launcher, the pane layout
+decides. Quitting the browser closes its pane.
+
 ## Keys
 
 | Action | Keys |
