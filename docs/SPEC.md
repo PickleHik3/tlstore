@@ -51,7 +51,7 @@ Columns:
 | `digest` | sha256 hex of the downloaded file; `-` for pkg, bundle, npm-musl (npm's registry sha512 is the check) |
 | `target` | install path with `~`; `-` = default (`~/.local/bin/<name>` for binary, `~/.local/lib/tlstore/priv/<name>` for a binary with `priv=shizuku`, `~/.local/lib/<name>` for npm-musl and archive, none for others) |
 | `requires` | comma list of catalog names installed first; bundle members live here |
-| `options` | `;`-separated `key=value`: `env=K=V` (wrapper exports, repeatable with `,`), `tz=1` (wrapper exports TZ from `persist.sys.timezone`), `mode=755`, `post=<catalog script name>`, `priv=shizuku` (binary only; Revision 5 below), `x86_64:source=`, `x86_64:digest=`, `x86_64:target=` (the x86_64 build, standing in for `source`, `digest` and `target` on an x86_64 device; Revision 12 below) |
+| `options` | `;`-separated `key=value`: `env=K=V` (wrapper exports, repeatable with `,`), `tz=1` (wrapper exports TZ from `persist.sys.timezone`), `mode=755`, `post=<catalog script name>`, `priv=shizuku` (binary only; Revision 5 below), `x86_64:source=`, `x86_64:digest=`, `x86_64:target=` (the x86_64 build, standing in for `source`, `digest` and `target` on an x86_64 device; Revision 12 below), `pkg-size=`, `pkg-what=`, `repo=1` (large Termux packages, and a package that adds a package source; Revision 15 below) |
 | `summary` | one plain sentence, product copy |
 
 Rules: one row per (name, prefix set) — per-edition builds are separate rows with their own
@@ -909,3 +909,129 @@ here`, after fetching nothing and writing nothing. `scripts/test.sh` checks this
 too, so the guard is the one Revisions 10 and 12 use: `TLSTORE_VERSION` moves to 0.15, and the
 first archive row ships in the same store release as the engine, which tlstore-ui takes at launch
 and `tlstore update` offers.
+
+## Revision 15 — large Termux packages, said first; a package that adds a source (tlstore 0.16)
+
+terminal-browser (an archive, Revision 14) runs on Termux's `electron42` package, which lives in
+Termux's x11 repository. On a stock Termux that repository is off, so `pkg install electron42`
+fails, and once it is on, Electron and what it needs come to about 153 MB to download and 862 MB
+on disk. Both have to be handled before that item can ship honestly: the store says what it pulls
+in, and turns the repository on itself.
+
+### The catalog
+
+Three options, no new column. Revisions 10, 12 and 14 settled that an engine skips an `options`
+key it does not know, and that is all an older engine needs to do here (below). A new column
+would work too (an engine reads 30 fields and ignores more; `rows()` only needs 10), but
+`build-catalog.sh` and every fixture row are fixed at 30 columns, and `size` already means the
+item's own size, so the figures ride in options beside the other things the engine acts on.
+
+| option | meaning |
+|---|---|
+| `pkg-size=<download MB>,<disk MB>` | a visible item whose Termux packages (its own and its parts') are large: what they take on a stock Termux, in whole decimal MB. Computed, never guessed: `python3 -I scripts/pkg-weight.py <packages>` walks every dependency in Termux's main and x11 package indexes, leaves out what a fresh Termux has (everything marked `Essential: yes` and the bootstrap's few extras, with their dependencies), sums `Size` and `Installed-Size`, and prints the option. `build-catalog.sh` refuses anything but two whole numbers |
+| `pkg-what=<words>` | what those packages are, for the sentence below ("Termux's Electron and the libraries it needs"). Default `packages from Termux`. Refused without `pkg-size=` |
+| `repo=1` | a `pkg` item whose package adds a package source (`x11-repo`). Refused on any other kind |
+
+terminal-browser's parts are two hidden `pkg` rows, both `com.termux` only (Termux's repositories
+build for that prefix): `x11-repo` (`repo=1`) and `electron42`, which requires `x11-repo`. The
+terminal-browser row requires `electron42` and carries `pkg-size=153,862` and `pkg-what=`; it is
+added once `build.yml` has published its asset (`docs/maintainer/catalog.md` has it ready).
+
+### The threshold
+
+`WEIGH_ASK_MB=50`: more than 50 MB to download, or more than 50 MB on disk. Below it nothing in
+this Revision shows or asks anything, so installing ripgrep or fish is exactly as before.
+
+### What an item's page says
+
+`info --tsv` and the snapshot's `field` lines gain two keys for an item whose `pkg-size=` is over
+the threshold, and none otherwise:
+
+- `Packages`: `Also installs <pkg-what>: about <download> MB to download, <disk> MB on disk (less
+  if you already have some of them).`
+- `Packages-size`: `<download>,<disk>`.
+
+Plain `info` prints the sentence as a `Packages` line. tlstore-ui draws it at the top of the item
+page, above the README, while the item is not installed. An older tlstore-ui skips keys it does not
+know.
+
+### What an install says, and asks
+
+Before anything is installed, `plan_weigh` asks apt what this phone still needs for the plan's
+packages: the same list `plan_packages` will install (every `pkg` row's packages and the missing
+`build=` tools). It runs
+
+```
+LC_ALL=C apt-get install --print-uris --assume-no -q <packages>
+```
+
+and reads two lines: `Need to get <n> <unit>[/<total>] of archives.` (the first figure is what is
+not in apt's cache yet) and `After this operation, <n> <unit> of additional disk space will be
+used.` (`freed` counts as 0). apt 3's `Download size:` and `Space needed:` are read too. Units are
+apt's decimal `B`, `kB`, `MB`, `GB`. `--assume-no` alone is not enough: apt asks only when it
+would install more than the names it was given, and installs without asking otherwise.
+`--print-uris` stops it before any download or install in that case, so the question never
+changes anything. It is read-only, so the dry run says it too.
+
+| apt says | figures used |
+|---|---|
+| the two lines | apt's: `The packages this needs from Termux take <n> MB to download and <m> MB more on disk.` |
+| nothing to install, exit 0 | none: everything is here, nothing is said |
+| an error (a package it does not know: electron42 before the x11 source is read), or no apt (pacman) | the sum of the `pkg-size=` figures of the plan's install rows, said as the item page says it |
+| an error, and no row has `pkg-size=` | none: the install goes ahead without a figure |
+
+Over the threshold the line is said, then:
+
+- `install` asks its usual `Go ahead?`, which it always asks. `-y` and `TLSTORE_ASSUME_YES=1`
+  answer it, and with nobody there it reads no answer, which is yes, as before.
+- `update` asks nothing normally. Over the threshold it says the line and asks `Go ahead?` the same
+  way (`ask_yn`); no says `Nothing was updated.`.
+- `--progress` implies `-y`: the line goes to stderr with the rest of the narration, and stdout
+  stays the machine stream.
+
+tlstore-ui runs `install --progress`, which asks nothing, so the store asks itself: `i` on an item
+that is not installed and has `Packages-size` (from its page or from Front, alone or in a
+selection) puts `<download> MB download, <disk> MB on disk · press i again` on the notice row and
+starts nothing. The same `i` again installs; any other key or tap lets it go. The figures there are
+the catalog's: asking apt first would put a package-manager call in front of every install from
+the store. A confirm screen built on the plan is still for later (Revision 13).
+
+### A package that adds a package source
+
+`plan_packages` makes one package-manager call for the whole plan (Revision 13). With
+`x11-repo` and `electron42` in it, that call fails as a whole: apt resolves every name before it
+installs anything, and electron42 is in a source it has not read. So a `repo=1` row's packages that
+are not here yet go first, in a call of their own (`pkg install -y x11-repo`), then the lists are
+read again (`apt-get update`; on pacman the next call's `-Sy` does it), then the rest as before.
+`pkg` alone would not do it: it refreshes only when its main list is old, which a source added a
+moment ago never is.
+
+The flag is on the row, not found by watching `$PREFIX/etc/apt/sources.list.d` for a new file: the
+split has to be known before the first call, and only the catalog knows that in advance. A file
+appearing afterwards could trigger the refresh, but the electron42 in the same call would already
+have failed. The flag also costs nothing when the package is already there: no separate call, no
+refresh.
+
+When the first call or the refresh fails, the rows that need the source cannot be had, so the rest
+of the call leaves out the `repo=1` rows' packages and those of rows that require one of them; the
+others install as usual. Then, as always, a `pkg` row whose packages are not all present fails
+(`the package manager could not install x11-repo`), and what needs it is skipped (`needs
+electron42, which did not install`).
+
+### Older engines
+
+An engine older than 0.16 skips all three options. It lists the rows as before (`x11-repo` and
+`electron42` are hidden parts), shows no `Packages` line, asks nothing more, and installs items
+without large packages exactly as before. Installing terminal-browser makes its one call with
+`x11-repo electron42` together; apt refuses it, nothing is installed, and the rows end failed and
+skipped. 0.13 (what phones run before 0.15) refuses the archive anyway. Nothing is written in
+either case. `scripts/test-weight.sh` checks this against the `dev` branch's `dist/tlstore` and
+`engine/tlstore`. As in Revisions 10, 12 and 14, `TLSTORE_VERSION` moves to 0.16 and the
+terminal-browser row ships in the same store release as the engine.
+
+Tests: `scripts/test-weight.sh` (also run by `scripts/test.sh`) covers the parse (apt 2 and 3,
+kB/MB/GB, `0 B`, freed, nothing to install, an error), the threshold, the question and its answers
+under `-y`, the dry run and `--progress`, the call order with a fake package manager and with a
+faked `pm_run`, a failing `x11-repo`, pacman, `update`, the `info`/snapshot fields, the
+`build-catalog.sh` checks and round trip, and the older engines. `ui/tests/screens.rs` covers the
+page line and the second `i`.
