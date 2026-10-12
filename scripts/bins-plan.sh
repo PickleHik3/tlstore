@@ -28,6 +28,7 @@ tl-priv      -                     tl-priv
 kitten       -                     kitten
 sigye        -                     sigye
 herdr        -                     herdr
+terminal-browser -                 terminal-browser
 fastfetch    com.termux,io.vaj.tl  -
 dawn         com.termux,io.vaj.tl  -
 musl-loader  com.termux,io.vaj.tl  -

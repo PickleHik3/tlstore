@@ -27,7 +27,7 @@ on:
   workflow_dispatch:
     inputs:
       tools:
-        description: "Tools to build: all, or a comma list of btop, tl-priv, kitten, sigye, herdr, fastfetch, dawn, musl-loader, musl-runtime"
+        description: "Tools to build: all, or a comma list of btop, tl-priv, kitten, sigye, herdr, terminal-browser, fastfetch, dawn, musl-loader, musl-runtime"
         required: false
         default: "all"
 
@@ -87,8 +87,9 @@ jobs:
           go-version: stable
           cache: false
 
+      # sigye and terminal-browser (its pixel.node and agent-browser) are Rust, built with the NDK.
       - name: Rust target
-        if: matrix.tool == 'sigye'
+        if: matrix.tool == 'sigye' || matrix.tool == 'terminal-browser'
         run: |
           rustup update stable
           rustup target add ${{ matrix.arch }}-linux-android

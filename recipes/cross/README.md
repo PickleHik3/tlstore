@@ -18,6 +18,7 @@ NDK plus a sysroot assembled with `dpkg-deb -x`.
 | `build-btop.sh` | patched btop, fully static, for the launcher's Shizuku lane | NDK + GNU make |
 | `build-tl-priv.sh` | `tl-priv`, the lane's client (`tl-priv/tl-priv.c`), fully static | NDK |
 | `fetch-herdr.sh` | herdr, upstream's own static musl build, digest-pinned (not built) | curl |
+| `build-terminal-browser.sh` | terminal-browser as a `.tar.gz` app tree: upstream's JavaScript, `pixel.node` and `agent-browser` rebuilt for Android, Termux's `electron42` in place of upstream's Electron | rustup `<arch>-linux-android` + NDK, GNU tar |
 
 `btop` and `tl-priv` are edition-agnostic: both are linked `-static` against the NDK's Bionic
 `libc.a`, have no interpreter, no `NEEDED` entries and no prefix baked in. They have to be — the
@@ -106,7 +107,9 @@ row per edition and picks between them by `$PREFIX`, skipping the item with a bu
 prefix nothing is published for.
 
 `sigye`, `kitten` and `herdr` are prefix-independent — no `RUNPATH`, no absolute prefix anywhere in either
-binary — so one build of each serves every edition.
+binary — so one build of each serves every edition. So is `terminal-browser`: its two native pieces
+have no `RUNPATH` either, and `electron/pixel` finds Termux's Electron through `$PREFIX` at run
+time (falling back to `com.termux`'s prefix only when it is unset).
 
 ## Why `kitten` is here and not in `../termux`
 
@@ -219,6 +222,32 @@ Device-verified 2026-08-16 on Pong (A065, Android 16), running inside the launch
   process list); all four fit from 29 rows, and `p` steps past presets that do not fit instead of
   stopping at a size error. The process detail pane needs a proc box at least 16 rows tall. An
   existing config file's `shown_boxes` and `presets` are honoured as before.
+
+**terminal-browser**
+
+- The asset is a gzipped tar of the app root (`bin/`, `cli/`, `browser/`, `agent-browser/`,
+  `assets/`, `skills/`, `scripts/`, `electron/pixel`, `TLSTORE-BUILD`), not a single binary; the
+  catalog unpacks it and runs `bin/terminal-browser`. Names are sorted, every mtime is the pinned
+  commit's, owners are numeric 0 and gzip stores no name or time, so the same inputs give the same
+  archive.
+- Runs on Termux's `electron42` (42.x, x11 repository), not upstream's patched Electron 44, which is
+  glibc. `electron/pixel` is a two-line script that execs `$PREFIX/lib/electron42/electron`.
+- `pixel.node` carries `0001-terminal-browser-pixel-android.patch`: no clipboard image paste (arboard
+  has no Android backend) and no POSIX shared memory (the frame transport probe falls back to file
+  frames, which the launcher's terminal supports). libc++ is linked statically; the recipe fails if
+  either native piece needs a library a phone does not have, or leaves a symbol undefined other
+  than the `napi_*` ones Electron provides.
+- `agent-browser` (what `terminal-browser action` runs) carries
+  `0002-terminal-browser-agent-browser-android.patch`. Rust's `target_os` is `android` here, not
+  `linux`, so agent-browser takes the fallbacks upstream wrote for other systems; the patch adds
+  the one it forgot (a Playwright cache path).
+- Both Rust builds use the stable toolchain, not the 1.93.1 `pixel/engine/rust-toolchain.toml`
+  names.
+- `terminal-browser upgrade` is refused by the launcher script (it would install upstream's glibc
+  build), and telemetry is off unless `TERMINAL_BROWSER_NO_TELEMETRY` or `DO_NOT_TRACK` is set.
+  It also points `XDG_RUNTIME_DIR` at the app's cache directory (agent-browser refuses socket
+  paths over 103 bytes, which `~/.local/state` and `$TMPDIR` both exceed) and unsets `DISPLAY` and
+  `WAYLAND_DISPLAY`, so Chromium always takes the headless ozone platform.
 
 **kitten**
 
