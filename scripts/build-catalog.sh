@@ -219,6 +219,29 @@ while IFS=$'\t' read -r name kind version prefixes source target requires option
                 ;;
         esac
     fi
+    # Revision 15: pkg-size=<download MB>,<disk MB> is what scripts/pkg-weight.py prints for the
+    # item's Termux packages, pkg-what= names them for the sentence and means nothing without it,
+    # and repo=1 marks a pkg item whose package adds a package source.
+    pkg_size="$(optval "$options" pkg-size)"
+    if [ -n "$pkg_size" ] && ! [[ "$pkg_size" =~ ^(0|[1-9][0-9]*),(0|[1-9][0-9]*)$ ]]; then
+        echo "$name: pkg-size= is <download MB>,<disk MB> in whole numbers, as scripts/pkg-weight.py prints it" >&2
+        failed=1
+        continue
+    fi
+    if [ -z "$pkg_size" ] && [ -n "$(optval "$options" pkg-what)" ]; then
+        echo "$name: pkg-what= names what pkg-size= weighs, and there is no pkg-size=" >&2
+        failed=1
+        continue
+    fi
+    case ";$options;" in
+        *";repo="*)
+            if [ "$kind" != pkg ] || [ "$(optval "$options" repo)" != 1 ]; then
+                echo "$name: repo=1 is only for a pkg item whose package adds a package source" >&2
+                failed=1
+                continue
+            fi
+            ;;
+    esac
     # priv=shizuku means "a binary the launcher runs as the Shizuku shell user";
     # the engine only honours it on a binary, so anything else is a mistake here.
     case ";$options;" in
