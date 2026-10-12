@@ -4,7 +4,8 @@
 #
 #   ./build-asset.sh <tool> [edition]
 #
-#   tool      btop | tl-priv | kitten | sigye | herdr | fastfetch | dawn | musl-loader | musl-runtime
+#   tool      btop | tl-priv | kitten | sigye | herdr | terminal-browser | fastfetch | dawn |
+#             musl-loader | musl-runtime
 #   edition   com.termux (default) | io.vaj.tl — only for fastfetch, dawn and musl-loader, the
 #             three whose binary carries the edition's prefix (README.md, "One build per
 #             launcher edition"); the others build once for every edition
@@ -174,6 +175,12 @@ case "$tool" in
         # Not built: upstream's static Linux binary, checked against its pinned digest.
         "$SCRIPT_DIR/fetch-herdr.sh"
         cp "$TL_OUT/herdr" "$TL_ASSETS/$asset"
+        ;;
+    terminal-browser)
+        # A .tar.gz of the app tree: upstream's JavaScript, pixel.node and agent-browser rebuilt
+        # for Android, Termux's electron42 in place of upstream's Electron.
+        "$SCRIPT_DIR/build-terminal-browser.sh"
+        cp "$TL_OUT/terminal-browser" "$TL_ASSETS/$asset"
         ;;
     fastfetch)
         sysroot

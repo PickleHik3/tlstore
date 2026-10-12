@@ -30,5 +30,10 @@ Notes:
   desktop install (badges, a video, install commands). It is written for this store from that
   list and herdr's quick-start docs (`herdrdev/herdr@7b116c05bfda646af39d2524c54e70c751f57ee8`,
   tag `v0.9.3`, Apache-2.0), with what was verified on a phone, so it has no pinned line either.
+- `terminal-browser.md` is not a copy of upstream's README: that one is a desktop install page
+  (a video, curl and Homebrew installs, macOS shortcuts, `upgrade`). It is written for this store
+  from that README and the CLI's own help (`zenbu-labs/terminal-browser@fd5f1798b128cd71508aa534ddbf67caf05ec0b8`,
+  tag `v0.13.4`, MIT), with what was verified on a phone and what this build changes
+  (`recipes/cross/build-terminal-browser.sh`), so it has no pinned line either.
 - `termux-api-shims.md` is not fetched from upstream: it is written for this store, so it has no
   `<!-- tlstore: pinned from ... -->` line and no relative images to resolve.
