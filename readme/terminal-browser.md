@@ -66,8 +66,10 @@ decides. Quitting the browser closes its pane.
 
 ## Good to know
 
-- It runs on Termux's `electron42` package, from the x11 repository, which the store installs
-  alongside it. Together they take about 400 MB.
+- It runs on Termux's `electron42` package, from Termux's x11 repository. The store turns that
+  repository on for you (it installs Termux's `x11-repo` package) and installs Electron and the
+  libraries it needs alongside the browser: on a fresh Termux that is about 153 MB to download
+  and 862 MB on disk, less if you already have some of them. The browser itself is about 13 MB.
 - This build runs on Electron 42, not the Electron 44 upstream ships with its desktop builds.
 - Pasting an image from the clipboard into a page does not work on Android; pasting text does.
 - Telemetry is off in this build. Upstream sends anonymous usage events and crash reports; to send

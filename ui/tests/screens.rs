@@ -775,6 +775,43 @@ fn item_keys_star_repo_and_jobs() {
     assert!(!h.has("u update"), "no update left: the slot is empty\n{}", h.text);
 }
 
+/// Revision 15: an item whose Termux packages are large says so on its page, and installing
+/// it takes a second `i`, from its page or from Front; any other key in between lets it go.
+#[test]
+fn large_termux_packages_are_said_first_and_install_takes_a_second_i() {
+    let mut h = H::new(53, 26, Opts::default());
+    open_item(&mut h, "opencode");
+    assert!(h.has("Also installs a large runtime from Termux"), "{}", h.text);
+    h.key(Key::Char('i'));
+    assert_eq!(h.r().top(), "item", "the first i holds the install\n{}", h.text);
+    assert!(h.has("153 MB download, 862 MB on disk"), "{}", h.text);
+    assert!(!h.log("calls.log").contains("install --progress"), "{}", h.log("calls.log"));
+    h.key(Key::Down);
+    h.key(Key::Char('i'));
+    assert_eq!(h.r().top(), "item", "another key in between lets the hold go\n{}", h.text);
+    h.key(Key::Char('i'));
+    assert_eq!(h.r().top(), "installing", "{}", h.text);
+    h.settle();
+    assert!(h.log("calls.log").lines().any(|l| l == "install --progress opencode"), "{}", h.log("calls.log"));
+
+    let mut h = H::new(53, 26, Opts::default());
+    go_to(&mut h, "opencode");
+    h.key(Key::Char('i'));
+    assert_eq!(h.r().top(), "front", "{}", h.text);
+    assert!(h.has("press i again"), "{}", h.text);
+    h.key(Key::Char('i'));
+    assert_eq!(h.r().top(), "installing", "{}", h.text);
+    h.settle();
+
+    // Nothing changes for an item without the line.
+    let mut h = H::new(53, 26, Opts::default());
+    open_item(&mut h, "sigye");
+    assert!(!h.has("Also installs"), "{}", h.text);
+    h.key(Key::Char('i'));
+    assert_eq!(h.r().top(), "installing", "{}", h.text);
+    h.settle();
+}
+
 #[test]
 fn item_star_with_gh_signed_out_shows_the_notice() {
     let mut h = H::new(53, 26, Opts { gh: Gh::SignedOut, ..Opts::default() });

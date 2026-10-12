@@ -21,6 +21,7 @@ in the launcher builds or signs any of this.
 | Trusted key (source) | `engine/trusted.pub` | the maintainer's minisign public key |
 | Store UI (Rust) | `ui/` | `scripts/build-ui.sh --install` after any `src/` change |
 | Pictures | `scripts/pictures/<name>.jpg` + `SOURCES.md` | you, with the conversion in `SOURCES.md` |
+| Termux package sizes | `scripts/pkg-weight.py` | prints an item's `pkg-size=` (see "Items that pull in large Termux packages") |
 | Release outputs (built, signed) | `dist/{tlstore,tlstore.minisig,catalog.tsv,catalog.tsv.minisig,trusted.pub,tlstore-ui-arm64-v8a,tlstore-ui-x86_64}` | `scripts/release.sh <tag>` — never hand-edited |
 | Binaries the catalog installs | GitHub Release assets of this repository (`bins-…` prereleases), digests in `SHA256SUMS` | `.github/workflows/build.yml` builds them with `recipes/cross` and records them (`scripts/bins-record.sh`) |
 | Launcher-side install | `app/src/main/java/com/termux/app/store/TlstoreInstaller.java` in `PickleHik3/termux-launcher` | writes script, catalog, key and UI binary into `$PREFIX` when the APK changes, from a pinned tag's `dist/`; from then on `tlstore` keeps itself and the UI current from the latest store release |
@@ -263,6 +264,53 @@ in whole and writes `~/.local/bin/<command>`, which execs `<dir>/<exe> "$@"`. Th
 store's: an update replaces it whole, and a change made inside it is lost. Settings belong
 outside it. An engine older than 0.15 lists an archive item but refuses to install it, so the first
 archive row ships in the same release as engine 0.15.
+
+## Items that pull in large Termux packages
+
+An item whose Termux packages are large says so before it is installed (`docs/SPEC.md`,
+Revision 15): its page shows "Also installs …: about N MB to download, M MB on disk (less if you
+already have some of them).", and `install` says what apt still needs on that phone before it asks
+to go ahead. Both happen only above 50 MB of either; below that nothing changes.
+
+1. **Compute the figures** for the packages the item pulls in, its own and its parts':
+   ```sh
+   python3 -I scripts/pkg-weight.py x11-repo electron42
+   # 89 packages beyond a stock Termux: 152.5 MB to download, 862.3 MB on disk
+   # largest on disk: electron42 414 MB, libllvm 174 MB, gtk3 32 MB, ...
+   # pkg-size=153,862
+   ```
+   It reads Termux's main and x11 package indexes for aarch64 (`--arch x86_64` for the other
+   build), follows every dependency, and leaves out what a fresh Termux has. `--index FILE` reads
+   saved `Packages` files instead of the mirror; `--have a,b` counts more packages as already
+   there. Never write the figures by hand, and recompute them when the packages move on.
+2. **Put them on the visible item**: `pkg-size=<download MB>,<disk MB>` exactly as printed, and
+   `pkg-what=<words>` for the sentence (default "packages from Termux"). `build-catalog.sh` refuses
+   anything but two whole numbers, and a `pkg-what=` with no `pkg-size=`.
+3. **A package from a repository a stock Termux does not have on** gets a hidden `pkg` part for
+   the package that turns it on, with `repo=1`, and the part that needs it requires that one. The
+   engine installs a `repo=1` package in a call of its own and reads the package lists again before
+   the rest; without the flag, the plan's one call would fail on the package apt has not seen yet.
+   `x11-repo` is the one in use (`root-repo` would be the next). Keep both parts `com.termux`
+   unless the other edition's own repository has the packages.
+
+### terminal-browser's row, ready to paste
+
+`x11-repo` and `electron42` are already in `scripts/items.tsv`. terminal-browser's own row waits
+for its first `bins-…` build: run `gh workflow run build.yml -f tools=terminal-browser`, let
+`bins-record.sh` record the `terminal-browser-aarch64` (and `-x86_64`) lines, then paste this row
+after `sigye` in the visible block, putting the new tag in place of `<bins-tag>` and, in the
+`readme` column, the commit (or tag) that has this readme in place of `<readme-ref>`. The digests
+come from `SHA256SUMS` through `build-catalog.sh`, as always. Add it to the list of visible
+items in `items.tsv`'s header comment too.
+
+```
+terminal-browser	archive	0.13.4+fd5f179.1	com.termux	binaries:terminal-browser@<bins-tag>	-	electron42	exe=bin/terminal-browser;host=launcher;pkg-size=153,862;pkg-what=Termux's Electron and the libraries it needs	A real web browser in the terminal, with whole pages drawn beside your shell and your agents.	Tools	zenbu-labs/terminal-browser	0	a web browser that lives in the terminal	Shows whole web pages in the terminal	Follows taps, swipes and typing	Lets coding agents drive the same page	terminal-browser open en.wikipedia.org	-	zenbu-labs	MIT	-	binaries:scripts/pictures/terminal-browser.jpg@7b29f6fd116d9a2452900e8e916c870808a8527c	-	0	-	binaries:readme/terminal-browser.md@<readme-ref>
+```
+
+The columns are tab-separated in `items.tsv`; check they survive the paste
+(`awk -F'\t' '$1=="terminal-browser" { print NF }' scripts/items.tsv` prints 26). The row
+ships in the same store release as tlstore 0.16, which knows `repo=1`: tlstore 0.15 would try
+`x11-repo electron42` in one call and fail (cleanly, writing nothing), and 0.13 refuses an archive.
 
 ## Pinning a readme or a hero picture
 

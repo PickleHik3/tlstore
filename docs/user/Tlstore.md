@@ -137,6 +137,34 @@ item:
 Tlstore installs those for you, and once everything is in place it offers to take back exactly the
 ones it added and clear what it downloaded. Say no and they simply stay.
 
+## Items that bring large packages with them
+
+A few items need big packages from Termux. terminal-browser, for one, runs on Termux's Electron,
+which with the libraries it needs comes to about 153 MB to download and 862 MB on disk on a fresh
+Termux. The store tells you before anything is installed, whenever the packages come to more than
+50 MB:
+
+- the item's page in the store says what it also installs, and pressing `i` once shows the two
+  figures; press `i` again to install, or anything else to leave it;
+- `tlstore install` asks the package manager what your phone is still missing and says so before
+  its usual "Go ahead?":
+
+  ```
+  $ tlstore install terminal-browser
+  Installing: x11-repo, electron42, terminal-browser
+  The packages this needs from Termux take 150 MB to download and 860 MB more on disk.
+  Go ahead? [Y/n]
+  ```
+
+  When it cannot ask (the packages come from a repository that is not turned on yet) it shows the
+  store's own figures for a fresh Termux instead, which are smaller when you already have some of
+  them;
+- `tlstore update` asks the same way when an update needs that much, and otherwise asks nothing.
+
+Electron comes from Termux's x11 repository, which a fresh Termux does not have turned on. The
+store turns it on for you by installing Termux's `x11-repo` package first, then reads the package
+lists again so Electron can be found.
+
 ## The fish setup
 
 `tlstore install fish-shell` installs fish itself, the launcher's

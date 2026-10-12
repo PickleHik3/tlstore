@@ -3973,6 +3973,20 @@ else
     FAIL=$((FAIL + 1)); FAILED_NAMES+=("test-install.sh did not finish")
 fi
 
+# Revision 15 (what large Termux packages take, and a package that adds a package source) has a
+# file of its own, so it can run alone: scripts/test-weight.sh [shell...].
+echo "== package sizes and sources (scripts/test-weight.sh)"
+tw_out="$("$repo/scripts/test-weight.sh" "$@" 2>&1)"
+echo "$tw_out" | sed 's/^/   /' | tail -3
+tw_line="$(echo "$tw_out" | grep '^passed ' | tail -1)"
+if [ -n "$tw_line" ]; then
+    read -r _ tw_p _ tw_f _ tw_s <<<"${tw_line//,/}"
+    PASS=$((PASS + tw_p)); FAIL=$((FAIL + tw_f)); SKIP=$((SKIP + tw_s))
+    [ "$tw_f" = 0 ] || FAILED_NAMES+=("test-weight.sh")
+else
+    FAIL=$((FAIL + 1)); FAILED_NAMES+=("test-weight.sh did not finish")
+fi
+
 echo
 if command -v shellcheck >/dev/null 2>&1; then
     echo "== shellcheck -s sh"

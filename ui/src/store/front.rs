@@ -104,6 +104,9 @@ impl Front {
                 Some(if verb == Verb::Install { "Already installed." } else { "Not installed." }.into());
             return Go::Stay;
         }
+        if verb == Verb::Install && !st.confirm_install(&names) {
+            return Go::Stay;
+        }
         if st.start_job(verb, names) {
             self.sel.clear();
             Go::Push(Box::new(Installing::new()))
