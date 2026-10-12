@@ -39,3 +39,6 @@ and a catalog that has the terminal-browser row from `docs/maintainer/catalog.md
    disk · press i again" on the notice row and starts nothing; a second `i` installs; any other
    key or tap in between lets it go. The notice fits at the phone's usual width (47 columns).
 10. The same from Front, on terminal-browser's row and with it selected among other items.
+11. On an io.vaj.tl phone: x11-repo and electron42 (com.termux only) have no row, so
+    terminal-browser, once its row is in, is not installable there; check whether that edition's
+    own repository has electron42 before widening them.

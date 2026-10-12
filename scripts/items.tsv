@@ -66,7 +66,19 @@
 #           item is not offered on x86_64. docs/SPEC.md, Revision 12),
 #           login-shell=<shell> (bundle only: after the members are in, chsh -s
 #           <shell> makes it the shell new sessions start in; remove takes the
-#           ~/.termux/shell link away again while it still points at that shell)
+#           ~/.termux/shell link away again while it still points at that shell),
+#           pkg-size=<download MB>,<disk MB> (a visible item whose Termux
+#           packages, its own and its parts', are large: what they take on a
+#           stock Termux, as scripts/pkg-weight.py prints it, never guessed.
+#           Over 50 MB of either, its page says so before install and install
+#           says so before it asks, when apt cannot say more. docs/SPEC.md,
+#           Revision 15),
+#           pkg-what=<words> (what those packages are, for that sentence:
+#           "Also installs <words>: about …"; default "packages from Termux"),
+#           repo=1 (pkg only: its package adds a package source, as x11-repo
+#           does. It is installed in a call of its own and the package lists
+#           are read again before the rest, which may come from that source;
+#           what comes from it requires this item)
 # summary   one plain sentence — it is what list and search show the user
 #
 # tlstore-ui (Revision 5) reads the rest through `tlstore info --tsv`/`list
@@ -134,6 +146,12 @@ oh-my-posh	pkg	-	*	oh-my-posh	-	-	hidden=1	The prompt oh-my-posh draws.	-	-	0	-	
 personal-fish	file-once	v0.2.39	*	launcher:docs/en/examples/conf.d-personal.fish@v0.2.39	~/.config/fish/conf.d/personal.fish	fish	hidden=1	A place for your own fish settings, left alone once it is there.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
 ripgrep	pkg	-	*	ripgrep	-	-	hidden=1	The fast code search opencode and codex use to find text in files.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
 zoxide	pkg	-	*	zoxide	-	-	hidden=1	Jump to the directories you use most by name.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
+# x11-repo and electron42 are terminal-browser's parts: Termux's electron42 lives in the x11
+# repository, which a stock Termux does not have turned on. terminal-browser's own row lands
+# once build.yml has published its bins-… asset (docs/maintainer/catalog.md has it ready to
+# paste). com.termux only: Termux's repositories build for that prefix.
+x11-repo	pkg	-	com.termux	x11-repo	-	-	hidden=1;repo=1	Turns on Termux's x11 package source, where Electron comes from.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
+electron42	pkg	-	com.termux	electron42	-	x11-repo	hidden=1	Termux's Electron, which terminal-browser runs on.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
 launcher-skill-md	file	b3d9334e	*	launcher:resources/agent-skills/termux-launcher/SKILL.md@b3d9334e4e1994d5a2ab666e8d9179d9fc67494b	~/.claude/skills/termux-launcher/SKILL.md	-	hidden=1;mode=644	How the agent learns what Termux Launcher can do.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
 launcher-skill-launcherctl	file	b3d9334e	*	launcher:resources/agent-skills/termux-launcher/launcherctl.md@b3d9334e4e1994d5a2ab666e8d9179d9fc67494b	~/.claude/skills/termux-launcher/launcherctl.md	-	hidden=1;mode=644	The agent skill's guide to launcherctl.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
 launcher-skill-terminal	file	b3d9334e	*	launcher:resources/agent-skills/termux-launcher/terminal.md@b3d9334e4e1994d5a2ab666e8d9179d9fc67494b	~/.claude/skills/termux-launcher/terminal.md	-	hidden=1;mode=644	The agent skill's guide to the terminal's graphics and signals.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
