@@ -44,12 +44,12 @@ Columns:
 | column | meaning |
 |---|---|
 | `name` | `[a-z0-9][a-z0-9-]*`, unique per prefix set |
-| `kind` | `pkg` \| `binary` \| `file` \| `file-once` \| `script` \| `npm-musl` \| `npm-android` \| `bundle` |
+| `kind` | `pkg` \| `binary` \| `archive` (Revision 14) \| `file` \| `file-once` \| `script` \| `npm-musl` \| `npm-android` \| `bundle` |
 | `version` | `-` for pkg/bundle; upstream version for binary/file/script; `latest` or pinned for npm-musl |
 | `prefixes` | `*` or comma list of app packages (`com.termux`, `io.vaj.tl`, `com.termux.launcher.nix`) |
 | `source` | `pkg`: space-separated package names. `binary`/`file`/`file-once`/`script`: a URL, or `binaries:<asset>@<tag>` (→ `https://github.com/PickleHik3/tlstore/releases/download/<tag>/<asset>-<arch>`, a release asset, `<arch>` being `aarch64` or `x86_64` (Revision 12); with a slash in the asset, `binaries:<path>@<tag>` → `https://raw.githubusercontent.com/PickleHik3/tlstore/<tag>/<path>`, a file in the repository) or `launcher:<path>@<tag>` (→ `https://raw.githubusercontent.com/PickleHik3/termux-launcher/<tag>/<path>`). `npm-musl`: `npm:<package>#<executable inside package/>`. `bundle`: `-` |
 | `digest` | sha256 hex of the downloaded file; `-` for pkg, bundle, npm-musl (npm's registry sha512 is the check) |
-| `target` | install path with `~`; `-` = default (`~/.local/bin/<name>` for binary, `~/.local/lib/tlstore/priv/<name>` for a binary with `priv=shizuku`, `~/.local/lib/<name>` for npm-musl, none for others) |
+| `target` | install path with `~`; `-` = default (`~/.local/bin/<name>` for binary, `~/.local/lib/tlstore/priv/<name>` for a binary with `priv=shizuku`, `~/.local/lib/<name>` for npm-musl and archive, none for others) |
 | `requires` | comma list of catalog names installed first; bundle members live here |
 | `options` | `;`-separated `key=value`: `env=K=V` (wrapper exports, repeatable with `,`), `tz=1` (wrapper exports TZ from `persist.sys.timezone`), `mode=755`, `post=<catalog script name>`, `priv=shizuku` (binary only; Revision 5 below), `x86_64:source=`, `x86_64:digest=`, `x86_64:target=` (the x86_64 build, standing in for `source`, `digest` and `target` on an x86_64 device; Revision 12 below) |
 | `summary` | one plain sentence, product copy |
@@ -847,3 +847,65 @@ run reports what did not finish.
 `rollback` still installs its one item directly through `install_item`. A confirm screen in
 tlstore-ui built on the plan (a `--dry-run --tsv`) is left for later. `TLSTORE_VERSION` moves to
 0.12.
+
+## Revision 14 — an app that is a whole directory (tlstore 0.15)
+
+A `binary` installs exactly one file, and the npm kinds read only the npm registry. An app made of
+many files (an Electron app: its `bin/`, its `dist/` trees and `node_modules`, its assets, ~40 MB)
+fits neither. The new kind `archive` carries one.
+
+| field | for an archive |
+|---|---|
+| `kind` | `archive` |
+| `version` | the upstream version, in the `<upstream>+<commit>.<N>` shape when the store builds it (below) |
+| `source` | `binaries:<asset>@<tag>`, a release asset of this repository resolved per processor exactly as a binary's is (`<asset>-aarch64`, `<asset>-x86_64`), or an immutable URL |
+| `digest` | the sha256 of the `.tar.gz`, from `SHA256SUMS` as a binary's is. `build-catalog.sh` appends `x86_64:digest=` when `SHA256SUMS` has `<asset>-x86_64`; without it the row is not offered on x86_64. An archive is processor-specific, like a binary, so `rows()` treats the two alike |
+| `target` | `-` = `~/.local/lib/<name>`, the directory it unpacks into |
+| `options` | `exe=<path inside the archive>` (required: what the wrapper execs; relative, never leaving the directory), `command=<name>` (the wrapper's name, default the item's), and the npm kinds' `env=`, `tz=1` and `args=`, which go in the wrapper the same way |
+
+The archive's top level is the app's root, packed with `tar czf <asset> -C <app dir> .`. Nothing is
+stripped: an archive with a folder on top has no `exe=` where the row says, and is refused.
+
+The default directory is `~/.local/lib/<name>`, where the npm kinds already unpack and where the
+first section of this document puts larger tools. `~/.local/share/tlstore` is not used: it holds
+the store's own state files (`installed.tsv`, `held`, `journal`, `channel.tsv`), and an item name
+could collide with one of them.
+
+Install:
+
+1. The payload is fetched and checked against the digest in plan_apply's fetch phase, with the
+   `binary`, `file` and `file-once` rows (Revision 13, step 3), so a bad download fails the row
+   before anything is put in place. A rollback downloads it directly, as it does for a binary. A
+   row without a digest is refused.
+2. It is unpacked into `<dir>.new`. `<dir>.new/<exe>` must be a file and executable, or the install
+   fails with `the <name> download has no <exe> to run — nothing was installed` and
+   `<dir>.new` is removed. The download is not kept.
+3. The old directory is replaced whole (`<dir>` to `<dir>.old`, `<dir>.new` to `<dir>`, `<dir>.old`
+   removed), as the npm kinds do.
+4. The wrapper `~/.local/bin/<command>` is written by the same code as the npm kinds' wrapper
+   (`wrapper_write`): `#!$PREFIX/bin/sh`, the `# written by termux-launcher` marker, then
+   `exec "<dir>/<exe>" "$@"`. A file of someone else's already at that path is kept as a `.bak`.
+5. `installed.tsv` records `archive`, the version, the directory and the wrapper as its files, and
+   the source and digest, so `rollback` can go back one version as it does for a binary.
+
+A cancel (SIGTERM) drops the downloaded archive and `<dir>.new`.
+
+The directory belongs to the store. There is no shipped-against-edited check as there is for a
+`file`: an update replaces the directory whole, and anything changed or added inside it goes. An
+app's settings belong under `~/.config` or its own home directory, never inside its install.
+`remove` deletes the directory and the wrapper and puts back a wrapper-path file it had kept; a
+retired archive is removed the same way.
+
+Update follows the version, as for every other kind: an installed archive is updated when the
+catalog's version differs from the installed one, and is otherwise skipped. A rebuilt archive at
+the same version is not an update. An archive built by `build.yml` therefore uses the
+`<upstream>+<commit>.<N>` version, which `bins-record.sh` bumps whenever the asset's bytes change
+(`docs/maintainer/catalog.md`, "Rebuilding a binary").
+
+An engine older than 0.15 does not know the kind. It lists the row (on every processor, since its
+`rows()` does not gate an unknown kind), and `install` refuses it with `<name> cannot be installed
+here`, after fetching nothing and writing nothing. `scripts/test.sh` checks this against the
+`dev` branch's engine. No catalog option hides a row from those engines without hiding it from 0.15
+too, so the guard is the one Revisions 10 and 12 use: `TLSTORE_VERSION` moves to 0.15, and the
+first archive row ships in the same store release as the engine, which tlstore-ui takes at launch
+and `tlstore update` offers.

@@ -31,7 +31,7 @@ in `setup`/`featured`.
 
 ## Adding or changing an item
 
-1. **Pin the payload.** A `binary`/`file` source is `launcher:<path>@<tag or commit>` (a
+1. **Pin the payload.** A `binary`/`archive`/`file` source is `launcher:<path>@<tag or commit>` (a
    launcher-owned template, fetched from `PickleHik3/termux-launcher`), `binaries:<asset>@<tag>`
    (a release asset of this repository, `<asset>-aarch64` or `<asset>-x86_64` on the `bins-…`
    prerelease `<tag>`, whichever the phone's processor is),
@@ -224,7 +224,8 @@ reads the processor from what `build-asset.sh` derives (`TL_ARCH`, `TL_TRIPLE`, 
 A row's own columns describe its aarch64 build. On an x86_64 device tlstore reads three options
 in their place (`docs/SPEC.md`, Revision 12):
 
-- **A binary** is offered on x86_64 once its x86_64 build is published. Nothing is written by hand:
+- **A binary** (and an **archive**, the same way) is offered on x86_64 once its x86_64 build is
+  published. Nothing is written by hand:
   `build.yml` builds `<asset>-x86_64` beside `<asset>-aarch64` under the same `bins-…` tag,
   `bins-record.sh` records its `SHA256SUMS` line, and `build-catalog.sh` appends
   `x86_64:digest=<sha256>` to the row. Without that line the row gets no `x86_64:digest` and stays
@@ -238,6 +239,30 @@ in their place (`docs/SPEC.md`, Revision 12):
 - **codex** has none: `@mmmbuto/codex-cli-termux` is published for `cpu: arm64` only, so it stays
   hidden on x86_64 until an x64 build of it exists.
 - **io.vaj.tl rows** are aarch64 only, like the edition itself.
+
+## An app that is a whole directory (archive)
+
+A `binary` is one file. An app made of many (an Electron app: `bin/`, `dist/` trees,
+`node_modules`, assets) is an `archive` item (`docs/SPEC.md`, Revision 14):
+
+1. **Pack it with the app's root at the top**: `tar czf <asset>-<arch> -C <app dir> .`. Nothing is
+   stripped on the phone, so a folder on top means the program is not where `exe=` says, and the
+   install is refused.
+2. **Publish it as a release asset** under a `bins-…` tag, `<asset>-aarch64` and (when there is
+   one) `<asset>-x86_64`, with their `SHA256SUMS` lines, the way `build.yml` publishes a binary.
+3. **Write the row**: kind `archive`; version `<upstream>+<commit>.<N>`, so `bins-record.sh` bumps
+   `.N` whenever a rebuild changes the asset's bytes (a rebuild at the same version is not an
+   update, as for a binary); source `binaries:<asset>@<tag>`; target `-`, which is
+   `~/.local/lib/<name>`; options `exe=<path of the program inside the archive>` (required),
+   plus `command=<name>` when the command should not be the item's name. `env=`, `tz=1` and
+   `args=` work as for the npm kinds. `build-catalog.sh` fills the digest and `x86_64:digest`, and
+   refuses a row without a usable `exe=`.
+
+tlstore unpacks it into `<dir>.new`, checks `exe=` is there and executable, swaps the directory
+in whole and writes `~/.local/bin/<command>`, which execs `<dir>/<exe> "$@"`. The directory is the
+store's: an update replaces it whole, and a change made inside it is lost. Settings belong
+outside it. An engine older than 0.15 lists an archive item but refuses to install it, so the first
+archive row ships in the same release as engine 0.15.
 
 ## Pinning a readme or a hero picture
 
@@ -335,7 +360,8 @@ it as an update) — deletes an installed
 file/file-once/binary item only when the file on disk still matches the digest that shipped it —
 an edited copy is left in place and the item is simply forgotten, never overwritten or deleted.
 Anything else (a `pkg`, `bundle` or `fisher` item) just stops being tracked, the way `remove`
-already leaves the underlying package installed. Once every phone has had a chance to update, the
+already leaves the underlying package installed. An `archive` is removed as `remove` removes it,
+directory and wrapper: the directory is the store's, with no edit of yours in it to keep. Once every phone has had a chance to update, the
 row can be deleted for good (see "Removing an item" above).
 
 ## Release cut
