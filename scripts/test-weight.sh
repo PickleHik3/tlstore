@@ -303,8 +303,12 @@ EOF
 0 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.
 EOF
     : > "$ROOT/lists-x11"; : > "$ROOT/have/x11-repo"; : > "$ROOT/have/electron42"
-    tl install big --dry-run
+    # A real install asks apt; a dry run asks the package manager nothing and says the catalog's.
+    tl -y install big
     expect_no_out "apt says it is all here: nothing is said, whatever the catalog says" "Also installs"
+    fresh
+    tl install big --dry-run
+    expect_out "a dry run says the catalog's figures, asking apt nothing" "Also installs"
 
     fresh
     apt_says 100 <<'EOF'
@@ -457,7 +461,9 @@ done
 echo
 echo "== older engines read the new rows"
 SHELL_LABEL="older engines"
-for ref in dev:dist/tlstore dev:engine/tlstore; do
+# The commit that made the engine 0.16; its parent holds the last engine and dist before it.
+r15=$(git -C "$repo" log -1 --format=%H -G '^TLSTORE_VERSION=0\.16$' -- engine/tlstore 2>/dev/null)
+for ref in "$r15^:dist/tlstore" "$r15^:engine/tlstore"; do
     OLD="$(mktemp)"
     if ! git -C "$repo" show "$ref" > "$OLD" 2>/dev/null; then
         skip "$ref" "not reachable from this checkout"

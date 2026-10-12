@@ -971,7 +971,8 @@ used.` (`freed` counts as 0). apt 3's `Download size:` and `Space needed:` are r
 apt's decimal `B`, `kB`, `MB`, `GB`. `--assume-no` alone is not enough: apt asks only when it
 would install more than the names it was given, and installs without asking otherwise.
 `--print-uris` stops it before any download or install in that case, so the question never
-changes anything. It is read-only, so the dry run says it too.
+changes anything. A dry run still asks the package manager nothing, as before this Revision,
+so it says the catalog's `pkg-size=` figures when they are over the threshold.
 
 | apt says | figures used |
 |---|---|

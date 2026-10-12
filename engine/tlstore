@@ -4211,9 +4211,9 @@ plan_show() {
     esac
 }
 
-# Nothing is fetched or written, so the build tools are named, not checked
-# for. The package manager is only asked what large packages would take
-# (plan_weight_say), which changes nothing.
+# Nothing is fetched, written or asked of the package manager, so the build
+# tools are named, not checked for, and large packages are said from the
+# catalog's figures (plan_weight_say catalog).
 plan_show_install() {
     si_names=""
     say "Would install, in this order:"
@@ -4243,8 +4243,7 @@ plan_show_install() {
         say "Needed only while installing: $(words_list "$si_tools")"
         say "  (any that are missing are added first, and you are asked about taking them back)"
     fi
-    # Asking apt what it would fetch changes nothing either.
-    plan_weight_say || :
+    plan_weight_say catalog || :
     say "Nothing was changed."
 }
 
@@ -4526,16 +4525,19 @@ plan_packages() {
 # they are all here). When apt cannot say (not here, or one of the packages comes from a source
 # a repo=1 row adds first, which apt does not read yet) it is `catalog`: the sum of the
 # pkg-size= figures of the plan's install rows, a stock Termux's figures, with pw_what naming the
-# packages of the first. `none` when there are no packages, or neither knows.
+# packages of the first. `none` when there are no packages, or neither knows. With `catalog`
+# (a dry run) the package manager is not asked anything and the catalog's figures are used.
 plan_weigh() {
     pw_dl=0
     pw_disk=0
     pw_how=none
     pw_what=""
-    plan_pkg_list
-    [ -n "$(printf '%s' "$pl_pkgs$pl_tools" | tr -d ' ')" ] || return 0
+    if [ "${1:-}" != catalog ]; then
+        plan_pkg_list
+        [ -n "$(printf '%s' "$pl_pkgs$pl_tools" | tr -d ' ')" ] || return 0
+    fi
     # shellcheck disable=SC2086  # lists of package names, split on purpose
-    if weigh_apt $pl_tools $pl_pkgs; then
+    if [ "${1:-}" != catalog ] && weigh_apt $pl_tools $pl_pkgs; then
         pw_dl="$wa_dl"
         pw_disk="$wa_disk"
         pw_how=apt
@@ -4559,9 +4561,9 @@ plan_weigh() {
 # plan_weight_say — says what the plan's Termux packages take when that is more than
 # WEIGH_ASK_MB to download or to keep, the way apt itself would before installing. Returns 0
 # when it said so, so a caller that does not always ask asks now; 1 when there was nothing to
-# say, and then nothing changes.
+# say, and then nothing changes. [catalog] passes on to plan_weigh.
 plan_weight_say() {
-    plan_weigh
+    plan_weigh "${1:-}"
     [ "$pw_how" != none ] || return 1
     heavy "$pw_dl" "$pw_disk" || return 1
     if [ "$pw_how" = apt ]; then
