@@ -24,9 +24,9 @@
 # as "<asset>-aarch64", the release asset .github/workflows/build.yml publishes
 # under that tag (scripts/bins-record.sh writes its SHA256SUMS line).
 #
-# x86_64 (docs/SPEC.md, Revision 12): a binary row's own columns are its aarch64
-# build. When SHA256SUMS also has "<asset>-x86_64" for its bare binaries: source
-# (or the row names an x86_64:source= of its own), the row gets
+# x86_64 (docs/SPEC.md, Revision 12): a binary (or archive, Revision 14) row's own
+# columns are its aarch64 build. When SHA256SUMS also has "<asset>-x86_64" for its
+# bare binaries: source (or the row names an x86_64:source= of its own), the row gets
 # `x86_64:digest=<sha256>` appended to its options, and tlstore shows it on
 # x86_64. Without that line it gets nothing and stays hidden there, so the
 # catalog is right both before and after the x86_64 build is published. Like
@@ -153,14 +153,14 @@ optval() {
     done
 }
 
-# x86_64_digest <kind> <source> <options> <name> — the digest of a binary's x86_64
-# build, or nothing when there is none to offer. An x86_64:source= the row names
-# itself must resolve (a failure stops the build, like any other pinned source);
+# x86_64_digest <kind> <source> <options> <name> — the digest of a binary's (or an
+# archive's) x86_64 build, or nothing when there is none to offer. An x86_64:source=
+# the row names itself must resolve (a failure stops the build, like any other pinned source);
 # the row's own bare binaries: asset counts only once SHA256SUMS has its
 # <asset>-x86_64 line, which bins-record.sh writes when that build is published.
 x86_64_digest() {
     local kind="$1" source="$2" options="$3" name="$4" own asset
-    [ "$kind" = binary ] || return 0
+    case "$kind" in binary|archive) ;; *) return 0 ;; esac
     own="$(optval "$options" x86_64:source)"
     if [ -n "$own" ]; then
         source_digest "$own" "$name (x86_64)" x86_64
@@ -205,9 +205,20 @@ while IFS=$'\t' read -r name kind version prefixes source target requires option
         *) echo "$name: a name is [a-z0-9][a-z0-9-]*" >&2; failed=1; continue ;;
     esac
     case "$kind" in
-        pkg|binary|file|file-once|fisher|npm-musl|npm-android|bundle) ;;
+        pkg|binary|archive|file|file-once|fisher|npm-musl|npm-android|bundle) ;;
         *) echo "$name: unknown kind $kind" >&2; failed=1; continue ;;
     esac
+    # An archive's wrapper execs exe=<path inside the archive>; without one, or with one
+    # that leaves the directory, the engine refuses to install it, so refuse it here first.
+    if [ "$kind" = archive ]; then
+        case "$(optval "$options" exe)" in
+            ''|/*|..|../*|*/..|*/../*)
+                echo "$name: an archive needs exe=<the program to run, a path inside it>" >&2
+                failed=1
+                continue
+                ;;
+        esac
+    fi
     # priv=shizuku means "a binary the launcher runs as the Shizuku shell user";
     # the engine only honours it on a binary, so anything else is a mistake here.
     case ";$options;" in

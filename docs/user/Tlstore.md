@@ -186,6 +186,11 @@ Everything tlstore installs lives under `~/.local` — programs in `~/.local/bin
 own directories, never takes your tools with it, and tlstore never fights `apt`/`pacman` over a
 name they already own. Configs go where the program that reads them expects, under `~/.config`.
 
+An app that comes as a whole folder of files lives in `~/.local/lib/<name>`, with the command that
+starts it in `~/.local/bin`. That folder belongs to the store: an update replaces it whole, so
+anything you change or add inside it is gone afterwards. Keep your own files and settings outside
+it.
+
 ## Keeping things up to date
 
 `tlstore update` checks for a newer list of items, then upgrades anything you have that has moved

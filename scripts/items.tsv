@@ -7,17 +7,22 @@
 #   category  upstream  setup  standfirst  does1  does2  does3  try  notes
 #   author  licence  size  picture  demo  featured  readme-skip  readme
 #
-# kind      pkg 	 binary 	 file 	 file-once 	 fisher 	 npm-musl 	 npm-android 	 bundle
-# version   - for pkg, bundle and fisher; the upstream version for a binary; the
-#           launcher tag or commit for a template; latest or a pin for npm-musl and
-#           npm-android
+# kind      pkg 	 binary 	 archive 	 file 	 file-once 	 fisher 	 npm-musl 	 npm-android 	 bundle
+#           (archive: an app that is a whole directory, one .tar.gz whose top
+#           level is the app's root, unpacked into ~/.local/lib/<name> and
+#           replaced whole on update; needs exe=. docs/SPEC.md, Revision 14)
+# version   - for pkg, bundle and fisher; the upstream version for a binary or an
+#           archive (<upstream>+<commit>.<N> when build.yml builds it, so a
+#           rebuild moves it); the launcher tag or commit for a template; latest
+#           or a pin for npm-musl and npm-android
 # prefixes  * or a comma list of app packages; one row per (name, prefix set),
 #           so the per-edition builds are two rows sharing a name
-# source    pkg: package names. binary/file: launcher:<path>@<tag or commit>,
-#           binaries:<asset>@<tag>, or a URL. npm-musl/npm-android:
+# source    pkg: package names. binary/archive/file: launcher:<path>@<tag or
+#           commit>, binaries:<asset>@<tag>, or a URL. npm-musl/npm-android:
 #           npm:<package>#<exe>.
 #           fisher: the plugin list, space separated
-# target    where it lands, ~ allowed; - means the default
+# target    where it lands, ~ allowed; - means the default (an archive: the
+#           directory ~/.local/lib/<name>)
 # requires  comma list installed first; a bundle's members live here
 # options   ;-separated key=value: env=K=V (comma repeats), tz=1, mode=755,
 #           build=<packages needed only while installing>, hidden=1,
@@ -33,10 +38,14 @@
 #           package, paths inside package/, unpacked beside the executable
 #           under their package paths and made executable; one missing fails
 #           the install like a missing executable),
-#           command=<name> (npm-musl and npm-android: the wrapper's name,
-#           instead of the executable's basename),
-#           args=<words> (npm-musl and npm-android: written into the wrapper's
-#           exec line before "$@", unquoted, so plain words only),
+#           exe=<path> (archive only, required: the program inside the
+#           archive the wrapper execs, relative to its top level; it must be
+#           there and executable or the install fails),
+#           command=<name> (npm-musl, npm-android and archive: the wrapper's
+#           name, instead of the executable's basename or the item's name),
+#           args=<words> (npm-musl, npm-android and archive: written into the
+#           wrapper's exec line before "$@", unquoted, so plain words only;
+#           env= and tz=1 go in the same wrapper),
 #           host=launcher|termux (comma list; absent means both),
 #           min-launcher=X.Y.Z (the oldest launcher that may have it),
 #           priv=shizuku (binary only: the launcher runs it as the Shizuku
@@ -51,10 +60,10 @@
 #           x86_64:source=<source>, x86_64:target=<path> (the x86_64 build,
 #           standing in for source and target on an x86_64 device; the row's
 #           own columns are the aarch64 build. An npm-musl/npm-android row is
-#           offered on x86_64 only with an x86_64:source. A binary's
-#           x86_64:digest is never written here: build-catalog.sh appends it
-#           when SHA256SUMS has <asset>-x86_64, and without it the binary is
-#           not offered on x86_64. docs/SPEC.md, Revision 12),
+#           offered on x86_64 only with an x86_64:source. A binary's or an
+#           archive's x86_64:digest is never written here: build-catalog.sh
+#           appends it when SHA256SUMS has <asset>-x86_64, and without it the
+#           item is not offered on x86_64. docs/SPEC.md, Revision 12),
 #           login-shell=<shell> (bundle only: after the members are in, chsh -s
 #           <shell> makes it the shell new sessions start in; remove takes the
 #           ~/.termux/shell link away again while it still points at that shell)
