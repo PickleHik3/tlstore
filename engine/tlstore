@@ -49,7 +49,7 @@
 
 set -u
 
-TLSTORE_VERSION=0.14
+TLSTORE_VERSION=0.15
 
 # The store program that pairs with this script, one digest per processor.
 # Empty in the source tree: scripts/release.sh --prepare fills them in from
@@ -334,10 +334,11 @@ need_catalog() {
 # a new enough launcher; first row per name wins. Off aarch64 a row comes out
 # with its <arch>:source, <arch>:digest and <arch>:target options already in
 # place of columns 5, 6 and 7, so nothing downstream needs to know the
-# processor. A binary is here only with its own <arch>:digest (build-catalog.sh
-# writes it once that build is published); an npm-musl or npm-android item only
-# with its own <arch>:source (the npm package built for it), and an npm-musl
-# item only while its musl loader and libraries are here as well.
+# processor. A binary or an archive is here only with its own <arch>:digest
+# (build-catalog.sh writes it once that build is published); an npm-musl or
+# npm-android item only with its own <arch>:source (the npm package built for
+# it), and an npm-musl item only while its musl loader and libraries are here
+# as well.
 rows() {
     awk -F "$TAB" -v OFS="$TAB" -v pkgname="$APP_PACKAGE" -v archok="$ARCH_OK" \
         -v arch="$ARCH" -v host="$HOST" -v lver="$LAUNCHER_VERSION" '
@@ -348,10 +349,10 @@ rows() {
             return 0
         }
         function arch_ok(kind, opts) {
-            if (kind != "binary" && kind != "npm-musl" && kind != "npm-android") return 1
+            if (kind != "binary" && kind != "archive" && kind != "npm-musl" && kind != "npm-android") return 1
             if (archok != "1") return 0
             if (arch == "aarch64") return 1
-            if (kind == "binary") return optval(opts, arch ":digest") != ""
+            if (kind == "binary" || kind == "archive") return optval(opts, arch ":digest") != ""
             return optval(opts, arch ":source") != ""
         }
         function for_arch(   v) {
@@ -561,7 +562,9 @@ source_url() {
 # `claude`) unless command=<name> says otherwise. A package that keeps its
 # executable in a subdirectory (npm:x#bin/y) still gets the bare name. A binary with priv=shizuku lands twice as well: the program
 # under PRIV_DIR, off PATH, then the wrapper on PATH that runs it through
-# tl-priv.
+# tl-priv. An archive lands twice too: the directory it unpacks into
+# (~/.local/lib/<name>, like the npm kinds), then the wrapper, named after the
+# item unless command=<name> says otherwise.
 item_targets() {
     case "$2" in
         binary|file|file-once)
@@ -591,6 +594,15 @@ item_targets() {
                 printf '%s %s' "$LIB_DIR/$1" "$BIN_DIR/$it_exe"
             else
                 printf '%s %s' "$(expand_path "$3")" "$BIN_DIR/$it_exe"
+            fi
+            ;;
+        archive)
+            it_cmd=$(opt "${5:-}" command)
+            [ -n "$it_cmd" ] || it_cmd="$1"
+            if [ "$3" = "-" ] || [ -z "$3" ]; then
+                printf '%s %s' "$LIB_DIR/$1" "$BIN_DIR/$it_cmd"
+            else
+                printf '%s %s' "$(expand_path "$3")" "$BIN_DIR/$it_cmd"
             fi
             ;;
     esac
@@ -1291,7 +1303,7 @@ install_item() {
     ii_target="$it_target"
     ii_options="$it_options"
     # A rollback installs an earlier version in place of the list's: its
-    # version, and for a binary or file its own source and digest.
+    # version, and for a binary, an archive or a file its own source and digest.
     if [ -n "${RB_VERSION:-}" ]; then
         ii_version="$RB_VERSION"
         if [ -n "${RB_SOURCE:-}" ]; then
@@ -1319,6 +1331,7 @@ install_item() {
         fisher) do_fisher ;;
         npm-musl) do_npm_musl ;;
         npm-android) do_npm_musl ;;
+        archive) do_archive ;;
         bundle) do_bundle ;;
         *) err "$ii_name cannot be installed here"; return 1 ;;
     esac
@@ -1685,30 +1698,96 @@ do_npm_musl() {
         rm -rf "$np_dir.old"
     fi
 
+    wrapper_write "$np_wrapper" "$np_dir/$np_exe"
+    state_record "$ii_name" "$ii_kind" "$np_version" "$np_dir" "$np_wrapper"
+    say "  $np_wrapper"
+    return 0
+}
+
+# wrapper_write <wrapper> <program> — the command on PATH for an item that
+# lives in a directory of its own (the npm kinds, an archive): it exports what
+# env= names, sets TZ for tz=1, and execs the program with args= in front of
+# the person's own arguments. What was at <wrapper> before is kept as a .bak
+# unless this item wrote it (backup_existing). Reads ii_options.
+wrapper_write() {
     mkdir -p "$BIN_DIR"
-    backup_existing "$np_wrapper"
-    np_envs=$(commas "$(opt "$ii_options" env)")
+    backup_existing "$1"
+    ww_envs=$(commas "$(opt "$ii_options" env)")
     {
         printf '#!%s/bin/sh\n' "$PREFIX"
         printf '# written by termux-launcher\n'
-        for np_e in $np_envs; do
-            printf 'export %s\n' "$np_e"
+        for ww_e in $ww_envs; do
+            printf 'export %s\n' "$ww_e"
         done
         if [ "$(opt "$ii_options" tz)" = 1 ]; then
             # shellcheck disable=SC2016  # written into the wrapper, expanded there
             printf '%s\n' '[ -n "${TZ:-}" ] || TZ=$(getprop persist.sys.timezone 2>/dev/null) && export TZ'
         fi
         # args=<words> go in unquoted, before the person's own arguments.
-        np_args=$(opt "$ii_options" args)
-        if [ -n "$np_args" ]; then
-            printf 'exec "%s" %s "$@"\n' "$np_dir/$np_exe" "$np_args"
+        ww_args=$(opt "$ii_options" args)
+        if [ -n "$ww_args" ]; then
+            printf 'exec "%s" %s "$@"\n' "$2" "$ww_args"
         else
-            printf 'exec "%s" "$@"\n' "$np_dir/$np_exe"
+            printf 'exec "%s" "$@"\n' "$2"
         fi
-    } > "$np_wrapper"
-    chmod 755 "$np_wrapper"
-    state_record "$ii_name" "$ii_kind" "$np_version" "$np_dir" "$np_wrapper"
-    say "  $np_wrapper"
+    } > "$1"
+    chmod 755 "$1"
+}
+
+# do_archive — an app that is a whole directory (an Electron app's tree, say),
+# shipped as one pinned .tar.gz whose top level is the app's root (packed with
+# `tar czf <asset> -C <app> .`; nothing is stripped). The payload is the one
+# plan_apply fetched and checked against the row's digest, or a download for a
+# rollback. It unpacks beside the directory as <dir>.new, must hold exe=<path
+# inside it> as an executable file, and only then replaces the directory whole:
+# the directory is the store's, and anything changed inside it goes with the
+# next update. The wrapper on PATH execs that program.
+do_archive() {
+    da_dir=$(item_targets "$ii_name" archive "$ii_target" "$ii_source" "$ii_options")
+    da_wrapper="${da_dir##* }"
+    da_dir="${da_dir%% *}"
+    da_exe=$(opt "$ii_options" exe)
+    case "$da_exe" in
+        ''|/*|..|../*|*/..|*/../*)
+            err "$ii_name does not say which program in it to run"
+            return 1
+            ;;
+    esac
+    case "$ii_digest" in
+        ''|-) err "$ii_name came without a checksum — nothing was installed"; return 1 ;;
+    esac
+    have tar || { err "tar is missing — install it and try again"; return 1; }
+
+    say "installing $ii_name"
+    da_tgz="$CACHE_DIR/$ii_name.tgz"
+    mkdir -p "$CACHE_DIR" "$(dirname "$da_dir")"
+    payload_to "$(source_url "$ii_source")" "$da_tgz" "$ii_digest" || return 1
+    rm -rf "$da_dir.new"
+    mkdir -p "$da_dir.new"
+    CANCEL_EXTRA="$da_tgz $da_dir.new"
+    if ! tar xzf "$da_tgz" -C "$da_dir.new"; then
+        rm -f "$da_tgz"
+        rm -rf "$da_dir.new"
+        CANCEL_EXTRA=""
+        err "the $ii_name download is not what was expected"
+        return 1
+    fi
+    rm -f "$da_tgz"
+    if [ ! -f "$da_dir.new/$da_exe" ] || [ ! -x "$da_dir.new/$da_exe" ]; then
+        rm -rf "$da_dir.new"
+        CANCEL_EXTRA=""
+        err "the $ii_name download has no $da_exe to run — nothing was installed"
+        return 1
+    fi
+    CANCEL_EXTRA=""
+    rm -rf "$da_dir.old"
+    [ ! -e "$da_dir" ] || mv "$da_dir" "$da_dir.old"
+    mv "$da_dir.new" "$da_dir"
+    rm -rf "$da_dir.old"
+
+    wrapper_write "$da_wrapper" "$da_dir/$da_exe"
+    state_record "$ii_name" archive "$ii_version" "$da_dir" "$da_wrapper"
+    say "  $da_wrapper"
     return 0
 }
 
@@ -1783,7 +1862,9 @@ remove_item() {
 # digest); an edited file is left alone and the state entry is simply
 # forgotten, so a retirement never overwrites or deletes the person's own
 # changes. Every other kind falls back to remove_item's own behaviour (a pkg
-# just stops being tracked; the package itself stays installed).
+# just stops being tracked; the package itself stays installed). That includes
+# an archive: its directory is the store's, replaced whole on every update, so
+# there is no edit of yours in it to keep, and it goes the way remove takes it.
 retire_item() {
     rt_name="$1"
     rt_row=$(row "$rt_name")
@@ -2290,10 +2371,10 @@ Puts an item back at the version it had before its last update, then holds it
 there so the next update does not undo that. It goes one step only; to move
 forward again, run 'tlstore unhold <name>' and 'tlstore update <name>'.
 
-Works for items from npm, binaries and config files. A package, a bundle or a
-fish plugin cannot go back: Termux keeps only the newest package, and the
-others have no version of their own to return to. An item installed before
-tlstore recorded versions has nothing to go back to until it updates once.
+Works for items from npm, binaries, app archives and config files. A package,
+a bundle or a fish plugin cannot go back: Termux keeps only the newest package,
+and the others have no version of their own to return to. An item installed
+before tlstore recorded versions has nothing to go back to until it updates once.
 
 Options:
   -n, --dry-run  say what would be installed, and change nothing
@@ -3120,6 +3201,12 @@ snapshot_rows() {
                 exe = (n > 1) ? parts[n] : name
                 sub(/.*\//, "", exe)
                 if (optval(opts, "command") != "") exe = optval(opts, "command")
+                if (target == "-" || target == "") return libdir "/" name " " bindir "/" exe
+                return expand(target) " " bindir "/" exe
+            }
+            if (kind == "archive") {
+                exe = optval(opts, "command")
+                if (exe == "") exe = name
                 if (target == "-" || target == "") return libdir "/" name " " bindir "/" exe
                 return expand(target) " " bindir "/" exe
             }
@@ -4324,8 +4411,8 @@ plan_apply() {
     return "$pa_rc"
 }
 
-# plan_fetch — step 3 of plan_apply: the payload of every binary, file and
-# file-once row the plan installs, downloaded and checked into STAGE_DIR before
+# plan_fetch — step 3 of plan_apply: the payload of every binary, archive, file
+# and file-once row the plan installs, downloaded and checked into STAGE_DIR before
 # any row is applied. One that does not arrive, or does not match its digest,
 # fails its row there and then, with the download's own reason, and goes in
 # pa_bad so what needs it is skipped; nothing on disk has changed by then. A
@@ -4361,15 +4448,17 @@ plan_fetch() {
             continue
         fi
         case "$pf_kind" in
-            binary|file|file-once) ;;
+            binary|archive|file|file-once) ;;
             *) continue ;;
         esac
         load_item "$pf_n" || continue
-        if [ "$pf_kind" != binary ]; then
-            pf_dest=$(item_targets "$pf_n" file "$it_target")
-            [ -n "$pf_dest" ] || continue
-            [ "$pf_kind" = file ] || [ ! -e "$pf_dest" ] || continue
-        fi
+        case "$pf_kind" in
+            file|file-once)
+                pf_dest=$(item_targets "$pf_n" file "$it_target")
+                [ -n "$pf_dest" ] || continue
+                [ "$pf_kind" = file ] || [ ! -e "$pf_dest" ] || continue
+                ;;
+        esac
         say "fetching $pf_n"
         LAST_ERR=""
         CANCEL_ITEM="$pf_n"
@@ -4757,7 +4846,7 @@ cmd_rollback() {
     rb_src=$(field "$rb_row" 9)
     rb_dig=$(field "$rb_row" 10)
     case "$rb_kind" in
-        binary|file|file-once)
+        binary|archive|file|file-once)
             # Without the old file's address and digest there is nothing to fetch.
             if [ -z "$rb_src" ] || [ -z "$rb_dig" ]; then rb_ver=""; fi
             ;;
@@ -4773,7 +4862,7 @@ cmd_rollback() {
     if [ "$DRY_RUN" = 1 ]; then
         say "Would put $rb_name back from $rb_have to $rb_ver, and hold it there."
         case "$rb_kind" in
-            binary|file|file-once) say "  from $rb_src" ;;
+            binary|archive|file|file-once) say "  from $rb_src" ;;
         esac
         say "Nothing was changed."
         return 0
@@ -4782,7 +4871,7 @@ cmd_rollback() {
     ask_yn "Go ahead?" || { say "Nothing was changed."; return 0; }
     RB_VERSION="$rb_ver"
     case "$rb_kind" in
-        binary|file|file-once) RB_SOURCE="$rb_src"; RB_DIGEST="$rb_dig" ;;
+        binary|archive|file|file-once) RB_SOURCE="$rb_src"; RB_DIGEST="$rb_dig" ;;
         *) RB_SOURCE=""; RB_DIGEST="" ;;
     esac
     SR_CLEAR_PREV=1

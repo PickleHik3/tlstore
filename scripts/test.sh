@@ -2122,6 +2122,153 @@ EOF
     rm -rf "$TESTHOME/.local"
     mv "$ROOT/saved-local" "$TESTHOME/.local"
 
+    # --- archive (Revision 14): an app that is a whole directory, from one pinned .tar.gz ---
+    # The archive's top level is the app's root: it unpacks into ~/.local/lib/<name> as it is,
+    # its exe= must be there and executable, and a wrapper on PATH execs it. The directory is
+    # the store's, replaced whole by an update. Like the x86_64 block, this one starts from
+    # nothing installed and puts ~/.local back afterwards.
+    rm -rf "$ROOT/saved-local"
+    cp -a "$TESTHOME/.local" "$ROOT/saved-local"
+    rm -rf "$TESTHOME/.local/share/tlstore/installed.tsv" "$TESTHOME/.local/lib" "$TESTHOME/.local/bin"
+    # mk_app <dir> <words> — an app tree: bin/app prints the words, its arguments and a file
+    # deeper in the tree, so the wrapper is seen reaching the unpacked directory.
+    mk_app() {
+        mkdir -p "$1/bin" "$1/lib/deep"
+        printf '#!/bin/sh\necho "%s $*"\ncat "$(dirname "$0")/../lib/deep/data"\n' "$2" > "$1/bin/app"
+        chmod 755 "$1/bin/app"
+        printf 'data of %s\n' "$2" > "$1/lib/deep/data"
+    }
+    mk_app "$FX/appsrc-1" "app 1"
+    printf 'only in the first build\n' > "$FX/appsrc-1/lib/gone-later"
+    mk_app "$FX/appsrc-2" "app 2"
+    mk_app "$FX/appsrc-x86" "app x86"
+    mk_app "$FX/appsrc-nox" "app nox"
+    chmod 644 "$FX/appsrc-nox/bin/app"
+    mkdir -p "$FX/rel/2.0" "$FX/rel/2.1"
+    tar czf "$FX/rel/2.0/app-aarch64" -C "$FX/appsrc-1" .
+    tar czf "$FX/rel/2.0/app-x86_64" -C "$FX/appsrc-x86" .
+    tar czf "$FX/rel/2.1/app-aarch64" -C "$FX/appsrc-2" .
+    # Packed with its folder on top (nothing is stripped, so bin/app is not where exe= says),
+    # and packed with a program that is not executable.
+    tar czf "$FX/rel/2.0/applead-aarch64" -C "$FX" appsrc-1
+    tar czf "$FX/rel/2.0/appnox-aarch64" -C "$FX/appsrc-nox" .
+    # write_app_catalog <version> <tag> — the block's own list, with app at that build.
+    write_app_catalog() {
+        {
+            printf '# tlstore catalog\tserial=2026090652\n'
+            printf 'app\tarchive\t%s\t*\tbinaries:app@%s\t%s\t-\t-\texe=bin/app;command=appcmd;x86_64:digest=%s\tAn app in a folder of its own.\t%s\n' \
+                "$1" "$2" "$(sha "$FX/rel/$2/app-aarch64")" "$(sha "$FX/rel/2.0/app-x86_64")" "$R5_NONE"
+            printf 'applead\tarchive\t1\t*\tbinaries:applead@2.0\t%s\t-\t-\texe=bin/app\tPacked with a folder on top, on purpose.\t%s\n' \
+                "$(sha "$FX/rel/2.0/applead-aarch64")" "$R5_NONE"
+            printf 'appnox\tarchive\t1\t*\tbinaries:appnox@2.0\t%s\t-\t-\texe=bin/app\tIts program is not executable, on purpose.\t%s\n' \
+                "$(sha "$FX/rel/2.0/appnox-aarch64")" "$R5_NONE"
+            printf 'appbad\tarchive\t1\t*\tbinaries:app@2.0\t%s\t-\t-\texe=bin/app\tIts digest never matches, on purpose.\t%s\n' \
+                0000000000000000000000000000000000000000000000000000000000000000 "$R5_NONE"
+            printf 'appnoexe\tarchive\t1\t*\tbinaries:app@2.0\t%s\t-\t-\t-\tSays nothing of what to run, on purpose.\t%s\n' \
+                "$(sha "$FX/rel/2.0/app-aarch64")" "$R5_NONE"
+        } > "$user_catalog"
+    }
+    write_app_catalog 1.0 2.0
+    app_dir="$TESTHOME/.local/lib/app"
+    app_cmd="$TESTHOME/.local/bin/appcmd"
+
+    tl list --tsv
+    expect_out "an archive is listed with its kind" $'^app\tavailable\t1.0\t\tarchive\t'
+    tl info app
+    expect_out "info names the directory and the wrapper" "Files *$app_dir $app_cmd"
+
+    : > "$ROOT/curl.log"
+    tl install app -y
+    expect_status "an archive installs" 0
+    expect_out "its payload is fetched and checked before anything is put in place" "fetching app"
+    if grep -q "file://$FX/rel/2.0/app-aarch64" "$ROOT/curl.log"; then pass; else fail "binaries:app@2.0 resolved to <releases>/2.0/app-aarch64" "$(cat "$ROOT/curl.log")"; fi
+    expect_content "it unpacked into ~/.local/lib/<name>, top level as the root" "$app_dir/lib/deep/data" "data of app 1"
+    expect_file "the wrapper is named by command=" "$app_cmd"
+    expect_content "the wrapper is the engine's, execing the program inside" "$app_cmd" \
+        "$(printf '#!%s/bin/sh\n# written by termux-launcher\nexec "%s/bin/app" "$@"' "$TPREFIX" "$app_dir")"
+    if [ "$("$app_cmd" hi there 2>&1 | head -1)" = "app 1 hi there" ]; then pass; else fail "the wrapper runs the program with the person's arguments" "$("$app_cmd" hi there 2>&1)"; fi
+    expect_no_file "the downloaded archive is not kept" "$TESTHOME/.cache/tlstore/app.tgz"
+    expect_no_file "nor the unpack directory" "$app_dir.new"
+    if awk -F'\t' -v d="$app_dir $app_cmd" '$1=="app" { exit ($2=="archive" && $3=="1.0" && $5==d) ? 0 : 1 }' "$TESTHOME/.local/share/tlstore/installed.tsv"; then pass; else fail "the state records the kind, version, directory and wrapper" "$(cat "$TESTHOME/.local/share/tlstore/installed.tsv")"; fi
+    if awk -F'\t' -v d="$(sha "$FX/rel/2.0/app-aarch64")" '$1=="app" { exit ($7==d) ? 0 : 1 }' "$TESTHOME/.local/share/tlstore/installed.tsv"; then pass; else fail "and the digest of the archive it came from"; fi
+    tl doctor
+    expect_no_out "doctor finds the directory and the wrapper" "Missing"
+
+    : > "$ROOT/curl.log"
+    tl update --offline -y app
+    expect_out "the same build again is not an update" "Everything is up to date."
+    if grep -q "app-aarch64" "$ROOT/curl.log"; then fail "and nothing is fetched for it"; else pass; fi
+
+    # A newer build, after the person changed a file inside the directory and added one.
+    printf 'my edit\n' > "$app_dir/lib/deep/data"
+    printf 'mine\n' > "$app_dir/mine.txt"
+    write_app_catalog 1.1 2.1
+    tl update --check --offline
+    expect_out "update --check names the newer build" "app 1.1 is available; you have 1.0"
+    tl update --offline -y app
+    expect_status "the newer build installs" 0
+    if [ "$("$app_cmd" 2>&1 | head -1)" = "app 2 " ]; then pass; else fail "the wrapper runs the new build" "$("$app_cmd" 2>&1)"; fi
+    expect_content "the directory is replaced whole: an edit inside it goes" "$app_dir/lib/deep/data" "data of app 2"
+    expect_no_file "a file of yours in it goes too" "$app_dir/mine.txt"
+    expect_no_file "and so does one the new build no longer has" "$app_dir/lib/gone-later"
+    expect_no_file "nothing is left beside it" "$app_dir.old"
+    if awk -F'\t' '$1=="app" { exit ($3=="1.1" && $8=="1.0") ? 0 : 1 }' "$TESTHOME/.local/share/tlstore/installed.tsv"; then pass; else fail "the state has the new version, and the one before it" "$(cat "$TESTHOME/.local/share/tlstore/installed.tsv")"; fi
+
+    tl rollback app -y
+    expect_status "an archive rolls back" 0
+    if [ "$("$app_cmd" 2>&1 | head -1)" = "app 1 " ]; then pass; else fail "to the build it had before" "$("$app_cmd" 2>&1)"; fi
+    expect_content "the whole directory with it" "$app_dir/lib/gone-later" "only in the first build"
+    tl unhold app
+
+    tl remove app -y
+    expect_status "an archive is removed" 0
+    expect_no_file "its directory goes" "$app_dir"
+    expect_no_file "and its wrapper" "$app_cmd"
+    if grep -q '^app	' "$TESTHOME/.local/share/tlstore/installed.tsv" 2>/dev/null; then fail "and its state row"; else pass; fi
+
+    tl_stdout install app --progress
+    if printf '%s\n' "$OUT" | grep -q $'^done\tapp\tok\t'; then pass; else fail "--progress ends an archive with a done ok line" "$OUT"; fi
+    tl remove app -y
+
+    tl install applead -y
+    if [ "$ST" != 0 ]; then pass; else fail "an archive without its program at exe= is refused"; fi
+    expect_out "and says which program is missing" "has no bin/app to run"
+    expect_no_file "nothing is put in place" "$TESTHOME/.local/lib/applead"
+    expect_no_file "no unpack directory is left" "$TESTHOME/.local/lib/applead.new"
+    expect_no_file "and no wrapper is written" "$TESTHOME/.local/bin/applead"
+    if grep -q '^applead	' "$TESTHOME/.local/share/tlstore/installed.tsv" 2>/dev/null; then fail "nor is it recorded"; else pass; fi
+    tl install appnox -y
+    if [ "$ST" != 0 ]; then pass; else fail "an archive whose program is not executable is refused"; fi
+    expect_no_file "and nothing is put in place" "$TESTHOME/.local/lib/appnox"
+    tl install appnoexe -y
+    if [ "$ST" != 0 ]; then pass; else fail "an archive with no exe= is refused"; fi
+    expect_no_file "and nothing is put in place" "$TESTHOME/.local/lib/appnoexe"
+    tl install appbad -y
+    if [ "$ST" != 0 ]; then pass; else fail "an archive whose digest does not match is refused"; fi
+    expect_out "with the download's own reason" "does not match what the list expects"
+    expect_no_file "and nothing is put in place" "$TESTHOME/.local/lib/appbad"
+    expect_no_file "nor a wrapper" "$TESTHOME/.local/bin/appbad"
+
+    write_app_catalog 1.0 2.0
+    ARCH_KNOB=x86_64
+    tl list --tsv
+    expect_out "an archive with an x86_64 build is offered on x86_64" $'^app\t'
+    expect_no_out "one without is not" $'^applead\t'
+    : > "$ROOT/curl.log"
+    ARCH_KNOB=x86_64
+    tl install app -y
+    expect_status "the x86_64 build of an archive installs" 0
+    if grep -q "file://$FX/rel/2.0/app-x86_64" "$ROOT/curl.log"; then pass; else fail "binaries:app@2.0 resolved to <releases>/2.0/app-x86_64 on x86_64" "$(cat "$ROOT/curl.log")"; fi
+    if grep -q "app-aarch64" "$ROOT/curl.log"; then fail "the aarch64 build is never fetched on x86_64"; else pass; fi
+    if [ "$("$app_cmd" 2>&1 | head -1)" = "app x86 " ]; then pass; else fail "and the wrapper runs the x86_64 build" "$("$app_cmd" 2>&1)"; fi
+    ARCH_KNOB=x86_64
+    tl remove app -y
+    ARCH_KNOB=riscv64
+    tl list --tsv
+    expect_no_out "no archive is offered on a processor with no prebuilt tools" $'^app\t'
+    rm -rf "$TESTHOME/.local"
+    mv "$ROOT/saved-local" "$TESTHOME/.local"
+
     # --- keeping tlstore itself current, with the store program that pairs with it ---
     if [ "$HAVE_MINISIGN" = 1 ]; then
         store="$TPREFIX/libexec/termux-launcher/tlstore"
@@ -3426,6 +3573,26 @@ if git -C "$repo" show dev:dist/tlstore > "$OLD_TLSTORE" 2>/dev/null; then
     OUT="$(old_env install hello -y)"; ST=$?
     expect_status "it can still install an item from the new catalog" 0
     expect_file "the file landed" "$TESTHOME/.config/hello.conf"
+    # An archive row (Revision 14) is a kind it has never heard of: it lists the item, and
+    # refuses to install it, putting nothing anywhere. That is all an older engine does with
+    # one until it takes the engine the same release carries.
+    mkdir -p "$FX/oldapp/bin"
+    printf '#!/bin/sh\necho old app\n' > "$FX/oldapp/bin/app"
+    chmod 755 "$FX/oldapp/bin/app"
+    tar czf "$FX/oldapp.tgz" -C "$FX/oldapp" .
+    mkdir -p "$TESTHOME/.local/share/tlstore"
+    {
+        printf '# tlstore catalog\tserial=2026090653\n'
+        printf 'oldapp\tarchive\t1\t*\tfile://%s/oldapp.tgz\t%s\t-\t-\texe=bin/app\tAn app in a folder of its own.\t%s\n' \
+            "$FX" "$(sha "$FX/oldapp.tgz")" "$R5_NONE"
+    } > "$TESTHOME/.local/share/tlstore/catalog.tsv"
+    OUT="$(old_env list)"; ST=$?
+    expect_status "its list still works with an archive row in it" 0
+    expect_out "and shows the item" "oldapp"
+    OUT="$(old_env install oldapp -y)"; ST=$?
+    if [ "$ST" != 0 ]; then pass; else fail "it refuses to install an archive" "$OUT"; fi
+    expect_no_file "and puts no directory down" "$TESTHOME/.local/lib/oldapp"
+    expect_no_file "nor a wrapper" "$TESTHOME/.local/bin/oldapp"
     rm -rf "$ROOT"
 else
     skip "dev-branch compatibility check" "no dev branch reachable from this worktree"
@@ -3559,6 +3726,22 @@ cp "$BC_ROOT/SHA256SUMS.arm" "$BC_SUMS"
 printf 'hand\tbinary\t1\t*\tbinaries:demo@1.0\t-\t-\tx86_64:digest=5555555555555555555555555555555555555555555555555555555555555555\tWritten by hand.\t-\t-\t0\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t0\t-\t-\n' >> "$bc_items"
 OUT="$(cd "$BC_ROOT" && bash scripts/build-catalog.sh "$BC_SUMS" 2>&1)"; ST=$?
 if [ "$ST" != 0 ]; then pass; else fail "a hand-written x86_64:digest is refused"; fi
+
+# archive (Revision 14): digested like a binary, x86_64:digest included, and refused without
+# an exe= that stays inside it.
+bc_write_items "$bc_items" 1 Tools
+printf '6666666666666666666666666666666666666666666666666666666666666666  app-aarch64\n' >> "$BC_SUMS"
+printf '7777777777777777777777777777777777777777777777777777777777777777  app-x86_64\n' >> "$BC_SUMS"
+printf 'app\tarchive\t1.0+abc1234.1\t*\tbinaries:app@1.0\t-\t-\texe=bin/app;command=app\tAn app.\t-\t-\t0\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t0\t-\t-\n' >> "$bc_items"
+OUT="$(cd "$BC_ROOT" && bash scripts/build-catalog.sh "$BC_SUMS" 2>&1)"; ST=$?
+if [ "$ST" = 0 ]; then pass; else fail "build-catalog.sh takes an archive row" "$OUT"; fi
+if awk -F'\t' '$1=="app" { exit ($2=="archive" && $6=="6666666666666666666666666666666666666666666666666666666666666666" && $9=="exe=bin/app;command=app;x86_64:digest=7777777777777777777777777777777777777777777777777777777777777777") ? 0 : 1 }' "$bc_cat"; then pass; else fail "an archive gets its digest and x86_64:digest from SHA256SUMS as a binary does" "$(grep '^app' "$bc_cat" | cut -f2,6,9)"; fi
+for bc_exe in "-" "exe=" "exe=/bin/app" "exe=../app" "exe=bin/../../app"; do
+    bc_write_items "$bc_items" 1 Tools
+    printf 'app\tarchive\t1.0\t*\tbinaries:app@1.0\t-\t-\t%s\tAn app.\t-\t-\t0\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t0\t-\t-\n' "$bc_exe" >> "$bc_items"
+    OUT="$(cd "$BC_ROOT" && bash scripts/build-catalog.sh "$BC_SUMS" 2>&1)"; ST=$?
+    if [ "$ST" != 0 ]; then pass; else fail "an archive with options '$bc_exe' is refused"; fi
+done
 
 rm -rf "$BC_ROOT"
 
