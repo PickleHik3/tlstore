@@ -62,7 +62,11 @@ impl ItemView {
     }
 
     fn job(&self, st: &mut Store, verb: Verb) -> Go {
-        if st.start_job(verb, vec![self.name.clone()]) {
+        let names = vec![self.name.clone()];
+        if verb == Verb::Install && !st.confirm_install(&names) {
+            return Go::Stay;
+        }
+        if st.start_job(verb, names) {
             Go::Push(Box::new(Installing::new()))
         } else {
             Go::Stay
@@ -126,11 +130,27 @@ impl View for ItemView {
         let mut links: Vec<String> = Vec::new();
         let link_st = pal.accent_s().underline(Underline::Dotted).ul_color(pal.accent);
         let dim_link_st = pal.dim_s().underline(Underline::Dotted).ul_color(pal.dim);
+        // Revision 15: the large Termux packages it pulls in, said before install, above the
+        // README; scrolls with the page.
+        // Blocks on screen, in drawing order (the motion fades them in one after another).
+        let mut k: u16 = 0;
+        if let Some(text) = info.packages().filter(|_| !self.installed(st)) {
+            for line in layout::wrap(text, b.w, 4) {
+                let el = if p.row(y).is_some() {
+                    k += 1;
+                    El::Block(k - 1)
+                } else {
+                    El::Block(u16::MAX)
+                };
+                p.text_clip(el, b.x, y, &line, pal.dim_s(), b.right());
+                y += 1;
+            }
+            y += 1;
+        }
         match readme {
             Readme::Doc(doc) => {
                 self.fit(&doc, b.w, &repo_url);
                 let fitted = self.fitted.as_ref().expect("fitted above");
-                let mut k: u16 = 0;
                 let ahead = self.scroll + self.view_h + PREFETCH_ROWS;
                 for (i, row) in fitted.rows.iter().enumerate() {
                     let visible = p.row(y).is_some();
@@ -252,7 +272,7 @@ impl View for ItemView {
             Readme::NoUpstream if setup => {}
             Readme::NoUpstream | Readme::Unavailable => {
                 let text = "read about it on GitHub";
-                let end = p.text_clip(El::Block(0), b.x, y, text, dim_link_st, b.right());
+                let end = p.text_clip(El::Block(k), b.x, y, text, dim_link_st, b.right());
                 if !repo_url.is_empty() {
                     let r = Rect::new(b.x, y, end.saturating_sub(b.x), 1);
                     p.link(r, &repo_url);

@@ -17,6 +17,8 @@ Notes	about 200 mb|needs a provider account to sign in
 Author	anomalyco
 Licence	MIT
 Size	~200 MB
+Packages	Also installs a large runtime from Termux: about 153 MB to download, 862 MB on disk (less if you already have some of them).
+Packages-size	153,862
 Picture	launcher:scripts/tlstore/pictures/opencode.jpg@5253e29ae8e128aad09b08fd57eb115ba66140d8
 Picture-digest	628951d862fe56794a8e1f46d979566f978c9e855757f9b8c5285d65e4151e8e
 Featured	0

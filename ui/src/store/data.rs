@@ -144,6 +144,17 @@ impl Info {
     pub fn standfirst(&self) -> &str {
         self.get("Standfirst").or(self.get("Summary")).unwrap_or("")
     }
+    /// The line the item's page shows before install when the Termux packages it pulls in are
+    /// large (`Packages`, Revision 15): "Also installs …: about N MB to download, M MB on disk
+    /// (…)". The script sends it only above its threshold, so its presence is the signal.
+    pub fn packages(&self) -> Option<&str> {
+        self.get("Packages")
+    }
+    /// The two figures in that line (`Packages-size`, `<download MB>,<disk MB>`).
+    pub fn packages_size(&self) -> Option<(u32, u32)> {
+        let (dl, disk) = self.get("Packages-size")?.split_once(',')?;
+        Some((dl.trim().parse().ok()?, disk.trim().parse().ok()?))
+    }
     /// README section titles the catalog asks to leave out (`Readme-skip`, `|`-separated).
     pub fn readme_skip(&self) -> Vec<String> {
         self.get("Readme-skip")
@@ -446,6 +457,16 @@ mod tests {
         assert!(Info::parse("Readme-skip\t-\n").readme_skip().is_empty());
         let u = parse_updates("kitten\t0.48.2\t0.49\t\nclaude-code\t1.0\tlatest\tlatest\n");
         assert_eq!(u[1].new, "latest");
+    }
+
+    #[test]
+    fn packages_line_and_its_figures() {
+        let i = Info::parse("Packages\tAlso installs Termux's Electron: about 153 MB\nPackages-size\t153,862\n");
+        assert_eq!(i.packages(), Some("Also installs Termux's Electron: about 153 MB"));
+        assert_eq!(i.packages_size(), Some((153, 862)));
+        let none = Info::parse("Kind\tbinary\n");
+        assert!(none.packages().is_none() && none.packages_size().is_none());
+        assert!(Info::parse("Packages-size\t153\n").packages_size().is_none());
     }
 
     #[test]

@@ -335,6 +335,9 @@ pub struct Store {
     pub notice: Option<String>,
     /// … or until then, when the notice is on a timer (the "tlstore updated to …" line).
     pub notice_until: Option<Instant>,
+    /// An install that pulls in large Termux packages, held for a second `i` (Revision 15);
+    /// any other key or tap lets it go.
+    pub confirm: Option<Vec<String>>,
     /// A newer store, as the startup check reports it.
     pub self_update: SelfUpdate,
     /// What the last check of the item list and of tlstore itself found (the snapshot's
@@ -415,6 +418,7 @@ impl Store {
             fullscreen: false,
             notice: None,
             notice_until: None,
+            confirm: None,
             self_update: SelfUpdate::Checking,
             channels: Channels::default(),
             self_update_started: false,
@@ -602,6 +606,29 @@ impl Store {
 
     pub fn job_running(&self) -> bool {
         self.job.as_ref().is_some_and(Job::running)
+    }
+
+    /// True when installing `names` may start now. When one of them that is not installed
+    /// pulls in large Termux packages (its info has `Packages`, Revision 15), the first `i`
+    /// puts what they take on the notice row and holds the install; the same `i` again lets it
+    /// go. `tlstore install --progress` asks nothing, so this is the store's own question,
+    /// as `Go ahead?` is the terminal's.
+    pub fn confirm_install(&mut self, names: &[String]) -> bool {
+        let heavy = names
+            .iter()
+            .filter(|n| !self.cat.item(n).is_some_and(|i| i.installed.is_some()))
+            .find_map(|n| self.cat.info(n).packages_size());
+        let Some((dl, disk)) = heavy else {
+            self.confirm = None;
+            return true;
+        };
+        if self.confirm.as_deref() == Some(names) {
+            self.confirm = None;
+            return true;
+        }
+        self.confirm = Some(names.to_vec());
+        self.notice = Some(format!("{dl} MB download, {disk} MB on disk · press i again"));
+        false
     }
 
     /// Starts `tlstore <verb> --progress names…` (after the refresh, if one runs).
@@ -1585,6 +1612,10 @@ impl Screen for Router {
             }
             other => *other,
         };
+        // A held install waits for `i` again; anything else the person does lets it go.
+        if matches!(ev, Event::Key(_) | Event::Tap { .. }) && !matches!(ev, Event::Key(Key::Char('i'))) {
+            self.st.confirm = None;
+        }
         let top = self.views.len() - 1;
         let go = self.views[top].handle(&ev, &mut self.st);
         let go = match (go, ev) {

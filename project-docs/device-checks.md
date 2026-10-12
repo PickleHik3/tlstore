@@ -34,3 +34,8 @@ and a catalog that has the terminal-browser row from `docs/maintainer/catalog.md
    next `tlstore install terminal-browser` starts from x11-repo again.
 8. `tlstore update` on a phone with several pkg items and an upgrade over 50 MB waiting asks
    `Go ahead?` after the size line; with only small upgrades it asks nothing, as before.
+9. In the store app (Termux Launcher): terminal-browser's page shows the "Also installs …" line
+   above the README while it is not installed; the first `i` puts "153 MB download, 862 MB on
+   disk · press i again" on the notice row and starts nothing; a second `i` installs; any other
+   key or tap in between lets it go. The notice fits at the phone's usual width (47 columns).
+10. The same from Front, on terminal-browser's row and with it selected among other items.
