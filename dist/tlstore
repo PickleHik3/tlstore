@@ -49,7 +49,7 @@
 
 set -u
 
-TLSTORE_VERSION=0.13
+TLSTORE_VERSION=0.17
 
 # The store program that pairs with this script, one digest per processor.
 # Empty in the source tree: scripts/release.sh --prepare fills them in from
@@ -58,9 +58,9 @@ TLSTORE_VERSION=0.13
 # self_update, which reads them out of the downloaded copy, not this one).
 # Keep these two lines exactly in this shape.
 # shellcheck disable=SC2034
-TLSTORE_UI_SHA256_arm64_v8a=5f8e54dd152907aba6399d37e8969f664678162783c0a1cb195876f872fb8a6f
+TLSTORE_UI_SHA256_arm64_v8a=3975c5b854b574b66650df41fd293aa9e02173a8b4615b91bc4fa97c8e179344
 # shellcheck disable=SC2034
-TLSTORE_UI_SHA256_x86_64=06ee034da1e77e2bc3ac1eca299c05a487133a44330b0dd4e6f9cb6c6bbedf1b
+TLSTORE_UI_SHA256_x86_64=945f04c11f2052b835bfb419dba1af85613c388802cb811779c19550a25b5430
 
 PREFIX="${TLSTORE_PREFIX:-${PREFIX:-${HOME%/files/home}/files/usr}}"
 HOME="${HOME:?tlstore needs HOME}"
@@ -334,10 +334,11 @@ need_catalog() {
 # a new enough launcher; first row per name wins. Off aarch64 a row comes out
 # with its <arch>:source, <arch>:digest and <arch>:target options already in
 # place of columns 5, 6 and 7, so nothing downstream needs to know the
-# processor. A binary is here only with its own <arch>:digest (build-catalog.sh
-# writes it once that build is published); an npm-musl or npm-android item only
-# with its own <arch>:source (the npm package built for it), and an npm-musl
-# item only while its musl loader and libraries are here as well.
+# processor. A binary or an archive is here only with its own <arch>:digest
+# (build-catalog.sh writes it once that build is published); an npm-musl or
+# npm-android item only with its own <arch>:source (the npm package built for
+# it), and an npm-musl item only while its musl loader and libraries are here
+# as well.
 rows() {
     awk -F "$TAB" -v OFS="$TAB" -v pkgname="$APP_PACKAGE" -v archok="$ARCH_OK" \
         -v arch="$ARCH" -v host="$HOST" -v lver="$LAUNCHER_VERSION" '
@@ -348,10 +349,10 @@ rows() {
             return 0
         }
         function arch_ok(kind, opts) {
-            if (kind != "binary" && kind != "npm-musl" && kind != "npm-android") return 1
+            if (kind != "binary" && kind != "archive" && kind != "npm-musl" && kind != "npm-android") return 1
             if (archok != "1") return 0
             if (arch == "aarch64") return 1
-            if (kind == "binary") return optval(opts, arch ":digest") != ""
+            if (kind == "binary" || kind == "archive") return optval(opts, arch ":digest") != ""
             return optval(opts, arch ":source") != ""
         }
         function for_arch(   v) {
@@ -561,7 +562,9 @@ source_url() {
 # `claude`) unless command=<name> says otherwise. A package that keeps its
 # executable in a subdirectory (npm:x#bin/y) still gets the bare name. A binary with priv=shizuku lands twice as well: the program
 # under PRIV_DIR, off PATH, then the wrapper on PATH that runs it through
-# tl-priv.
+# tl-priv. An archive lands twice too: the directory it unpacks into
+# (~/.local/lib/<name>, like the npm kinds), then the wrapper, named after the
+# item unless command=<name> says otherwise.
 item_targets() {
     case "$2" in
         binary|file|file-once)
@@ -591,6 +594,15 @@ item_targets() {
                 printf '%s %s' "$LIB_DIR/$1" "$BIN_DIR/$it_exe"
             else
                 printf '%s %s' "$(expand_path "$3")" "$BIN_DIR/$it_exe"
+            fi
+            ;;
+        archive)
+            it_cmd=$(opt "${5:-}" command)
+            [ -n "$it_cmd" ] || it_cmd="$1"
+            if [ "$3" = "-" ] || [ -z "$3" ]; then
+                printf '%s %s' "$LIB_DIR/$1" "$BIN_DIR/$it_cmd"
+            else
+                printf '%s %s' "$(expand_path "$3")" "$BIN_DIR/$it_cmd"
             fi
             ;;
     esac
@@ -1080,6 +1092,105 @@ conflict_check() {
     return 0
 }
 
+# pkg_refresh — the package lists, read again: after a package that adds a package source
+# (repo=1, Revision 15), so the next call knows what that source offers. Termux's own pkg
+# refreshes only when its main list is old, which a source added a moment ago never is. On
+# pacman the plan's next call is a -Sy, which is the refresh.
+pkg_refresh() {
+    if have pacman; then
+        return 0
+    elif have apt-get; then
+        pm_run apt-get update
+    else
+        return 1
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# What Termux packages take (Revision 15)
+# ---------------------------------------------------------------------------
+
+# Above this many MB, to download or to keep, a plan says what its Termux packages take before
+# it asks to go ahead, and an item page shows its pkg-size= sentence. Below it nothing changes.
+WEIGH_ASK_MB=50
+
+# weigh_parse — apt-get's install output on stdin, in the C locale; prints "<download MB>
+# <disk MB>" when it said what it would fetch, nothing when it did not. apt 2 says "Need to get
+# 1234 kB/75.3 MB of archives." (the first figure is what is not in its cache yet) and "After
+# this operation, 414 MB of additional disk space will be used." (or "freed", which is 0 here);
+# apt 3 says "Download size: …" and "Space needed: …" instead. Sizes are decimal, as apt's are.
+weigh_parse() {
+    awk '
+        function bytes(n, u) {
+            gsub(",", "", n)
+            sub("/.*", "", u)
+            n += 0
+            if (u == "kB") return n * 1000
+            if (u == "MB") return n * 1000000
+            if (u == "GB") return n * 1000000000
+            if (u == "TB") return n * 1000000000000
+            return n
+        }
+        function mb(b) { return int(b / 1000000 + 0.5) }
+        /^Need to get / { dl = bytes($4, $5); seen = 1; next }
+        /^ *Download size: / { sub(/^ *Download size: /, ""); dl = bytes($1, $2); seen = 1; next }
+        /^After this operation, .* be used/ { disk = bytes($4, $5); seen = 1; next }
+        /^ *Space needed: / { sub(/^ *Space needed: /, ""); disk = bytes($1, $2); seen = 1; next }
+        END { if (seen) printf "%d %d\n", mb(dl), mb(disk) }'
+}
+
+# weigh_apt <packages> — what apt says this phone still needs for them: wa_dl and wa_disk, in
+# MB, both 0 when nothing is missing. --print-uris keeps it from ever installing: apt asks
+# before it installs more than the names it was given, and --assume-no answers that; with
+# nothing more to add it would install without asking, and --print-uris stops it there and
+# only prints addresses. Returns 1 when apt is not the package manager here or cannot work it
+# out (a package no source it reads has yet, such as one from a source the plan adds first).
+weigh_apt() {
+    wa_dl=0
+    wa_disk=0
+    ! have pacman || return 1
+    have apt-get || return 1
+    wa_out=$(LC_ALL=C apt-get install --print-uris --assume-no -q "$@" 2>&1)
+    wa_rc=$?
+    wa_sizes=$(printf '%s\n' "$wa_out" | weigh_parse)
+    if [ -n "$wa_sizes" ]; then
+        wa_dl="${wa_sizes% *}"
+        wa_disk="${wa_sizes#* }"
+        return 0
+    fi
+    [ "$wa_rc" = 0 ]
+}
+
+# item_weight <options> — an item's pkg-size=<download MB>,<disk MB> and pkg-what=<words>:
+# what the Termux packages it pulls in (its own and its parts') take on a stock Termux, as
+# scripts/pkg-weight.py computes it. Sets iw_dl, iw_disk and iw_what; returns 1 without a
+# usable pkg-size.
+item_weight() {
+    iw_v=$(opt "$1" pkg-size)
+    case "$iw_v" in
+        *[!0-9,]*|*,*,*|,*|*,|0[0-9]*|*,0[0-9]*) return 1 ;;
+        *,*) ;;
+        *) return 1 ;;
+    esac
+    iw_dl="${iw_v%,*}"
+    iw_disk="${iw_v#*,}"
+    iw_what=$(opt "$1" pkg-what)
+    [ -n "$iw_what" ] || iw_what="packages from Termux"
+    return 0
+}
+
+# weight_sentence <what> <download MB> <disk MB> — the line an item page shows before install,
+# and what a plan says when apt cannot tell it more. snapshot_rows writes the same words in awk.
+weight_sentence() {
+    printf 'Also installs %s: about %s MB to download, %s MB on disk (less if you already have some of them).' \
+        "$1" "$2" "$3"
+}
+
+# heavy <download MB> <disk MB> — more than WEIGH_ASK_MB of either.
+heavy() {
+    [ "$1" -gt "$WEIGH_ASK_MB" ] || [ "$2" -gt "$WEIGH_ASK_MB" ]
+}
+
 # ---------------------------------------------------------------------------
 # Lists of names (space separated; names are [a-z0-9-]+ so words are safe)
 # ---------------------------------------------------------------------------
@@ -1291,7 +1402,7 @@ install_item() {
     ii_target="$it_target"
     ii_options="$it_options"
     # A rollback installs an earlier version in place of the list's: its
-    # version, and for a binary or file its own source and digest.
+    # version, and for a binary, an archive or a file its own source and digest.
     if [ -n "${RB_VERSION:-}" ]; then
         ii_version="$RB_VERSION"
         if [ -n "${RB_SOURCE:-}" ]; then
@@ -1319,6 +1430,7 @@ install_item() {
         fisher) do_fisher ;;
         npm-musl) do_npm_musl ;;
         npm-android) do_npm_musl ;;
+        archive) do_archive ;;
         bundle) do_bundle ;;
         *) err "$ii_name cannot be installed here"; return 1 ;;
     esac
@@ -1540,6 +1652,21 @@ npm_latest_version() {
     curl -fsSL --connect-timeout 5 --max-time 60 "$NPM_REGISTRY/$nl_package/latest" 2>/dev/null | json_field version
 }
 
+# np_runtime_refresh <installed> <copy> <mode> — replaces an npm-musl
+# program's copy of a musl part when the installed part differs. The copy is
+# renamed into place, never written over: a running program has it mapped.
+np_runtime_refresh() {
+    [ -f "$1" ] || return 0
+    [ "$(file_digest "$1")" != "$(file_digest "$2" 2>/dev/null)" ] || return 0
+    if cp -f "$1" "$2.new" && chmod "$3" "$2.new" && mv -f "$2.new" "$2"; then
+        say "  updated its copy of ${2##*/}"
+        return 0
+    fi
+    rm -f "$2.new"
+    err "could not update ${2##*/} beside $ii_name"
+    return 1
+}
+
 # do_npm_musl installs both npm kinds. npm-musl is a musl binary that needs
 # our loader and a patchelf pass; npm-android is a Bionic executable that runs
 # as it is, so it skips the loader, the musl libraries and patchelf.
@@ -1584,6 +1711,19 @@ do_npm_musl() {
     if [ -x "$np_dir/$np_exe" ] && [ "$(cat "$np_dir/version" 2>/dev/null)" = "$np_version" ] &&
         { [ "$ii_kind" != npm-musl ] || [ -e "$np_dir/rpath-first" ]; }; then
         say "  $ii_name $np_version is already here"
+        # Its loader and libraries are copies taken when it was unpacked; a
+        # rebuilt musl-loader (updated first, as a part this needs) reaches
+        # the program here rather than with its next version.
+        if [ "$ii_kind" = npm-musl ]; then
+            np_runtime_refresh "$(item_targets musl-loader binary "$(field "$np_loader_row" 7)")" \
+                "$np_dir/ld-musl-$ARCH.so.1" 755 || return 1
+            for np_lib in $(commas "$(opt "$ii_options" musl-libs)"); do
+                np_lib_row=$(row "$np_lib")
+                [ -n "$np_lib_row" ] || continue
+                np_lib_have=$(item_targets "$np_lib" binary "$(field "$np_lib_row" 7)")
+                np_runtime_refresh "$np_lib_have" "$np_dir/${np_lib_have##*/}" 644 || return 1
+            done
+        fi
     else
         say "  downloading $ii_name $np_version"
         mkdir -p "$(dirname "$np_dir")"
@@ -1685,30 +1825,96 @@ do_npm_musl() {
         rm -rf "$np_dir.old"
     fi
 
+    wrapper_write "$np_wrapper" "$np_dir/$np_exe"
+    state_record "$ii_name" "$ii_kind" "$np_version" "$np_dir" "$np_wrapper"
+    say "  $np_wrapper"
+    return 0
+}
+
+# wrapper_write <wrapper> <program> — the command on PATH for an item that
+# lives in a directory of its own (the npm kinds, an archive): it exports what
+# env= names, sets TZ for tz=1, and execs the program with args= in front of
+# the person's own arguments. What was at <wrapper> before is kept as a .bak
+# unless this item wrote it (backup_existing). Reads ii_options.
+wrapper_write() {
     mkdir -p "$BIN_DIR"
-    backup_existing "$np_wrapper"
-    np_envs=$(commas "$(opt "$ii_options" env)")
+    backup_existing "$1"
+    ww_envs=$(commas "$(opt "$ii_options" env)")
     {
         printf '#!%s/bin/sh\n' "$PREFIX"
         printf '# written by termux-launcher\n'
-        for np_e in $np_envs; do
-            printf 'export %s\n' "$np_e"
+        for ww_e in $ww_envs; do
+            printf 'export %s\n' "$ww_e"
         done
         if [ "$(opt "$ii_options" tz)" = 1 ]; then
             # shellcheck disable=SC2016  # written into the wrapper, expanded there
             printf '%s\n' '[ -n "${TZ:-}" ] || TZ=$(getprop persist.sys.timezone 2>/dev/null) && export TZ'
         fi
         # args=<words> go in unquoted, before the person's own arguments.
-        np_args=$(opt "$ii_options" args)
-        if [ -n "$np_args" ]; then
-            printf 'exec "%s" %s "$@"\n' "$np_dir/$np_exe" "$np_args"
+        ww_args=$(opt "$ii_options" args)
+        if [ -n "$ww_args" ]; then
+            printf 'exec "%s" %s "$@"\n' "$2" "$ww_args"
         else
-            printf 'exec "%s" "$@"\n' "$np_dir/$np_exe"
+            printf 'exec "%s" "$@"\n' "$2"
         fi
-    } > "$np_wrapper"
-    chmod 755 "$np_wrapper"
-    state_record "$ii_name" "$ii_kind" "$np_version" "$np_dir" "$np_wrapper"
-    say "  $np_wrapper"
+    } > "$1"
+    chmod 755 "$1"
+}
+
+# do_archive — an app that is a whole directory (an Electron app's tree, say),
+# shipped as one pinned .tar.gz whose top level is the app's root (packed with
+# `tar czf <asset> -C <app> .`; nothing is stripped). The payload is the one
+# plan_apply fetched and checked against the row's digest, or a download for a
+# rollback. It unpacks beside the directory as <dir>.new, must hold exe=<path
+# inside it> as an executable file, and only then replaces the directory whole:
+# the directory is the store's, and anything changed inside it goes with the
+# next update. The wrapper on PATH execs that program.
+do_archive() {
+    da_dir=$(item_targets "$ii_name" archive "$ii_target" "$ii_source" "$ii_options")
+    da_wrapper="${da_dir##* }"
+    da_dir="${da_dir%% *}"
+    da_exe=$(opt "$ii_options" exe)
+    case "$da_exe" in
+        ''|/*|..|../*|*/..|*/../*)
+            err "$ii_name does not say which program in it to run"
+            return 1
+            ;;
+    esac
+    case "$ii_digest" in
+        ''|-) err "$ii_name came without a checksum — nothing was installed"; return 1 ;;
+    esac
+    have tar || { err "tar is missing — install it and try again"; return 1; }
+
+    say "installing $ii_name"
+    da_tgz="$CACHE_DIR/$ii_name.tgz"
+    mkdir -p "$CACHE_DIR" "$(dirname "$da_dir")"
+    payload_to "$(source_url "$ii_source")" "$da_tgz" "$ii_digest" || return 1
+    rm -rf "$da_dir.new"
+    mkdir -p "$da_dir.new"
+    CANCEL_EXTRA="$da_tgz $da_dir.new"
+    if ! tar xzf "$da_tgz" -C "$da_dir.new"; then
+        rm -f "$da_tgz"
+        rm -rf "$da_dir.new"
+        CANCEL_EXTRA=""
+        err "the $ii_name download is not what was expected"
+        return 1
+    fi
+    rm -f "$da_tgz"
+    if [ ! -f "$da_dir.new/$da_exe" ] || [ ! -x "$da_dir.new/$da_exe" ]; then
+        rm -rf "$da_dir.new"
+        CANCEL_EXTRA=""
+        err "the $ii_name download has no $da_exe to run — nothing was installed"
+        return 1
+    fi
+    CANCEL_EXTRA=""
+    rm -rf "$da_dir.old"
+    [ ! -e "$da_dir" ] || mv "$da_dir" "$da_dir.old"
+    mv "$da_dir.new" "$da_dir"
+    rm -rf "$da_dir.old"
+
+    wrapper_write "$da_wrapper" "$da_dir/$da_exe"
+    state_record "$ii_name" archive "$ii_version" "$da_dir" "$da_wrapper"
+    say "  $da_wrapper"
     return 0
 }
 
@@ -1783,7 +1989,9 @@ remove_item() {
 # digest); an edited file is left alone and the state entry is simply
 # forgotten, so a retirement never overwrites or deletes the person's own
 # changes. Every other kind falls back to remove_item's own behaviour (a pkg
-# just stops being tracked; the package itself stays installed).
+# just stops being tracked; the package itself stays installed). That includes
+# an archive: its directory is the store's, replaced whole on every update, so
+# there is no edit of yours in it to keep, and it goes the way remove takes it.
 retire_item() {
     rt_name="$1"
     rt_row=$(row "$rt_name")
@@ -2228,7 +2436,8 @@ Usage: tlstore [-y] install [options] [name...]
        tlstore add ...
 
 Installs items, and the parts they need, in the order they need them.
-With no names it shows a list to pick from.
+With no names it shows a list to pick from. When the packages they need
+from Termux come to more than 50 MB, it says how much before it asks.
 
 Options:
   -n, --dry-run  say what would be installed, and change nothing
@@ -2267,7 +2476,8 @@ Usage: tlstore [-y] update [options] [name...]
 Fetches the newest item list and brings what you have up to date, then offers
 a newer tlstore when there is one: answer yes, no, or never. With no names it
 does everything you have installed, except items you have held; naming a held
-item updates it and lets go of the hold.
+item updates it and lets go of the hold. When the packages it needs from
+Termux come to more than 50 MB, it says how much and asks first.
 
 Options:
   --check        say what would change, and change nothing
@@ -2290,10 +2500,10 @@ Puts an item back at the version it had before its last update, then holds it
 there so the next update does not undo that. It goes one step only; to move
 forward again, run 'tlstore unhold <name>' and 'tlstore update <name>'.
 
-Works for items from npm, binaries and config files. A package, a bundle or a
-fish plugin cannot go back: Termux keeps only the newest package, and the
-others have no version of their own to return to. An item installed before
-tlstore recorded versions has nothing to go back to until it updates once.
+Works for items from npm, binaries, app archives and config files. A package,
+a bundle or a fish plugin cannot go back: Termux keeps only the newest package,
+and the others have no version of their own to return to. An item installed
+before tlstore recorded versions has nothing to go back to until it updates once.
 
 Options:
   -n, --dry-run  say what would be installed, and change nothing
@@ -2543,6 +2753,12 @@ cmd_info() {
         [ "$it_author" = - ] || printf '%s\t%s\n' Author "$it_author"
         [ "$it_licence" = - ] || printf '%s\t%s\n' Licence "$it_licence"
         [ "$it_size" = - ] || printf '%s\t%s\n' Size "$it_size"
+        # Revision 15: the line its page shows before install, and the two figures, when its
+        # Termux packages are large. An older tlstore-ui skips keys it does not know.
+        if item_weight "$it_options" && heavy "$iw_dl" "$iw_disk"; then
+            printf '%s\t%s\n' Packages "$(weight_sentence "$iw_what" "$iw_dl" "$iw_disk")"
+            printf '%s\t%s,%s\n' Packages-size "$iw_dl" "$iw_disk"
+        fi
         if [ "$it_picture" != - ]; then
             printf '%s\t%s\n' Picture "$it_picture"
             printf '%s\t%s\n' Picture-digest "$it_picture_digest"
@@ -2577,6 +2793,9 @@ cmd_info() {
     [ "$it_author" = - ] || printf '  %-11s %s\n' Author "$it_author"
     [ "$it_licence" = - ] || printf '  %-11s %s\n' Licence "$it_licence"
     [ "$it_size" = - ] || printf '  %-11s %s\n' Size "$it_size"
+    if item_weight "$it_options" && heavy "$iw_dl" "$iw_disk"; then
+        printf '  %-11s %s\n' Packages "$(weight_sentence "$iw_what" "$iw_dl" "$iw_disk")"
+    fi
     return 0
 }
 
@@ -3091,7 +3310,7 @@ snapshot_rows() {
     rows | awk -F "$TAB" -v OFS="$TAB" -v state="$STATE" -v heldfile="$HELD" -v home="$HOME" \
         -v bindir="$BIN_DIR" -v libdir="$LIB_DIR" -v privdir="$PRIV_DIR" \
         -v cachedir="$CACHE_DIR" -v launcher_raw="$LAUNCHER_RAW" -v binaries_raw="$BINARIES_RAW" \
-        -v binaries_rel="$BINARIES_RELEASES" -v arch="$ARCH" '
+        -v binaries_rel="$BINARIES_RELEASES" -v arch="$ARCH" -v ask="$WEIGH_ASK_MB" '
         function optval(list, key,   n, i, parts) {
             n = split(list, parts, ";")
             for (i = 1; i <= n; i++)
@@ -3123,6 +3342,12 @@ snapshot_rows() {
                 if (target == "-" || target == "") return libdir "/" name " " bindir "/" exe
                 return expand(target) " " bindir "/" exe
             }
+            if (kind == "archive") {
+                exe = optval(opts, "command")
+                if (exe == "") exe = name
+                if (target == "-" || target == "") return libdir "/" name " " bindir "/" exe
+                return expand(target) " " bindir "/" exe
+            }
             return ""
         }
         # source_url, as the shell does it.
@@ -3147,6 +3372,18 @@ snapshot_rows() {
             sub(/.*\./, "", e)
             if (e == "" || e ~ /[^a-zA-Z0-9]/) e = "jpg"
             return e
+        }
+        # item_weight, heavy and weight_sentence, as the shell does them (Revision 15).
+        function weight(name, opts,   v, what, dl, disk) {
+            v = optval(opts, "pkg-size")
+            if (v !~ /^(0|[1-9][0-9]*),(0|[1-9][0-9]*)$/) return
+            dl = v; sub(/,.*/, "", dl)
+            disk = v; sub(/.*,/, "", disk)
+            if (dl + 0 <= ask + 0 && disk + 0 <= ask + 0) return
+            what = optval(opts, "pkg-what")
+            if (what == "") what = "packages from Termux"
+            put(name, "Packages", "Also installs " what ": about " dl " MB to download, " disk " MB on disk (less if you already have some of them).")
+            put(name, "Packages-size", dl "," disk)
         }
         function put(name, key, value) { print "field", name, key, value }
         function put_known(name, key, value) { if (value != "-") put(name, key, value) }
@@ -3200,6 +3437,7 @@ snapshot_rows() {
                 put_known(name, "Author", dash($20))
                 put_known(name, "Licence", dash($21))
                 put_known(name, "Size", dash($22))
+                weight(name, opts)
                 if (dash($23) != "-") {
                     put(name, "Picture", $23)
                     put(name, "Picture-digest", $24)
@@ -3854,10 +4092,10 @@ plan_build_update() {
             continue
         fi
         map_get "$bu_rows" "$bu_n"
-        bu_act="${mg_v%%|*}"
-        bu_rest="${mg_v#*|}"
-        bu_ver="${bu_rest%%|*}"
-        bu_code="${bu_rest#*|}"
+        bu_act="${mg_v%%"|"*}"
+        bu_rest="${mg_v#*"|"}"
+        bu_ver="${bu_rest%%"|"*}"
+        bu_code="${bu_rest#*"|"}"
         case "$bu_code" in
             latest) bu_why="$PLAN_LATEST" ;;
             pkg) bu_why="the package manager checks it" ;;
@@ -4002,7 +4240,8 @@ plan_show() {
 }
 
 # Nothing is fetched, written or asked of the package manager, so the build
-# tools are named, not checked for.
+# tools are named, not checked for, and large packages are said from the
+# catalog's figures (plan_weight_say catalog).
 plan_show_install() {
     si_names=""
     say "Would install, in this order:"
@@ -4032,6 +4271,7 @@ plan_show_install() {
         say "Needed only while installing: $(words_list "$si_tools")"
         say "  (any that are missing are added first, and you are asked about taking them back)"
     fi
+    plan_weight_say catalog || :
     say "Nothing was changed."
 }
 
@@ -4177,33 +4417,71 @@ plan_tsv() {
     IFS="$pt_ifs"
 }
 
-# plan_packages — the plan's one call to the package manager, for every
-# package its pkg rows need and every build= tool that is missing. On pacman
-# that is one -Sy, so the lists are synced once; on apt an update upgrades
-# with --only-upgrade, so build tools there are a second call. Sets
-# pa_first_pkg (the first pkg row, which the call's --progress steps belong
-# to), pa_pkg_at (how far those steps got), pa_pkg_bad (pkg rows whose
-# packages are not all present afterwards) and pa_tools_bad (build tools that
-# did not arrive); the tools it added go in BUILD_ADDED.
-plan_packages() {
-    pp_pkgs=""
-    pp_names=""
-    pp_ifs="$IFS"
+# plan_pkg_list [rows] — the Termux packages the plan's install rows need: pl_pkgs (every pkg
+# row's packages), pl_repo (the packages of repo=1 rows that are not here yet, which add a
+# package source; Revision 15) and pl_repo_rows (those rows), pl_tools (the build= tools that
+# are missing), pl_names (every install row) and pl_first (the first pkg row). [rows] leaves out
+# the packages of those rows and of the rows that require one of them.
+plan_pkg_list() {
+    pl_pkgs=""
+    pl_repo=""
+    pl_repo_rows=""
+    pl_names=""
+    pl_first=""
+    pl_ifs="$IFS"
     IFS="$NL"
-    for pp_line in $PLAN; do
-        IFS="$pp_ifs"
-        plan_split "$pp_line"
+    for pl_line in $PLAN; do
+        IFS="$pl_ifs"
+        plan_split "$pl_line"
         [ "$ps_action" = install ] || continue
-        pp_names="$pp_names $ps_name"
+        pl_names="$pl_names $ps_name"
         [ "$ps_kind" = pkg ] || continue
-        [ -n "$pa_first_pkg" ] || pa_first_pkg="$ps_name"
-        pp_pkgs="$pp_pkgs $(field "$(row "$ps_name")" 5)"
+        [ -n "$pl_first" ] || pl_first="$ps_name"
+        pl_n="$ps_name"
+        if [ -n "${1:-}" ]; then
+            in_list "$1" "$pl_n" && continue
+            pb_row "$pl_n"
+            pl_skip=0
+            for pl_d in $(commas "$prw_deps"); do
+                in_list "$1" "$pl_d" && pl_skip=1
+            done
+            [ "$pl_skip" = 0 ] || continue
+        fi
+        pl_row=$(row "$pl_n")
+        pl_src=$(field "$pl_row" 5)
+        pl_pkgs="$pl_pkgs $pl_src"
+        [ "$(opt "$(field "$pl_row" 9)" repo)" = 1 ] || continue
+        for pl_p in $pl_src; do
+            pkg_present "$pl_p" && continue
+            pl_repo="$pl_repo $pl_p"
+            in_list "$pl_repo_rows" "$pl_n" || pl_repo_rows="$pl_repo_rows $pl_n"
+        done
     done
-    IFS="$pp_ifs"
-    pp_missing=""
-    for pp_t in $(build_tools_for "$pp_names" 1); do
-        pkg_present "$pp_t" || pp_missing="$pp_missing $pp_t"
+    IFS="$pl_ifs"
+    pl_tools=""
+    for pl_t in $(build_tools_for "$pl_names" 1); do
+        pkg_present "$pl_t" || pl_tools="$pl_tools $pl_t"
     done
+}
+
+# plan_packages — the plan's call to the package manager, for every package
+# its pkg rows need and every build= tool that is missing. On pacman that is
+# one -Sy, so the lists are synced once; on apt an update upgrades with
+# --only-upgrade, so build tools there are a second call. A repo=1 package
+# that is not here yet (it adds a package source; Revision 15) goes first, in
+# a call of its own, and the lists are read again (pkg_refresh) before the
+# rest, which may come from that source; when that fails, what needs it is
+# left out of the rest. Sets pa_first_pkg (the first pkg row, which the
+# calls' --progress steps belong to), pa_pkg_at (how far those steps got),
+# pa_pkg_bad (pkg rows whose packages are not all present afterwards) and
+# pa_tools_bad (build tools that did not arrive); the tools it added go in
+# BUILD_ADDED.
+plan_packages() {
+    plan_pkg_list
+    pa_first_pkg="$pl_first"
+    pp_pkgs="$pl_pkgs"
+    pp_missing="$pl_tools"
+    pp_ifs="$IFS"
     [ -n "$pp_pkgs$pp_missing" ] || return 0
 
     if [ "$PROGRESS" = 1 ] && [ -n "$pa_first_pkg" ]; then
@@ -4211,6 +4489,17 @@ plan_packages() {
         PROGRESS_AT=0
         progress_stage 10 fetched
     fi
+    pp_rc=0
+    if [ -n "$pl_repo" ]; then
+        say "Installing $(words_list "$pl_repo") first, for the packages that come from it"
+        # shellcheck disable=SC2086  # a list of package names, split on purpose
+        if ! install_pkg $pl_repo || ! pkg_refresh; then
+            pp_rc=1
+            plan_pkg_list "$pl_repo_rows"
+            pp_pkgs="$pl_pkgs"
+        fi
+    fi
+    [ -n "$(printf '%s' "$pp_pkgs" | tr -d ' ')" ] || pp_pkgs=""
     [ -z "$pp_missing" ] || say "Installing what is needed to build:$pp_missing"
     if [ -n "$pp_pkgs" ]; then
         if [ "$PLAN_VERB" = update ]; then
@@ -4219,9 +4508,10 @@ plan_packages() {
             say "Installing packages: $(words_list "$pp_pkgs")"
         fi
     fi
-    pp_rc=0
     # shellcheck disable=SC2086  # lists of package names, split on purpose
-    if have pacman; then
+    if [ -z "$pp_pkgs$pp_missing" ]; then
+        :
+    elif have pacman; then
         pm_run pacman -Sy --needed --noconfirm $pp_missing $pp_pkgs || pp_rc=1
     elif [ "$PLAN_VERB" = update ] && have apt; then
         [ -z "$pp_pkgs" ] || upgrade_pkg $pp_pkgs || pp_rc=1
@@ -4255,6 +4545,61 @@ plan_packages() {
         done
     done
     IFS="$pp_ifs"
+}
+
+# plan_weigh — what the plan's Termux packages take, before anything is installed (Revision 15):
+# pw_dl and pw_disk in MB, and pw_how, which says where the figures came from. `apt` is what apt
+# says this phone still needs for the same packages plan_packages will ask for (0 and 0 when
+# they are all here). When apt cannot say (not here, or one of the packages comes from a source
+# a repo=1 row adds first, which apt does not read yet) it is `catalog`: the sum of the
+# pkg-size= figures of the plan's install rows, a stock Termux's figures, with pw_what naming the
+# packages of the first. `none` when there are no packages, or neither knows. With `catalog`
+# (a dry run) the package manager is not asked anything and the catalog's figures are used.
+plan_weigh() {
+    pw_dl=0
+    pw_disk=0
+    pw_how=none
+    pw_what=""
+    if [ "${1:-}" != catalog ]; then
+        plan_pkg_list
+        [ -n "$(printf '%s' "$pl_pkgs$pl_tools" | tr -d ' ')" ] || return 0
+    fi
+    # shellcheck disable=SC2086  # lists of package names, split on purpose
+    if [ "${1:-}" != catalog ] && weigh_apt $pl_tools $pl_pkgs; then
+        pw_dl="$wa_dl"
+        pw_disk="$wa_disk"
+        pw_how=apt
+        return 0
+    fi
+    pw_ifs="$IFS"
+    IFS="$NL"
+    for pw_line in $PLAN; do
+        IFS="$pw_ifs"
+        plan_split "$pw_line"
+        [ "$ps_action" = install ] || continue
+        item_weight "$(field "$(row "$ps_name")" 9)" || continue
+        pw_dl=$((pw_dl + iw_dl))
+        pw_disk=$((pw_disk + iw_disk))
+        [ "$pw_how" = catalog ] || pw_what="$iw_what"
+        pw_how=catalog
+    done
+    IFS="$pw_ifs"
+}
+
+# plan_weight_say — says what the plan's Termux packages take when that is more than
+# WEIGH_ASK_MB to download or to keep, the way apt itself would before installing. Returns 0
+# when it said so, so a caller that does not always ask asks now; 1 when there was nothing to
+# say, and then nothing changes. [catalog] passes on to plan_weigh.
+plan_weight_say() {
+    plan_weigh "${1:-}"
+    [ "$pw_how" != none ] || return 1
+    heavy "$pw_dl" "$pw_disk" || return 1
+    if [ "$pw_how" = apt ]; then
+        say "The packages this needs from Termux take $pw_dl MB to download and $pw_disk MB more on disk."
+    else
+        say "$(weight_sentence "$pw_what" "$pw_dl" "$pw_disk")"
+    fi
+    return 0
 }
 
 # plan_apply — runs PLAN, row by row, in order. Each row ends ok, failed or
@@ -4324,8 +4669,8 @@ plan_apply() {
     return "$pa_rc"
 }
 
-# plan_fetch — step 3 of plan_apply: the payload of every binary, file and
-# file-once row the plan installs, downloaded and checked into STAGE_DIR before
+# plan_fetch — step 3 of plan_apply: the payload of every binary, archive, file
+# and file-once row the plan installs, downloaded and checked into STAGE_DIR before
 # any row is applied. One that does not arrive, or does not match its digest,
 # fails its row there and then, with the download's own reason, and goes in
 # pa_bad so what needs it is skipped; nothing on disk has changed by then. A
@@ -4361,15 +4706,17 @@ plan_fetch() {
             continue
         fi
         case "$pf_kind" in
-            binary|file|file-once) ;;
+            binary|archive|file|file-once) ;;
             *) continue ;;
         esac
         load_item "$pf_n" || continue
-        if [ "$pf_kind" != binary ]; then
-            pf_dest=$(item_targets "$pf_n" file "$it_target")
-            [ -n "$pf_dest" ] || continue
-            [ "$pf_kind" = file ] || [ ! -e "$pf_dest" ] || continue
-        fi
+        case "$pf_kind" in
+            file|file-once)
+                pf_dest=$(item_targets "$pf_n" file "$it_target")
+                [ -n "$pf_dest" ] || continue
+                [ "$pf_kind" = file ] || [ ! -e "$pf_dest" ] || continue
+                ;;
+        esac
         say "fetching $pf_n"
         LAST_ERR=""
         CANCEL_ITEM="$pf_n"
@@ -4621,6 +4968,8 @@ cmd_install() {
         return 0
     fi
     say "Installing: $(words_list "$(plan_names)")"
+    # Large Termux packages are named, with what they take, before the usual question.
+    plan_weight_say || :
     ask_yn "Go ahead?" || { say "Nothing was installed."; return 0; }
     plan_apply
 }
@@ -4694,6 +5043,10 @@ update_items() {
         say "Everything is up to date."
         return 0
     fi
+    # An update asks nothing, unless the Termux packages it needs are large (Revision 15).
+    if plan_weight_say; then
+        ask_yn "Go ahead?" || { say "Nothing was updated."; return 0; }
+    fi
     plan_apply
 }
 
@@ -4757,7 +5110,7 @@ cmd_rollback() {
     rb_src=$(field "$rb_row" 9)
     rb_dig=$(field "$rb_row" 10)
     case "$rb_kind" in
-        binary|file|file-once)
+        binary|archive|file|file-once)
             # Without the old file's address and digest there is nothing to fetch.
             if [ -z "$rb_src" ] || [ -z "$rb_dig" ]; then rb_ver=""; fi
             ;;
@@ -4773,7 +5126,7 @@ cmd_rollback() {
     if [ "$DRY_RUN" = 1 ]; then
         say "Would put $rb_name back from $rb_have to $rb_ver, and hold it there."
         case "$rb_kind" in
-            binary|file|file-once) say "  from $rb_src" ;;
+            binary|archive|file|file-once) say "  from $rb_src" ;;
         esac
         say "Nothing was changed."
         return 0
@@ -4782,7 +5135,7 @@ cmd_rollback() {
     ask_yn "Go ahead?" || { say "Nothing was changed."; return 0; }
     RB_VERSION="$rb_ver"
     case "$rb_kind" in
-        binary|file|file-once) RB_SOURCE="$rb_src"; RB_DIGEST="$rb_dig" ;;
+        binary|archive|file|file-once) RB_SOURCE="$rb_src"; RB_DIGEST="$rb_dig" ;;
         *) RB_SOURCE=""; RB_DIGEST="" ;;
     esac
     SR_CLEAR_PREV=1
