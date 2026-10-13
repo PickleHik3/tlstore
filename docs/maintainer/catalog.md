@@ -298,24 +298,12 @@ to go ahead. Both happen only above 50 MB of either; below that nothing changes.
    `x11-repo` is the one in use (`root-repo` would be the next). Keep both parts `com.termux`
    unless the other edition's own repository has the packages.
 
-### terminal-browser's row, ready to paste
+### terminal-browser
 
-`x11-repo` and `electron42` are already in `scripts/items.tsv`. terminal-browser's own row waits
-for its first `bins-…` build: run `gh workflow run build.yml -f tools=terminal-browser`, let
-`bins-record.sh` record the `terminal-browser-aarch64` (and `-x86_64`) lines, then paste this row
-after `sigye` in the visible block, putting the new tag in place of `<bins-tag>` and, in the
-`readme` column, the commit (or tag) that has this readme in place of `<readme-ref>`. The digests
-come from `SHA256SUMS` through `build-catalog.sh`, as always. Add it to the list of visible
-items in `items.tsv`'s header comment too.
-
-```
-terminal-browser	archive	0.13.4+fd5f179.1	com.termux	binaries:terminal-browser@<bins-tag>	-	electron42	exe=bin/terminal-browser;host=launcher;pkg-size=153,862;pkg-what=Termux's Electron and the libraries it needs	A real web browser in the terminal, with whole pages drawn beside your shell and your agents.	Tools	zenbu-labs/terminal-browser	0	a web browser that lives in the terminal	Shows whole web pages in the terminal	Follows taps, swipes and typing	Lets coding agents drive the same page	terminal-browser open en.wikipedia.org	-	zenbu-labs	MIT	-	binaries:scripts/pictures/terminal-browser.jpg@7b29f6fd116d9a2452900e8e916c870808a8527c	-	0	-	binaries:readme/terminal-browser.md@<readme-ref>
-```
-
-The columns are tab-separated in `items.tsv`; check they survive the paste
-(`awk -F'\t' '$1=="terminal-browser" { print NF }' scripts/items.tsv` prints 26). The row
-ships in the same store release as tlstore 0.16, which knows `repo=1`: tlstore 0.15 would try
-`x11-repo electron42` in one call and fail (cleanly, writing nothing), and 0.13 refuses an archive.
+terminal-browser is the archive item that pulls in large packages: its row requires
+`electron42`, which requires `x11-repo`, and carries `pkg-size=153,862` from `pkg-weight.py`. It
+first shipped with tlstore 0.17; an engine older than 0.16 cannot install it (0.15 would try
+`x11-repo electron42` in one call and fail cleanly, and 0.13 refuses an archive).
 
 ## Pinning a readme or a hero picture
 
