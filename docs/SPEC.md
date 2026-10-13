@@ -1036,3 +1036,102 @@ under `-y`, the dry run and `--progress`, the call order with a fake package man
 faked `pm_run`, a failing `x11-repo`, pacman, `update`, the `info`/snapshot fields, the
 `build-catalog.sh` checks and round trip, and the older engines. `ui/tests/screens.rs` covers the
 page line and the second `i`.
+
+## Revision 16 — update takes the newer tlstore first, and says less while it works (tlstore 0.18)
+
+Until 0.17 `tlstore update` planned and installed the items with the engine that was running, and
+offered a newer tlstore only at the end, so a release that fixed how an item installs reached the
+phone one update late. On a terminal it also printed a diff for every config file that differed and
+the package manager's whole transcript. Three changes, all on the terminal path; the `--progress`
+stream, every `--tsv` format and the `self-update --check --tsv` line are unchanged.
+
+### Self-update first
+
+A plain `update` (any options but `--check`, `--tsv`, `--progress`, `--offline`, `--dry-run` or one
+it does not know) runs `self_update_offer` before `update_items` parses anything. When tlstore moved
+(`su_moved=1`), it `exec`s `$PREFIX/bin/tlstore update <the same arguments>` with
+`TLSTORE_UPDATED_FROM=<old version>` and `TLSTORE_ASSUME_YES` (so a `-y` given before the command
+carries over) in the environment; the newer engine plans and installs the items. The engine reads
+`TLSTORE_UPDATED_FROM` once at start-up and unsets it, and while it is set never offers or restarts.
+
+| situation | what a plain `update` does |
+|---|---|
+| newer, taken (`-y`, Enter, `y`) | the completion line, then the newer tlstore does the rest |
+| newer, declined (`n`, `never`) | carries on with the running engine; not asked again at the end |
+| nothing newer, offline, cannot verify, or after `never` | carries on, silently, as before |
+| refused (a bad signature) | carries on; the exit status is 1, as before |
+| `TLSTORE_UPDATED_FROM` set | no offer at all |
+
+`update --check`, `--progress`, `--offline` and `--dry-run` still never offer. `update --tsv`
+without `--check` still offers at the end, on stderr, as it has since Revision 11.
+
+### Styled output
+
+`STYLE=1` when stdout is a terminal, `NO_COLOR` is empty or unset and `TERM` is set and not `dumb`;
+`TLSTORE_STYLE=1|0` decides it instead (the suite has no terminal). `styled` is `STYLE=1` and not
+`--progress`. Off, the output is what 0.17 printed, bar the order above and the config question below.
+
+- Colours: SGR 32 done, 31 failed, 33 needs you, 2 detail, 34 item names and versions, 0 reset.
+  Never 256-colour or true colour: the launcher maps the sixteen to the person's scheme.
+- Icons follow `fish/prompt.fish`: Nerd glyphs (fa-check `f00c`, fa-xmark `f00d`, fa-warning
+  `f071`, fa-download `f019`, oct-package `f487`, written as octal escapes, followed by two spaces)
+  when `SSH_CONNECTION` is unset and `TERM_PROGRAM=termux-launcher` or `launcherctl` is on `PATH`;
+  `✓ ✗ ! ·` otherwise; `TLSTORE_ICONS=nerd|plain` decides it instead.
+- The status line is one line rewritten with `\r` + `ESC[K`, cut to `term_cols` (item names and
+  versions are ASCII, so bytes are cells). It moves only when the work does: *Checking for a newer
+  tlstore…*, *Checking the item list…*, *Asking npm for claude-code's latest version…*,
+  *Downloading claude-code 2.1.300 ━━━━━━━━╺━━━━━━━━━━━ 40%* (curl's `-#` frames, as `--progress`
+  reads them, one redraw per whole percent; the exit status still comes back through a file),
+  *Installing Termux packages · 3 of 12*. No timer, no background process.
+- While `plan_apply` runs styled (`STATUS_SCOPE=1`), `say` moves the status line instead of
+  printing, and `err` inside a row only records `LAST_ERR`, which the row's closing line carries,
+  the way a `--progress` done line does. Each row ends with one line (`row_mark`): `✓ <name>
+  <version>` (or `installed`/`updated`/`removed` for a kind without one, with any note after a
+  `·`), `✗ <name>: <reason>`, or nothing for one already current, which is counted. An update row
+  whose version did not move (a package, an npm item already at its latest) counts as current. The
+  run ends `2 updated · 1 failed · 6 already current` (install: `installed`/`already installed`;
+  remove: `removed`/`not installed`), leaving out a count of 0.
+
+### The package manager's log
+
+Styled, `pm_run` writes everything the package manager says to `~/.cache/tlstore/last-update.log`
+(emptied by the run's first call, appended to by the rest) and counts `(n/m)` lines and apt's
+`Unpacking`/`Setting up` lines on the status line. Its stdin is `/dev/null`, since a question it
+asked would be hidden in the log, and `DPKG_FORCE=confdef,confold` answers the one dpkg asks
+about a package's config file the person changed: keep theirs, or take the default. On a failure the last 10 lines are printed, then where the log is.
+`drop_build_tools` keeps the log when it clears the cache. Unstyled, `pm_run` passes through as
+before; `--progress` keeps its awk stream.
+
+### Config files: what tlstore wrote
+
+No new column. For a `file` item, `installed.tsv` column 7 (`digest`, Revision 13) already holds
+the sha256 of the payload tlstore put in place. After a declined replacement it holds the declined
+version's digest while the person's own file stays on disk, so that file reads as changed, which
+it is. `file-once` is untouched.
+
+When `do_file` meets an existing file that differs from the new one:
+
+- it matches column 7: nobody edited it, so it is replaced with no question and no backup;
+- it differs from column 7: on a terminal, one line, `You changed ~/<path>. Replace it with the new
+  one? [y/N/d]`;
+- column 7 is empty or `-` (a row from before it, or no row at all), or the file cannot be hashed:
+  the same question as `Replace your ~/<path> with the new one? [y/N/d]`.
+
+`d` prints the `diff -u` and asks again. `--configs` still answers yes, `-y` still does not, and
+`--progress` or nobody there still keeps the person's file. A yes to a changed file still leaves a
+`.bak` copy.
+
+`update --check` now says *has a new version; update asks first if you changed it*.
+
+### Older engines
+
+The state file is unchanged, so 0.17 and 0.18 read each other's rows. A 0.17 engine updating to 0.18
+offers at the end, as it always did, and does not restart; the first update run by 0.18 is the first
+to offer first. `TLSTORE_VERSION` moves to 0.18.
+
+Tests (`scripts/test.sh`): the restart with `update -y` and `-y update --configs` (the fixture's
+newer script names its arguments and the old version when it runs under the guard), declined,
+unreachable and guarded runs, `--check`/`--progress`/`--tsv`, the unedited and edited config
+(`d` then `n`, then `--configs`), a row written the pre-0.18 way, `TLSTORE_STYLE=0` without escapes,
+`TLSTORE_STYLE=1` with plain and nerd icons and only the sixteen colours, and the package
+manager's log on success and failure.

@@ -56,6 +56,13 @@
 #                            and a `binaries:<path>@<tag>` source (a file in
 #                            the repository) resolve; file:// trees laid out
 #                            <tag>/<asset>-<arch> and <tag>/<path>.
+#   TLSTORE_STYLE=1|0      — styled output (colour, icons, the status line) is
+#                            only drawn on a terminal, and the suite captures
+#                            stdout through a pipe, so every run is plain text
+#                            unless a test sets STYLE_KNOB=1 to see the styled
+#                            bytes (ICONS_KNOB picks nerd or plain icons).
+#   TLSTORE_UPDATED_FROM   — what an update that took a newer tlstore hands
+#                            it; FROM_KNOB sets it, to run as that newer one.
 # The catalog signature tests need minisign. Without it they are skipped, and
 # the suite says so instead of passing quietly.
 
@@ -464,6 +471,9 @@ tl() {
             TLSTORE_BINARIES_RAW="file://$FX/raw" \
             TERM_PROGRAM="${TP_KNOB:-}" \
             TERM_PROGRAM_VERSION="${TPV_KNOB:-}" \
+            TLSTORE_STYLE="${STYLE_KNOB:-}" \
+            TLSTORE_ICONS="${ICONS_KNOB:-}" \
+            TLSTORE_UPDATED_FROM="${FROM_KNOB:-}" \
             "${SHCMD[@]}" "$TLSTORE" "$@" 2>&1)"
     else
         OUT="$(env -i \
@@ -482,6 +492,9 @@ tl() {
             TLSTORE_BINARIES_RAW="file://$FX/raw" \
             TERM_PROGRAM="${TP_KNOB:-}" \
             TERM_PROGRAM_VERSION="${TPV_KNOB:-}" \
+            TLSTORE_STYLE="${STYLE_KNOB:-}" \
+            TLSTORE_ICONS="${ICONS_KNOB:-}" \
+            TLSTORE_UPDATED_FROM="${FROM_KNOB:-}" \
             "${SHCMD[@]}" "$TLSTORE" "$@" < /dev/null 2>&1)"
     fi
     ST=$?
@@ -494,6 +507,9 @@ tl() {
     RELEASE_KNOB=""
     TP_KNOB=""
     TPV_KNOB=""
+    STYLE_KNOB=""
+    ICONS_KNOB=""
+    FROM_KNOB=""
     return 0
 }
 
@@ -1078,16 +1094,27 @@ run_suite() {
     expect_out "and it says so" "kept your hello.conf"
     expect_no_out "-y does not answer the config question" "Replace your"
 
-    # asked, and answered no
+    # asked, and answered no: one line, the change only on d. With no record of
+    # what tlstore wrote there, it does not claim the person changed it.
     forget_state
     TTY_KNOB=1
     STDIN_TEXT='n
 '
     tl install hello -y
     expect_status "a config that differs, answered no" 0
-    expect_out "the change is shown" "greeting from the catalog"
-    expect_out "and the question is asked" "Replace your hello.conf"
+    expect_out "the question is asked on one line" "^Replace your ~/.config/hello.conf with the new one? \[y/N/d\] kept your hello.conf$"
+    expect_no_out "the change is not shown unasked" "^+greeting from the catalog"
+    expect_no_out "nor said to be the persons own change" "You changed"
     expect_content "answering no keeps the users file" "$TESTHOME/.config/hello.conf" "the users own greeting"
+
+    forget_state
+    TTY_KNOB=1
+    STDIN_TEXT=$'d\nn\n'
+    tl install hello -y
+    expect_status "a config that differs, d then no" 0
+    expect_out "d shows the change" "^+greeting from the catalog"
+    if [ "$(printf '%s\n' "$OUT" | grep -c 'with the new one? \[y/N/d\]')" = 2 ]; then pass; else fail "and asks again"; fi
+    expect_content "then no keeps the users file" "$TESTHOME/.config/hello.conf" "the users own greeting"
 
     # asked, and answered yes
     forget_state
@@ -1113,6 +1140,74 @@ run_suite() {
     expect_status "--configs" 0
     expect_content "--configs takes the new config" "$TESTHOME/.config/hello.conf" "greeting from the catalog"
     expect_no_out "--configs does not ask" "Replace your"
+
+    # --- what tlstore wrote: the row's digest (column 7) is the sha256 of the
+    # file it put in place, so an update replaces a config nobody edited without
+    # a word, and asks about one the person changed ---
+    # A newer list whose hello is a different file, read offline as a refreshed one.
+    wr_state="$TESTHOME/.local/share/tlstore/installed.tsv"
+    wr_cat="$TESTHOME/.local/share/tlstore/catalog.tsv"
+    wr_written() { awk -F "$T" '$1 == "hello" { print $7 }' "$wr_state"; }
+    wr_version() { awk -F "$T" -v OFS="$T" -v v="$1" '/^#/ { print; next } $1 == "hello" { $3 = v } { print }' "$wr_state" > "$wr_state.new" && mv "$wr_state.new" "$wr_state"; }
+    cp "$wr_state" "$ROOT/wr-state-saved"
+    mkdir -p "$ROOT/wr-bak"
+    mv "$TESTHOME/.config/hello.conf".bak-* "$ROOT/wr-bak/" 2>/dev/null
+    rm -f "$TESTHOME/.config/hello.conf"
+    forget_state
+    tl install hello -y
+    expect_status "a fresh config install" 0
+    if [ "$(wr_written)" = "$(sha "$TESTHOME/.config/hello.conf")" ]; then pass; else fail "the state records what was written" "$(wr_written)"; fi
+    printf 'greeting, second edition\n' > "$FX/hello2.conf"
+    write_catalog "$wr_cat" 2026090690 3 fakebin-1
+    sed -i "s|file://$FX/hello.conf$T$(sha "$FX/hello.conf")$T~/.config/hello.conf$T|file://$FX/hello2.conf$T$(sha "$FX/hello2.conf")$T~/.config/hello.conf$T|" "$wr_cat"
+    TTY_KNOB=1
+    STDIN_TEXT=$'y\n'
+    tl update hello --offline
+    expect_status "an update of a config nobody edited" 0
+    expect_content "it is replaced" "$TESTHOME/.config/hello.conf" "greeting, second edition"
+    expect_no_out "without a question" "Replace"
+    if ls "$TESTHOME/.config/hello.conf".bak-* >/dev/null 2>&1; then fail "and nothing to keep a copy of"; else pass; fi
+    if [ "$(wr_written)" = "$(sha "$FX/hello2.conf")" ]; then pass; else fail "the recorded digest moves with it" "$(wr_written)"; fi
+
+    printf 'my own edit\n' >> "$TESTHOME/.config/hello.conf"
+    wr_version 1
+    TTY_KNOB=1
+    STDIN_TEXT=$'d\nn\n'
+    tl update hello --offline
+    expect_status "an update of a config the person changed" 0
+    expect_out "asks on one line, naming the change as theirs" "You changed ~/.config/hello.conf. Replace it with the new one? \[y/N/d\]"
+    expect_out "d shows the change" "^-my own edit"
+    expect_out "no keeps it" "kept your hello.conf"
+    if printf 'greeting, second edition\nmy own edit\n' | cmp -s - "$TESTHOME/.config/hello.conf"; then pass; else fail "the edited file stays"; fi
+    if [ "$(wr_written)" = "$(sha "$FX/hello2.conf")" ]; then pass; else fail "the row holds the declined file's digest, so the edit still reads as yours" "$(wr_written)"; fi
+
+    wr_version 1
+    tl update hello --offline --configs
+    expect_status "--configs on an edited config" 0
+    expect_content "--configs replaces it" "$TESTHOME/.config/hello.conf" "greeting, second edition"
+    expect_no_out "without asking" "You changed"
+    if ls "$TESTHOME/.config/hello.conf".bak-* >/dev/null 2>&1; then pass; else fail "keeping the edited one beside it"; fi
+
+    # A row written by hand the way a pre-0.18 tlstore wrote it (11 columns),
+    # with the file on disk still the one its digest names: replaced silently.
+    rm -f "$TESTHOME/.config/hello.conf".bak-*
+    printf 'greeting from the catalog\n' > "$TESTHOME/.config/hello.conf"
+    printf '# tlstore installed\tname\tkind\tversion\twhen\tfiles\tsource\tdigest\tprev_version\tprev_source\tprev_digest\tby\n' > "$wr_state"
+    printf 'hello\tfile\t1\t20260101-000000\t%s\tfile://%s/hello.conf\t%s\t\t\t\t\n' \
+        "$TESTHOME/.config/hello.conf" "$FX" "$(sha "$FX/hello.conf")" >> "$wr_state"
+    TTY_KNOB=1
+    STDIN_TEXT=$'y\n'
+    tl update hello --offline
+    expect_status "an update over a row from an older tlstore" 0
+    expect_content "the unedited file is replaced" "$TESTHOME/.config/hello.conf" "greeting, second edition"
+    expect_no_out "without a question" "Replace"
+    if ls "$TESTHOME/.config/hello.conf".bak-* >/dev/null 2>&1; then fail "and without a copy beside it"; else pass; fi
+
+    # Back to where the tests before left hello.
+    rm -f "$wr_cat" "$TESTHOME/.config/hello.conf".bak-*
+    mv "$ROOT/wr-bak/"* "$TESTHOME/.config/" 2>/dev/null
+    mv "$ROOT/wr-state-saved" "$wr_state"
+    printf 'greeting from the catalog\n' > "$TESTHOME/.config/hello.conf"
 
     # --- a file-once, twice ---
     printf 'already mine\n' > "$TESTHOME/.config/mine.conf"
@@ -2290,7 +2385,13 @@ EOF
         for d in new same bad badui noui; do mkdir -p "$FX/release-$d"; done
         printf '#!/bin/sh\necho the new ui\n' > "$FX/release-new/tlstore-ui-arm64-v8a"
         printf '#!/bin/sh\necho the new x86 ui\n' > "$FX/release-new/tlstore-ui-x86_64"
-        sed 's/^TLSTORE_VERSION=.*/TLSTORE_VERSION=9.9/' "$TLSTORE" > "$FX/release-new/tlstore"
+        # An update that takes it runs it in its own place, through its
+        # shebang: /system/bin/sh on a phone, the shell under test here. It
+        # says so when it is that run, so the test can see who planned.
+        su_shell="$(command -v "${SHCMD[0]}") ${SHCMD[*]:1}"
+        sed -e "1s|.*|#!${su_shell% }|" \
+            -e 's/^TLSTORE_VERSION=.*/TLSTORE_VERSION=9.9\n[ -z "${TLSTORE_UPDATED_FROM:-}" ] || echo "the newer tlstore plans this, after $TLSTORE_UPDATED_FROM: $*"/' \
+            "$TLSTORE" > "$FX/release-new/tlstore"
         printf '# the newer one\n' >> "$FX/release-new/tlstore"
         bash "$repo/scripts/embed-ui-digests.sh" "$FX/release-new" >/dev/null
         cp "$TLSTORE" "$FX/release-same/tlstore"
@@ -2377,6 +2478,57 @@ EOF
         expect_no_file "no staging file is left beside the script" "$TPREFIX/bin/tlstore.new"
         expect_no_file "no staging file is left beside the UI" "$ui.new"
 
+        # Revision 16: a plain update takes the newer tlstore before it plans
+        # anything, then runs it in its own place with the same arguments.
+        su_cur="$(sed -n 's/^TLSTORE_VERSION=//p' "$TLSTORE" | head -1)"
+        expect_out "the newer tlstore plans the items, with the same arguments" "^the newer tlstore plans this, after $su_cur: update -y$"
+        if [ "$(printf '%s\n' "$OUT" | grep -c 'tlstore is now version')" = 1 ]; then pass; else fail "and it never offers itself again"; fi
+
+        su_reset
+        RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"; TTY_KNOB=1; STDIN_TEXT=$'n\nn\n'
+        tl -y update --configs
+        expect_status "-y before update, with an option after it" 0
+        expect_out "the restart keeps the arguments" "^the newer tlstore plans this, after $su_cur: update --configs$"
+        expect_no_out "and the -y: nothing is asked" "Update now"
+
+        su_reset
+        UI_KNOB="$ui"; TTY_KNOB=1; STDIN_TEXT=$'y\ny\n'
+        tl update
+        expect_status "update with no release to reach" 0
+        expect_no_out "carries on with this tlstore" "the newer tlstore plans this"
+        expect_no_out "and asks nothing about itself" "Update now"
+        su_untouched "update, no release"
+
+        su_reset
+        RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"; TTY_KNOB=1; STDIN_TEXT=$'y\ny\n'; FROM_KNOB="0.17"
+        tl update
+        expect_status "the run a restart hands over to" 0
+        expect_no_out "never offers a newer tlstore again" "Update now"
+        expect_no_out "nor says one is there" "is available"
+        su_untouched "update after a restart"
+
+        # The paths tlstore-ui reads keep what they did: nothing up front.
+        su_reset
+        RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"; TTY_KNOB=1; STDIN_TEXT=$'y\ny\n'
+        tl update --check
+        expect_no_out "update --check never offers it" "Update now"
+        su_untouched "update --check, someone there"
+
+        su_reset
+        RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"
+        tl_stdout update --progress
+        expect_no_out "update --progress never offers it" "Update now"
+        expect_no_out "nor says one is there" "is available"
+        su_untouched "update --progress"
+
+        su_reset
+        RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"; TTY_KNOB=1; STDIN_TEXT=$'n\nn\n'
+        tl update --tsv
+        if printf '%s\n' "$OUT" | tail -1 | grep -q "Update now"; then pass; else fail "update --tsv still asks, at the end" "$OUT"; fi
+        if [ "$(printf '%s\n' "$OUT" | grep -c 'Update now')" = 1 ]; then pass; else fail "and only there"; fi
+        expect_no_out "and never restarts" "the newer tlstore plans this"
+        su_untouched "update --tsv"
+
         # update --check is the refresh tlstore-ui runs in the background: it
         # must never swap the files under a running UI (self-update --progress
         # does that in plain view).
@@ -2399,23 +2551,25 @@ EOF
         su_quiet="$TESTHOME/.local/share/tlstore/self-update-quiet"
         rm -f "$su_quiet"
         su_reset
-        RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"; TTY_KNOB=1; STDIN_TEXT=$'y\nn\n'
+        RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"; TTY_KNOB=1; STDIN_TEXT=$'n\ny\n'
         tl update
         expect_status "update, answered no" 0
         expect_out "asks first" "tlstore 9.9 is available; you have $cur_ver_q. Update now"
         expect_no_out "does not update" "tlstore is now version"
+        expect_no_out "carries on with this tlstore" "the newer tlstore plans this"
+        if [ "$(printf '%s\n' "$OUT" | grep -c 'Update now')" = 1 ]; then pass; else fail "and does not ask again at the end"; fi
         su_untouched "update, answered no"
         expect_no_file "no is not remembered" "$su_quiet"
 
         su_reset
-        RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"; TTY_KNOB=1; STDIN_TEXT=$'y\n\n'
+        RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"; TTY_KNOB=1; STDIN_TEXT=$'\ny\n'
         tl update
         expect_status "update, answered with Enter" 0
         expect_out "Enter means yes" "tlstore is now version 9.9"
         if grep -q "^# the newer one" "$TPREFIX/bin/tlstore"; then pass; else fail "Enter updates tlstore"; fi
 
         su_reset
-        RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"; TTY_KNOB=1; STDIN_TEXT=$'y\nnever\n'
+        RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"; TTY_KNOB=1; STDIN_TEXT=$'never\ny\n'
         tl update
         expect_status "update, answered never" 0
         expect_out "says how to get it later" "tlstore self-update still gets it"
@@ -2622,6 +2776,55 @@ EOF
     else
         skip "self-update tests" "minisign is not installed"
     fi
+
+    # --- styled output (Revision 16): on a terminal only, the sixteen ANSI
+    # colours only, a status line, one closing line per item and a summary ---
+    E=$'\033'
+    tl remove fakebin -y
+    STYLE_KNOB=0
+    tl install fakebin -y
+    expect_status "an install with styling off" 0
+    expect_no_out "plain output has no escape sequences" "$E"
+    expect_out "and says what it always said" "^fetching fakebin$"
+    tl remove fakebin -y
+    STYLE_KNOB=1; ICONS_KNOB=plain
+    tl install fakebin -y
+    expect_status "a styled install" 0
+    expect_out "the item's closing line, with its tick and version" "✓${E}\[0m ${E}\[34mfakebin${E}\[0m ${E}\[34m[0-9][0-9]*${E}\[0m$"
+    expect_out "the run ends with a summary" "1 installed"
+    expect_out "the status line is rewritten in place" $'\r'"${E}\[K"
+    sgr_bad=$(printf '%s' "$OUT" | grep -o "${E}\[[0-9;]*m" | sed "s/^${E}\[//; s/m\$//" | tr ';' '\n' | grep -vxE '0|1|2|3[0-7]|9[0-7]')
+    if [ -z "$sgr_bad" ]; then pass; else fail "only the sixteen colours, bold and dim" "$sgr_bad"; fi
+    expect_no_out "never 256 colours" "38;5"
+    expect_no_out "nor true colour" "38;2"
+    expect_no_out "the item's narration stays off the page" "^fetching fakebin$"
+    tl remove fakebin -y
+    STYLE_KNOB=1; ICONS_KNOB=nerd
+    tl install fakebin -y
+    expect_out "nerd icons where the launcher's font draws them" "$(printf '\357\200\214')"
+    expect_no_out "and not the plain tick" "✓"
+
+    # A package manager on a styled terminal writes to a log, not the screen.
+    pm_log="$TESTHOME/.cache/tlstore/last-update.log"
+    pm_had=$(awk -F "$T" '$1 == "demo-pkg"' "$TESTHOME/.local/share/tlstore/installed.tsv")
+    tl remove demo-pkg -y
+    rm -f "$pm_log"
+    STYLE_KNOB=1; ICONS_KNOB=plain
+    tl install demo-pkg -y
+    expect_status "a styled package install" 0
+    expect_no_out "the package manager's lines stay off the screen" ":: Synchronizing"
+    if grep -q '^:: Synchronizing package databases' "$pm_log" 2>/dev/null; then pass; else fail "they are in the log" "$(cat "$pm_log" 2>/dev/null)"; fi
+    expect_out "the status line counts its packages" "Installing Termux packages · 1 of 1"
+    tl remove demo-pkg -y
+    touch "$ROOT/pacman-fails"
+    STYLE_KNOB=1; ICONS_KNOB=plain
+    tl install demo-pkg -y
+    rm -f "$ROOT/pacman-fails"
+    expect_status "a styled package install that fails" 1
+    expect_out "shows the last lines it said" "error: target not found"
+    expect_out "and where the rest is" "~/.cache/tlstore/last-update.log"
+    expect_out "the item's closing line says why" "✗.*demo-pkg.*: the package manager could not install demo-one, demo-two"
+    if [ -n "$pm_had" ]; then tl install demo-pkg -y; else tl remove demo-pkg -y; fi
 
     # --- --progress: the machine stream tlstore-ui reads ---
     tl remove fakebin -y
