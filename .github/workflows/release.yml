@@ -56,7 +56,8 @@ jobs:
       - name: Tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq minisign
+          # The shells ci.yml tests under, so the release runs the same suite CI passed.
+          sudo apt-get install -y -qq shellcheck minisign dash busybox mksh
 
       - name: Tag
         id: tag
