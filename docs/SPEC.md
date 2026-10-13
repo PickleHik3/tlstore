@@ -1097,37 +1097,41 @@ without `--check` still offers at the end, on stderr, as it has since Revision 1
 Styled, `pm_run` writes everything the package manager says to `~/.cache/tlstore/last-update.log`
 (emptied by the run's first call, appended to by the rest) and counts `(n/m)` lines and apt's
 `Unpacking`/`Setting up` lines on the status line. Its stdin is `/dev/null`, since a question it
-asked would be hidden in the log. On a failure the last 10 lines are printed, then where the log is.
+asked would be hidden in the log, and `DPKG_FORCE=confdef,confold` answers the one dpkg asks
+about a package's config file the person changed: keep theirs, or take the default. On a failure the last 10 lines are printed, then where the log is.
 `drop_build_tools` keeps the log when it clears the cache. Unstyled, `pm_run` passes through as
 before; `--progress` keeps its awk stream.
 
 ### Config files: what tlstore wrote
 
-`installed.tsv` gains column 12, `written`: the sha256 of the file a `file` item last put in place
-(a fresh install, a replacement, or a file already identical to the shipped one). A declined
-replacement keeps the old value, since the file on disk is still the person's. `file-once` records
-nothing. Rows from before the column read it as empty, and an older engine writing a row drops it;
-both only mean the next update asks.
+No new column. For a `file` item, `installed.tsv` column 7 (`digest`, Revision 13) already holds
+the sha256 of the payload tlstore put in place. After a declined replacement it holds the declined
+version's digest while the person's own file stays on disk, so that file reads as changed, which
+it is. `file-once` is untouched.
 
 When `do_file` meets an existing file that differs from the new one:
 
-- it still matches `written`: nobody edited it, so it is replaced with no question and no backup;
-- otherwise, on a terminal, one line: `You changed ~/<path>. Replace it with the new one? [y/N/d]`
-  (or `Replace your ~/<path> with the new one? [y/N/d]` when there is no `written` to say so). `d`
-  prints the `diff -u` and asks again. `--configs` still answers yes, `-y` still does not, and
-  `--progress` or nobody there still keeps the person's file. A yes still leaves a `.bak` copy.
+- it matches column 7: nobody edited it, so it is replaced with no question and no backup;
+- it differs from column 7: on a terminal, one line, `You changed ~/<path>. Replace it with the new
+  one? [y/N/d]`;
+- column 7 is empty or `-` (a row from before it, or no row at all), or the file cannot be hashed:
+  the same question as `Replace your ~/<path> with the new one? [y/N/d]`.
+
+`d` prints the `diff -u` and asks again. `--configs` still answers yes, `-y` still does not, and
+`--progress` or nobody there still keeps the person's file. A yes to a changed file still leaves a
+`.bak` copy.
 
 `update --check` now says *has a new version; update asks first if you changed it*.
 
 ### Older engines
 
-Column 12 is appended, so 0.17 reads 0.18's state as before (every reader asks for a column by
-number). A 0.17 engine updating to 0.18 offers at the end, as it always did, and does not restart;
-the first update run by 0.18 is the first to offer first. `TLSTORE_VERSION` moves to 0.18.
+The state file is unchanged, so 0.17 and 0.18 read each other's rows. A 0.17 engine updating to 0.18
+offers at the end, as it always did, and does not restart; the first update run by 0.18 is the first
+to offer first. `TLSTORE_VERSION` moves to 0.18.
 
 Tests (`scripts/test.sh`): the restart with `update -y` and `-y update --configs` (the fixture's
 newer script names its arguments and the old version when it runs under the guard), declined,
 unreachable and guarded runs, `--check`/`--progress`/`--tsv`, the unedited and edited config
-(`d` then `n`, then `--configs`), the recorded digest, `TLSTORE_STYLE=0` without escapes,
+(`d` then `n`, then `--configs`), a row written the pre-0.18 way, `TLSTORE_STYLE=0` without escapes,
 `TLSTORE_STYLE=1` with plain and nerd icons and only the sixteen colours, and the package
 manager's log on success and failure.

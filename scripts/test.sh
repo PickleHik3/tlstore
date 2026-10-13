@@ -957,7 +957,7 @@ run_suite() {
     expect_status "a plan with several package items installs" 0
     if [ "$(grep -c -- '^-Sy' "$ROOT/pkg.log")" = 1 ]; then pass; else fail "the package manager is called once for the whole plan" "$(cat "$ROOT/pkg.log")"; fi
     if grep -qx -- "-Sy --needed --noconfirm demo-build demo-one demo-two demo-retiree" "$ROOT/pkg.log"; then pass; else fail "with the build tool and every package in it" "$(cat "$ROOT/pkg.log")"; fi
-    if head -1 "$PSTATE" | grep -q "${T}prev_digest${T}by${T}written$"; then pass; else fail "installed.tsv names columns 11 and 12" "$(head -1 "$PSTATE")"; fi
+    if head -1 "$PSTATE" | grep -q "${T}prev_digest${T}by$"; then pass; else fail "installed.tsv names column 11" "$(head -1 "$PSTATE")"; fi
     if awk -F "$T" '$1 == "claude-code" && $11 == "requested"' "$PSTATE" | grep -q .; then pass; else fail "column 11: a named item is requested" "$(cat "$PSTATE")"; fi
     if awk -F "$T" '$1 == "musl-loader" && $11 == "auto"' "$PSTATE" | grep -q .; then pass; else fail "column 11: a part it pulled in is auto" "$(cat "$PSTATE")"; fi
     tl install musl-loader -y
@@ -1141,12 +1141,13 @@ run_suite() {
     expect_content "--configs takes the new config" "$TESTHOME/.config/hello.conf" "greeting from the catalog"
     expect_no_out "--configs does not ask" "Replace your"
 
-    # --- what tlstore wrote, remembered (column 12): an update replaces a config
-    # nobody edited without a word, and asks about one the person changed ---
+    # --- what tlstore wrote: the row's digest (column 7) is the sha256 of the
+    # file it put in place, so an update replaces a config nobody edited without
+    # a word, and asks about one the person changed ---
     # A newer list whose hello is a different file, read offline as a refreshed one.
     wr_state="$TESTHOME/.local/share/tlstore/installed.tsv"
     wr_cat="$TESTHOME/.local/share/tlstore/catalog.tsv"
-    wr_written() { awk -F "$T" '$1 == "hello" { print $12 }' "$wr_state"; }
+    wr_written() { awk -F "$T" '$1 == "hello" { print $7 }' "$wr_state"; }
     wr_version() { awk -F "$T" -v OFS="$T" -v v="$1" '/^#/ { print; next } $1 == "hello" { $3 = v } { print }' "$wr_state" > "$wr_state.new" && mv "$wr_state.new" "$wr_state"; }
     cp "$wr_state" "$ROOT/wr-state-saved"
     mkdir -p "$ROOT/wr-bak"
@@ -1178,7 +1179,7 @@ run_suite() {
     expect_out "d shows the change" "^-my own edit"
     expect_out "no keeps it" "kept your hello.conf"
     if printf 'greeting, second edition\nmy own edit\n' | cmp -s - "$TESTHOME/.config/hello.conf"; then pass; else fail "the edited file stays"; fi
-    if [ "$(wr_written)" = "$(sha "$FX/hello2.conf")" ]; then pass; else fail "and the record still names what tlstore wrote" "$(wr_written)"; fi
+    if [ "$(wr_written)" = "$(sha "$FX/hello2.conf")" ]; then pass; else fail "the row holds the declined file's digest, so the edit still reads as yours" "$(wr_written)"; fi
 
     wr_version 1
     tl update hello --offline --configs
@@ -1186,6 +1187,21 @@ run_suite() {
     expect_content "--configs replaces it" "$TESTHOME/.config/hello.conf" "greeting, second edition"
     expect_no_out "without asking" "You changed"
     if ls "$TESTHOME/.config/hello.conf".bak-* >/dev/null 2>&1; then pass; else fail "keeping the edited one beside it"; fi
+
+    # A row written by hand the way a pre-0.18 tlstore wrote it (11 columns),
+    # with the file on disk still the one its digest names: replaced silently.
+    rm -f "$TESTHOME/.config/hello.conf".bak-*
+    printf 'greeting from the catalog\n' > "$TESTHOME/.config/hello.conf"
+    printf '# tlstore installed\tname\tkind\tversion\twhen\tfiles\tsource\tdigest\tprev_version\tprev_source\tprev_digest\tby\n' > "$wr_state"
+    printf 'hello\tfile\t1\t20260101-000000\t%s\tfile://%s/hello.conf\t%s\t\t\t\t\n' \
+        "$TESTHOME/.config/hello.conf" "$FX" "$(sha "$FX/hello.conf")" >> "$wr_state"
+    TTY_KNOB=1
+    STDIN_TEXT=$'y\n'
+    tl update hello --offline
+    expect_status "an update over a row from an older tlstore" 0
+    expect_content "the unedited file is replaced" "$TESTHOME/.config/hello.conf" "greeting, second edition"
+    expect_no_out "without a question" "Replace"
+    if ls "$TESTHOME/.config/hello.conf".bak-* >/dev/null 2>&1; then fail "and without a copy beside it"; else pass; fi
 
     # Back to where the tests before left hello.
     rm -f "$wr_cat" "$TESTHOME/.config/hello.conf".bak-*

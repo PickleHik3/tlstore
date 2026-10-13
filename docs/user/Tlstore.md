@@ -116,8 +116,8 @@ until that file itself changes. `tlstore update --check` lists those as *has a n
 asks first if you changed it*. In a script, or anywhere there is nobody to ask, your file is kept
 and one line says so — add `--configs` if you want the new one.
 
-Files installed before tlstore 0.18 have no such record, so tlstore cannot tell whether you changed
-them: it asks about each once (*Replace your … with the new one?*) and remembers from then on.
+When tlstore has no record of what it wrote there, it asks the same
+question as *Replace your … with the new one?*
 
 A few files are only ever installed once and then left alone for you to edit for good: your
 personal fish settings and the fastfetch layout.

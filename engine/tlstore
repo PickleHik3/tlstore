@@ -801,13 +801,7 @@ installed_names() {
 # reinstall keeps what was recorded unless SR_BY is requested, and a new row
 # takes SR_BY (empty, as a rollback leaves it, records nothing). A row from
 # before the column reads as unknown.
-# Column 12 is `written` (Revision 16): the sha256 of the file a file item last
-# put in place, so an update can tell a copy nobody edited from one the person
-# changed. SR_WRITTEN sets it for this one call; without it the row keeps what
-# it had (a replacement the person declined leaves the file, and so the
-# digest, as they were). A row from before the column reads as empty: unknown.
 SR_BY=""
-SR_WRITTEN=""
 state_record() {
     sr_name="$1"
     sr_kind="$2"
@@ -845,15 +839,12 @@ state_record() {
     else
         sr_by=""
     fi
-    sr_wr="$SR_WRITTEN"
-    SR_WRITTEN=""
-    [ -n "$sr_wr" ] || [ -z "$sr_old" ] || sr_wr=$(field "$sr_old" 12)
     mkdir -p "$DATA_DIR"
-    [ -f "$STATE" ] || printf '# tlstore installed\tname\tkind\tversion\twhen\tfiles\tsource\tdigest\tprev_version\tprev_source\tprev_digest\tby\twritten\n' > "$STATE"
+    [ -f "$STATE" ] || printf '# tlstore installed\tname\tkind\tversion\twhen\tfiles\tsource\tdigest\tprev_version\tprev_source\tprev_digest\tby\n' > "$STATE"
     sr_tmp="$STATE.new"
     awk -F "$TAB" -v want="$sr_name" '$1 != want' "$STATE" > "$sr_tmp" || return 1
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$sr_name" "$sr_kind" "$sr_version" "$(timestamp)" "$sr_files" \
-        "$sr_src" "$sr_dig" "$sr_pv" "$sr_ps" "$sr_pd" "$sr_by" "$sr_wr" >> "$sr_tmp"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$sr_name" "$sr_kind" "$sr_version" "$(timestamp)" "$sr_files" \
+        "$sr_src" "$sr_dig" "$sr_pv" "$sr_ps" "$sr_pd" "$sr_by" >> "$sr_tmp"
     mv "$sr_tmp" "$STATE"
 }
 
@@ -1185,7 +1176,10 @@ pm_run() {
 # manager says goes to PM_LOG (emptied by the run's first call, added to by the
 # rest), and the status line counts its packages as it goes. Its input is
 # empty, since a question it asked would be hidden in the log; on a failure the
-# last lines are shown, and where the rest is.
+# last lines are shown, and where the rest is. The one question dpkg asks on
+# its own, about a package's config file the person changed, is answered
+# ahead through DPKG_FORCE: keep theirs, or take the default where there is
+# one; with empty input it would fail the install instead. pacman never asks.
 PM_LOG="$CACHE_DIR/last-update.log"
 PM_LOGGED=0
 pm_styled() {
@@ -1195,7 +1189,7 @@ pm_styled() {
     pms_rc="$CACHE_DIR/pm.rc"
     status "Installing Termux packages" "$I_PKG"
     pms_head=$(status_text "$I_PKG" "Installing Termux packages" 30)
-    { "$@" < /dev/null 2>&1; echo "$?" > "$pms_rc"; } |
+    { DPKG_FORCE=confdef,confold "$@" < /dev/null 2>&1; echo "$?" > "$pms_rc"; } |
         tr '\r' '\n' |
         awk -v lf="$PM_LOG" -v head="$pms_head" -v esc="$ESC" '
             function show(w) {
@@ -1736,28 +1730,31 @@ do_file() {
         return 0
     fi
     # A config file you already have is replaced without a word only while it
-    # is still exactly what tlstore last wrote there (column 12): nobody edited
-    # it, so there is nothing of yours to keep a copy of. One you changed, or
-    # one tlstore has no record of writing, is asked about first. It is
-    # recorded either way, so declining is not asked again until the shipped
-    # file itself moves on.
+    # is still exactly what tlstore last wrote there: the row's digest (column
+    # 7) is the sha256 of the payload it put in place, so a match means nobody
+    # edited it and there is nothing of yours to keep a copy of. One that
+    # differs is yours (edited, or kept when you declined the last one, whose
+    # digest the row then holds) and is asked about first; so is one with no
+    # digest recorded. It is recorded either way, so declining is not asked
+    # again until the shipped file itself moves on.
     if [ "$df_once" = 0 ] && [ -e "$df_dest" ]; then
         mkdir -p "$CACHE_DIR"
         df_new="$CACHE_DIR/$ii_name.new"
         payload_to "$(source_url "$ii_source")" "$df_new" "$ii_digest" || return 1
-        df_wrote=$(file_digest "$df_new")
         if same_file "$df_dest" "$df_new"; then
             rm -f "$df_new"
-            SR_WRITTEN="$df_wrote"
             state_record "$ii_name" file "$ii_version" "$df_dest"
             return 0
         fi
-        df_was=$(field "$(state_row "$ii_name" 2>/dev/null || true)" 12)
+        df_was=$(field "$(state_row "$ii_name" 2>/dev/null || true)" 7)
+        df_have=$(file_digest "$df_dest")
         df_edited=""
-        [ -z "$df_was" ] || df_edited=1
-        if [ -n "$df_was" ] && [ "$(file_digest "$df_dest")" = "$df_was" ]; then
-            df_edited=0
-        elif ! confirm_replace "$df_dest" "$df_new" "$df_edited"; then
+        case "$df_was" in
+            ''|-) ;;
+            "$df_have") df_edited=0 ;;
+            *) [ -z "$df_have" ] || df_edited=1 ;;
+        esac
+        if [ "$df_edited" != 0 ] && ! confirm_replace "$df_dest" "$df_new" "$df_edited"; then
             rm -f "$df_new"
             say "kept your $(basename "$df_dest")"
             PROGRESS_NOTE="kept your $(basename "$df_dest")"
@@ -1768,7 +1765,6 @@ do_file() {
         cp "$df_new" "$df_dest" || return 1
         rm -f "$df_new"
         chmod "$df_mode" "$df_dest"
-        SR_WRITTEN="$df_wrote"
         state_record "$ii_name" file "$ii_version" "$df_dest"
         say "  $df_dest"
         return 0
@@ -1781,7 +1777,6 @@ do_file() {
     if [ "$df_once" = 1 ]; then
         state_record "$ii_name" file-once "$ii_version" "$df_dest"
     else
-        SR_WRITTEN=$(file_digest "$df_dest")
         state_record "$ii_name" file "$ii_version" "$df_dest"
     fi
     say "  $df_dest"
@@ -5144,7 +5139,7 @@ plan_apply_install() {
 plan_mark_ok() {
     styled || return 0
     pa_now=$(installed_version "$pa_n")
-    if [ "$pa_word" = updated ] && [ "$pa_now" = "$pa_was" ] && [ -z "$PROGRESS_NOTE" ]; then
+    if [ "$pa_word" = updated ] && [ "$pa_now" = "$pa_was" ] && [ -z "$PROGRESS_NOTE$LAST_ERR" ]; then
         row_mark same "$pa_n"
         return 0
     fi
@@ -5152,7 +5147,12 @@ plan_mark_ok() {
         ''|-|latest) pa_said="$pa_word" ;;
         *) pa_said="$C_ACC$pa_now$C_OFF" ;;
     esac
-    [ -z "$PROGRESS_NOTE" ] || pa_said="$pa_said $C_DIM· $PROGRESS_NOTE$C_OFF"
+    if [ -n "$PROGRESS_NOTE" ]; then
+        pa_said="$pa_said $C_DIM· $PROGRESS_NOTE$C_OFF"
+    elif [ -n "$LAST_ERR" ]; then
+        # An err from a row that still succeeded (err only records it here).
+        pa_said="$pa_said $C_DIM·$C_OFF $C_ASK$LAST_ERR$C_OFF"
+    fi
     row_mark ok "$pa_n" "$pa_said"
 }
 
