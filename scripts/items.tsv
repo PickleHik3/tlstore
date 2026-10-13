@@ -137,7 +137,7 @@ fastfetch-config	file-once	4b598870	*	launcher:docs/en/examples/fastfetch.jsonc@
 fastfetch-libs	pkg	-	*	imagemagick chafa libandroid-glob zlib	-	-	hidden=1	The image libraries fastfetch needs for its logo.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
 fish	pkg	-	*	fish	-	-	hidden=1	The fish shell itself.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
 fish-plugins	fisher	-	*	nickeb96/puffer-fish jorgebucaran/autopair.fish	-	fisher,fish	hidden=1	Shorter path shortcuts and automatic bracket pairing in fish.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
-fish-prompt	file	3c626405	*	binaries:fish/prompt.fish@3c6264053459fd3add1a7efa89fc967f4fca539c	~/.config/fish/conf.d/launcher-prompt.fish	fish	hidden=1	The store's fish prompt: Pure's layout, with icons in the terminal's colours.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
+fish-prompt	file	f4ff7afd	*	binaries:fish/prompt.fish@f4ff7afd24377e158d45ae6fbf2d6d4ee6dc8d8e	~/.config/fish/conf.d/launcher-prompt.fish	fish	hidden=1	The store's fish prompt: Pure's layout, with icons in the terminal's colours.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
 fisher	file	4.4.8	*	https://raw.githubusercontent.com/jorgebucaran/fisher/4.4.8/functions/fisher.fish	~/.config/fish/functions/fisher.fish	fish	hidden=1	The plugin manager fish uses.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
 musl-libgcc	binary	14.2.0	*	binaries:musl-libgcc@bins-2026.10.08-3	~/.local/lib/musl/libgcc_s.so.1	-	hidden=1	A support library some tools built for other Linux systems need.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
 musl-libstdcxx	binary	14.2.0	*	binaries:musl-libstdcxx@bins-2026.10.08-3	~/.local/lib/musl/libstdc++.so.6	-	hidden=1	The C++ library some tools built for other Linux systems need.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
