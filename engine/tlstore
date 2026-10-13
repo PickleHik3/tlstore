@@ -49,7 +49,7 @@
 
 set -u
 
-TLSTORE_VERSION=0.16
+TLSTORE_VERSION=0.17
 
 # The store program that pairs with this script, one digest per processor.
 # Empty in the source tree: scripts/release.sh --prepare fills them in from
@@ -1652,6 +1652,21 @@ npm_latest_version() {
     curl -fsSL --connect-timeout 5 --max-time 60 "$NPM_REGISTRY/$nl_package/latest" 2>/dev/null | json_field version
 }
 
+# np_runtime_refresh <installed> <copy> <mode> — replaces an npm-musl
+# program's copy of a musl part when the installed part differs. The copy is
+# renamed into place, never written over: a running program has it mapped.
+np_runtime_refresh() {
+    [ -f "$1" ] || return 0
+    [ "$(file_digest "$1")" != "$(file_digest "$2" 2>/dev/null)" ] || return 0
+    if cp -f "$1" "$2.new" && chmod "$3" "$2.new" && mv -f "$2.new" "$2"; then
+        say "  updated its copy of ${2##*/}"
+        return 0
+    fi
+    rm -f "$2.new"
+    err "could not update ${2##*/} beside $ii_name"
+    return 1
+}
+
 # do_npm_musl installs both npm kinds. npm-musl is a musl binary that needs
 # our loader and a patchelf pass; npm-android is a Bionic executable that runs
 # as it is, so it skips the loader, the musl libraries and patchelf.
@@ -1696,6 +1711,19 @@ do_npm_musl() {
     if [ -x "$np_dir/$np_exe" ] && [ "$(cat "$np_dir/version" 2>/dev/null)" = "$np_version" ] &&
         { [ "$ii_kind" != npm-musl ] || [ -e "$np_dir/rpath-first" ]; }; then
         say "  $ii_name $np_version is already here"
+        # Its loader and libraries are copies taken when it was unpacked; a
+        # rebuilt musl-loader (updated first, as a part this needs) reaches
+        # the program here rather than with its next version.
+        if [ "$ii_kind" = npm-musl ]; then
+            np_runtime_refresh "$(item_targets musl-loader binary "$(field "$np_loader_row" 7)")" \
+                "$np_dir/ld-musl-$ARCH.so.1" 755 || return 1
+            for np_lib in $(commas "$(opt "$ii_options" musl-libs)"); do
+                np_lib_row=$(row "$np_lib")
+                [ -n "$np_lib_row" ] || continue
+                np_lib_have=$(item_targets "$np_lib" binary "$(field "$np_lib_row" 7)")
+                np_runtime_refresh "$np_lib_have" "$np_dir/${np_lib_have##*/}" 644 || return 1
+            done
+        fi
     else
         say "  downloading $ii_name $np_version"
         mkdir -p "$(dirname "$np_dir")"

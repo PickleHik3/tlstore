@@ -1242,6 +1242,13 @@ exec \"$TESTHOME/.local/bin/tl-priv\" run \"$TESTHOME/.local/lib/tlstore/priv/pr
     expect_out "info names the build tools" "Builds with demo-build"
     tl install claude-code -y
     expect_out "installing it again says it is already here" "claude-code 1.0.0 is already here"
+    printf 'rebuilt loader\n' > "$TESTHOME/.local/lib/musl/ld-musl-aarch64.so.1"
+    tl install claude-code -y
+    expect_out "a rebuilt loader reaches the program already here" "updated its copy of ld-musl-aarch64.so.1"
+    expect_content "the copy is the rebuilt loader" "$TESTHOME/.local/lib/claude-code/ld-musl-aarch64.so.1" "rebuilt loader"
+    expect_no_out "and the program is not fetched again for it" "downloading claude-code"
+    tl install claude-code -y
+    expect_no_out "a copy that matches is left alone" "updated its copy"
     rm "$TESTHOME/.local/lib/claude-code/rpath-first"
     tl install claude-code -y
     expect_out "a copy patched before rpath-first is fetched and patched again" "downloading claude-code 1.0.0"
@@ -1258,6 +1265,9 @@ exec \"$TESTHOME/.local/bin/tl-priv\" run \"$TESTHOME/.local/lib/tlstore/priv/pr
     OUT="$("$TESTHOME/.local/bin/agent" 2>&1)"; ST=$?
     expect_status "the wrapper runs" 0
     expect_out "the wrapper runs the package executable" "demo-agent 2.0.0"
+    printf 'rebuilt library\n' > "$TESTHOME/.local/lib/musl/libdemo++.so.6"
+    tl install agent -y
+    expect_content "a rebuilt musl library reaches the program already here" "$TESTHOME/.local/lib/agent/libdemo++.so.6" "rebuilt library"
     tl remove agent -y
     expect_status "remove it again" 0
 

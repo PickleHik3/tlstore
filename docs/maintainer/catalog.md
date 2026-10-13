@@ -209,6 +209,11 @@ asset under its catalog name plus a `SHA256SUMS` of them, and then commits to `m
   hand before the store release — the tidy move is to switch it to the `+<commit>.<N>` shape once
   — or leave it when the rebuild changes nothing that matters to a phone that already has it.
 
+The musl loader and the musl libraries (`musl-libs=`) are copied into each npm-musl item's own
+directory when it is unpacked. From tlstore 0.17 an update or install that finds the item already
+there replaces a copy that differs from the installed part, so a rebuilt loader reaches Claude
+Code and opencode without a new npm version; the loader's version is `1.2.5+tl.<N>` for that.
+
 Then cut a store release (`release.yml`) so the new tag and digests reach phones in a signed
 catalog. If the workflow's final push failed (a race with another commit), the release and its
 assets exist: run `scripts/bins-record.sh <bins-tag> <dir with the assets>` locally and commit.

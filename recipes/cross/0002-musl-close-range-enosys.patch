@@ -1,0 +1,31 @@
+From: Termux Launcher <noreply@pathayam.xyz>
+Subject: [PATCH] syscall: answer close_range with ENOSYS
+
+Android's app seccomp filter on older releases (Android 12 among them) does
+not list close_range, and a disallowed call is answered with SIGSYS, which
+kills the process. Bun, inside Claude Code and opencode, calls it through
+syscall() during start-up. ENOSYS is what a kernel older than 5.9 says, and
+callers already fall back from it (closing descriptors one by one), so the
+programs start everywhere; the fallback costs next to nothing on releases
+that would have allowed the call.
+
+--- a/src/misc/syscall.c
++++ b/src/misc/syscall.c
+@@ -2,6 +2,7 @@
+ #include <unistd.h>
+ #include "syscall.h"
+ #include <stdarg.h>
++#include <errno.h>
+ 
+ #undef syscall
+ 
+@@ -17,5 +18,9 @@
+ 	e=va_arg(ap, syscall_arg_t);
+ 	f=va_arg(ap, syscall_arg_t);
+ 	va_end(ap);
++	/* Older Android releases (12 among them) kill a process for close_range:
++	 * the seccomp filter they put on every app predates it. Answer as an
++	 * older kernel would, so callers take their fallback. */
++	if (n == SYS_close_range) return __syscall_ret(-ENOSYS);
+ 	return __syscall_ret(__syscall(n,a,b,c,d,e,f));
+ }
