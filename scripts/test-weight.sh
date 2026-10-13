@@ -462,11 +462,12 @@ echo
 echo "== older engines read the new rows"
 SHELL_LABEL="older engines"
 # The commit that made the engine 0.16; its parent holds the last engine and dist before it. The
-# oldest commit touching the line, since the one that moved past 0.16 touches it too.
+# oldest commit touching the line, since the one that moved past 0.16 touches it too. A shallow
+# clone (ci.yml's) may hold neither, and an empty r15 would make "^:<path>" an empty file.
 r15=$(git -C "$repo" log --format=%H -G '^TLSTORE_VERSION=0\.16$' -- engine/tlstore 2>/dev/null | tail -1)
 for ref in "$r15^:dist/tlstore" "$r15^:engine/tlstore"; do
     OLD="$(mktemp)"
-    if ! git -C "$repo" show "$ref" > "$OLD" 2>/dev/null; then
+    if [ -z "$r15" ] || ! git -C "$repo" show "$ref" > "$OLD" 2>/dev/null || [ ! -s "$OLD" ]; then
         skip "$ref" "not reachable from this checkout"
         rm -f "$OLD"
         continue
