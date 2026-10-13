@@ -13,6 +13,8 @@
 #   * /etc/resolv.conf and /etc/hosts -> $TERMUX_PREFIX/etc/... (Android has no
 #     /etc/resolv.conf, so unpatched musl DNS times out).
 #   * LD_PRELOAD is read from MUSL_LD_PRELOAD (recipes/cross/0001-musl-ld-preload-var.patch).
+#   * syscall(SYS_close_range) answers ENOSYS (0002-musl-close-range-enosys.patch): older
+#     Android's app seccomp filter kills the process for it, and Bun calls it at start-up.
 # libc.so *is* the loader in musl; it is shipped under the ld-musl name.
 set -eu
 
@@ -40,6 +42,7 @@ tar xzf "$tarball"
 cd "musl-$MUSL_VERSION"
 
 patch -p1 -s < "$SCRIPT_DIR/0001-musl-ld-preload-var.patch"
+patch -p1 -s < "$SCRIPT_DIR/0002-musl-close-range-enosys.patch"
 sed -i "s|\"/etc/resolv.conf\"|\"$TERMUX_PREFIX/etc/resolv.conf\"|" src/network/resolvconf.c
 sed -i "s|\"/etc/hosts\"|\"$TERMUX_PREFIX/etc/hosts\"|" src/network/lookup_name.c src/network/getnameinfo.c
 grep -q "$TERMUX_PREFIX/etc/resolv.conf" src/network/resolvconf.c
