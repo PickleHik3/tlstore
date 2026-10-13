@@ -46,10 +46,17 @@
 #                       that tag (default the raw GitHub URL; tests use file://)
 #   TLSTORE_SOURCE_ONLY 1 = define the functions and run nothing (tests source
 #                       the file and call them directly)
+#   TLSTORE_STYLE       1|0 = colour, icons and a status line on, or plain
+#                       text, whatever stdout is (default: on for a terminal)
+#   TLSTORE_ICONS       nerd|plain — which icons styled output draws (default:
+#                       nerd in the launcher's terminal, plain elsewhere)
+#   TLSTORE_UPDATED_FROM  set by an update that just took a newer tlstore and
+#                       hands the rest of the run to it; that run never offers
+#                       a newer tlstore again
 
 set -u
 
-TLSTORE_VERSION=0.17
+TLSTORE_VERSION=0.18
 
 # The store program that pairs with this script, one digest per processor.
 # Empty in the source tree: scripts/release.sh --prepare fills them in from
@@ -154,6 +161,12 @@ ASSUME_YES="${TLSTORE_ASSUME_YES:-0}"
 ASSUME_TTY="${TLSTORE_ASSUME_TTY:-0}"
 [ "$ASSUME_TTY" = 1 ] || ASSUME_TTY=0
 
+# The version an update just moved on from, when this run is the newer tlstore
+# it handed itself to (cmd_update). Read once and dropped from the environment,
+# so nothing this run starts inherits it.
+SU_FROM="${TLSTORE_UPDATED_FROM:-}"
+unset TLSTORE_UPDATED_FROM
+
 # -y never answers "replace my config file?"; --configs does, and only that.
 REPLACE_CONFIGS=0
 
@@ -217,12 +230,22 @@ DL_STAGE=0
 say() {
     if [ "$PROGRESS" = 1 ]; then
         printf '%s\n' "$*" >&2
+    elif [ "$STATUS_SCOPE" = 1 ]; then
+        # An item's narration: its status and closing lines say what matters.
+        :
     else
+        status_clear
         printf '%s\n' "$*"
     fi
 }
-err() { LAST_ERR="$*"; printf 'tlstore: %s\n' "$*" >&2; }
-die() { err "$*"; exit 1; }
+# Inside a styled row, the row's own closing line carries the reason instead.
+err() {
+    LAST_ERR="$*"
+    [ "$STATUS_SCOPE" = 1 ] && [ -n "$ROW_NAME" ] && return 0
+    status_clear
+    printf 'tlstore: %s\n' "$*" >&2
+}
+die() { ROW_NAME=""; err "$*"; exit 1; }
 
 # progress_line <step> <name> <pct> <words> — one line of the --progress
 # stream. Always stdout, whether or not PROGRESS is set, since these lines are
@@ -250,7 +273,33 @@ PROGRESS_FETCH_END=55
 # job's own item, curl's progress bar is turned into step lines as the bytes
 # arrive (one per whole percent of the bar, flushed), so the count and the line
 # move with the download instead of jumping from the first step to the last.
+# On a styled terminal, a download its caller named (DL_WHAT) draws the same
+# frames as a bar on the status line instead.
 curl_to() {
+    if styled && [ -n "$DL_WHAT" ]; then
+        ct_rc="$2.rc"
+        status "Downloading $DL_WHAT" "$I_DL"
+        ct_head=$(status_text "$I_DL" "Downloading $DL_WHAT" $((BAR_CELLS + 5)))
+        { curl -fL -# --connect-timeout 5 --speed-limit 1 --speed-time 30 -o "$2" "$1" 2>&1
+          echo "$?" > "$ct_rc"; } |
+            tr '\r' '\n' |
+            awk -v head="$ct_head" -v esc="$ESC" -v cells="$BAR_CELLS" -v on="$C_ACC" -v dim="$C_DIM" -v off="$C_OFF" '
+                match($0, /[0-9]+(\.[0-9]+)?%/) {
+                    p = int(substr($0, RSTART, RLENGTH - 1))
+                    if (p == last) next
+                    last = p
+                    f = int(cells * p / 100)
+                    bar = ""; rest = ""
+                    for (i = 0; i < f; i++) bar = bar "━"
+                    if (f < cells) { rest = "╺"; for (i = f + 1; i < cells; i++) rest = rest "━" }
+                    printf "\r%s[K%s %s%s%s%s%s %d%%", esc, head, on, bar, dim, rest, off, p
+                    fflush()
+                }'
+        ct_status=$(cat "$ct_rc" 2>/dev/null || echo 1)
+        rm -f "$ct_rc"
+        [ "$ct_status" = 0 ]
+        return
+    fi
     if [ "$PROGRESS" != 1 ] || [ -z "$CANCEL_ITEM" ]; then
         curl -fsSL --connect-timeout 5 --speed-limit 1 --speed-time 30 -o "$2" "$1"
         return
@@ -276,6 +325,111 @@ curl_to() {
 }
 
 have() { command -v "$1" >/dev/null 2>&1; }
+
+# ---------------------------------------------------------------------------
+# Styled output (Revision 16)
+# ---------------------------------------------------------------------------
+
+# On a terminal, install, update and remove draw one status line rewritten in
+# place, one closing line per item and a summary; everywhere else (a pipe,
+# --progress, NO_COLOR, a dumb TERM) output stays plain text. Colours are the
+# sixteen ANSI ones only: the launcher builds those from the person's scheme,
+# so the store wears it too. Icons follow fish/prompt.fish: Nerd Font glyphs
+# where the launcher's bundled Symbols Nerd Font draws them, plain ones
+# elsewhere. Nothing animates on a timer; the line moves when the work does.
+STYLE="${TLSTORE_STYLE:-}"
+case "$STYLE" in
+    0|1) ;;
+    *)
+        STYLE=0
+        if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ -n "${TERM:-}" ] && [ "$TERM" != dumb ]; then
+            STYLE=1
+        fi
+        ;;
+esac
+ESC=$(printf '\033')
+C_OK="" C_BAD="" C_ASK="" C_DIM="" C_ACC="" C_OFF=""
+if [ "$STYLE" = 1 ]; then
+    C_OK="${ESC}[32m" C_BAD="${ESC}[31m" C_ASK="${ESC}[33m" C_DIM="${ESC}[2m" C_ACC="${ESC}[34m" C_OFF="${ESC}[0m"
+fi
+ICONS="${TLSTORE_ICONS:-}"
+case "$ICONS" in
+    nerd|plain) ;;
+    *)
+        ICONS=plain
+        if [ -z "${SSH_CONNECTION:-}" ] && { [ "${TERM_PROGRAM:-}" = termux-launcher ] || have launcherctl; }; then
+            ICONS=nerd
+        fi
+        ;;
+esac
+# Nerd Fonts 3.5: fa-check, fa-xmark, fa-warning, fa-download, oct-package. The
+# launcher draws a glyph two cells wide over the space after it, hence the gap.
+I_OK="✓" I_BAD="✗" I_ASK="!" I_DOT="·" I_DL="·" I_PKG="·" GAP=" "
+if [ "$ICONS" = nerd ]; then
+    I_OK=$(printf '\357\200\214') I_BAD=$(printf '\357\200\215') I_ASK=$(printf '\357\201\261')
+    I_DL=$(printf '\357\200\231') I_PKG=$(printf '\357\222\207') GAP="  "
+fi
+# How many cells a download's bar takes on the status line.
+BAR_CELLS=20
+STATUS_ON=0
+STATUS_COLS=""
+# 1 while plan_apply runs styled: its narration (say) is left out, and
+# ROW_NAME is the item whose closing line will carry any error.
+STATUS_SCOPE=0
+ROW_NAME=""
+# What curl_to is downloading, for the status line ("claude-code 2.1.300").
+DL_WHAT=""
+ROWS_OK=0 ROWS_BAD=0 ROWS_SAME=0
+
+styled() { [ "$STYLE" = 1 ] && [ "$PROGRESS" != 1 ]; }
+
+# status_text <icon> <words> <cells kept after them> — the status line, cut to
+# the terminal's width. Item names and versions are ASCII, so bytes are cells.
+status_text() {
+    st_room=$((STATUS_COLS - $3 - 5))
+    [ "$st_room" -gt 8 ] || st_room=8
+    # shellcheck disable=SC2059  # the width is ours, the words are an argument
+    printf "%s%s%s%s%.${st_room}s" "$C_ACC" "$1" "$C_OFF" "$GAP" "$2"
+}
+
+# status <words> [icon] — says what is happening now, in place of the last.
+status() {
+    styled || return 0
+    [ -n "$STATUS_COLS" ] || STATUS_COLS=$(term_cols)
+    printf '\r%s[K%s…' "$ESC" "$(status_text "${2:-$I_DOT}" "$1" 1)"
+    STATUS_ON=1
+}
+
+status_clear() {
+    [ "$STATUS_ON" = 1 ] || return 0
+    printf '\r%s[K' "$ESC"
+    STATUS_ON=0
+}
+
+# row_mark ok|failed|same|note <name> <words> — an item's one closing line on
+# a styled terminal (an item already current gets none, only a count).
+row_mark() {
+    styled || return 0
+    case "$1" in
+        ok) ROWS_OK=$((ROWS_OK + 1)); rm_c="$C_OK" rm_i="$I_OK" rm_sep=" " ;;
+        failed) ROWS_BAD=$((ROWS_BAD + 1)); rm_c="$C_BAD" rm_i="$I_BAD" rm_sep=": " ;;
+        same) ROWS_SAME=$((ROWS_SAME + 1)); return 0 ;;
+        *) rm_c="$C_DIM" rm_i="$I_DOT" rm_sep=" " ;;
+    esac
+    status_clear
+    printf '%s%s%s%s%s%s%s%s\n' "$rm_c" "$rm_i" "$C_OFF" "$GAP" "$C_ACC" "$2" "$C_OFF$rm_sep" "$3"
+}
+
+# row_summary <done word> <current words> — "2 updated · 1 failed · 6 already current".
+row_summary() {
+    styled || return 0
+    rs_out=""
+    [ "$ROWS_OK" = 0 ] || rs_out="$C_OK$ROWS_OK $1$C_OFF"
+    [ "$ROWS_BAD" = 0 ] || rs_out="$rs_out${rs_out:+ $C_DIM·$C_OFF }$C_BAD$ROWS_BAD failed$C_OFF"
+    [ "$ROWS_SAME" = 0 ] || rs_out="$rs_out${rs_out:+ $C_DIM·$C_OFF }$C_DIM$ROWS_SAME $2$C_OFF"
+    status_clear
+    [ -z "$rs_out" ] || printf '%s\n' "$rs_out"
+}
 
 # Runs on SIGTERM (a plain kill or the whole process group tlstore-ui signals
 # to cancel a running --progress job): drop whatever the current download had
@@ -647,7 +801,13 @@ installed_names() {
 # reinstall keeps what was recorded unless SR_BY is requested, and a new row
 # takes SR_BY (empty, as a rollback leaves it, records nothing). A row from
 # before the column reads as unknown.
+# Column 12 is `written` (Revision 16): the sha256 of the file a file item last
+# put in place, so an update can tell a copy nobody edited from one the person
+# changed. SR_WRITTEN sets it for this one call; without it the row keeps what
+# it had (a replacement the person declined leaves the file, and so the
+# digest, as they were). A row from before the column reads as empty: unknown.
 SR_BY=""
+SR_WRITTEN=""
 state_record() {
     sr_name="$1"
     sr_kind="$2"
@@ -685,12 +845,15 @@ state_record() {
     else
         sr_by=""
     fi
+    sr_wr="$SR_WRITTEN"
+    SR_WRITTEN=""
+    [ -n "$sr_wr" ] || [ -z "$sr_old" ] || sr_wr=$(field "$sr_old" 12)
     mkdir -p "$DATA_DIR"
-    [ -f "$STATE" ] || printf '# tlstore installed\tname\tkind\tversion\twhen\tfiles\tsource\tdigest\tprev_version\tprev_source\tprev_digest\tby\n' > "$STATE"
+    [ -f "$STATE" ] || printf '# tlstore installed\tname\tkind\tversion\twhen\tfiles\tsource\tdigest\tprev_version\tprev_source\tprev_digest\tby\twritten\n' > "$STATE"
     sr_tmp="$STATE.new"
     awk -F "$TAB" -v want="$sr_name" '$1 != want' "$STATE" > "$sr_tmp" || return 1
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$sr_name" "$sr_kind" "$sr_version" "$(timestamp)" "$sr_files" \
-        "$sr_src" "$sr_dig" "$sr_pv" "$sr_ps" "$sr_pd" "$sr_by" >> "$sr_tmp"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$sr_name" "$sr_kind" "$sr_version" "$(timestamp)" "$sr_files" \
+        "$sr_src" "$sr_dig" "$sr_pv" "$sr_ps" "$sr_pd" "$sr_by" "$sr_wr" >> "$sr_tmp"
     mv "$sr_tmp" "$STATE"
 }
 
@@ -941,6 +1104,7 @@ yes_reply() {
 # A question that goes ahead unless you say no. -y answers it.
 ask_yn() {
     [ "$ASSUME_YES" = 1 ] && return 0
+    status_clear
     printf '%s [Y/n] ' "$1"
     read -r ay_answer || ay_answer=""
     [ -n "$ay_answer" ] || ay_answer=y
@@ -952,6 +1116,7 @@ ask_yn() {
 ask_ny() {
     [ "$ASSUME_YES" = 1 ] && return 0
     interactive || return 1
+    status_clear
     printf '%s [y/N] ' "$1"
     read -r an_answer || an_answer=""
     yes_reply "$an_answer"
@@ -975,6 +1140,10 @@ same_file() {
 # and the unpacking move it past that, and everything it says goes to stderr so
 # stdout stays the machine stream.
 pm_run() {
+    if styled; then
+        pm_styled "$@"
+        return
+    fi
     if [ "$PROGRESS" != 1 ]; then
         "$@"
         return
@@ -1010,6 +1179,41 @@ pm_run() {
     PROGRESS_AT=$(cat "$pr_rc.at" 2>/dev/null || echo "$PROGRESS_AT")
     rm -f "$pr_rc" "$pr_rc.at"
     [ "$pr_status" = 0 ]
+}
+
+# pm_styled <command...> — pm_run on a styled terminal: what the package
+# manager says goes to PM_LOG (emptied by the run's first call, added to by the
+# rest), and the status line counts its packages as it goes. Its input is
+# empty, since a question it asked would be hidden in the log; on a failure the
+# last lines are shown, and where the rest is.
+PM_LOG="$CACHE_DIR/last-update.log"
+PM_LOGGED=0
+pm_styled() {
+    mkdir -p "$CACHE_DIR"
+    [ "$PM_LOGGED" = 1 ] || : > "$PM_LOG"
+    PM_LOGGED=1
+    pms_rc="$CACHE_DIR/pm.rc"
+    status "Installing Termux packages" "$I_PKG"
+    pms_head=$(status_text "$I_PKG" "Installing Termux packages" 30)
+    { "$@" < /dev/null 2>&1; echo "$?" > "$pms_rc"; } |
+        tr '\r' '\n' |
+        awk -v lf="$PM_LOG" -v head="$pms_head" -v esc="$ESC" '
+            function show(w) {
+                if (w == shown) return
+                shown = w
+                printf "\r%s[K%s · %s", esc, head, substr(w, 1, 24); fflush()
+            }
+            { print >> lf }
+            match($0, /^\([0-9]+\/[0-9]+\)/) { split(substr($0, 2, RLENGTH - 2), n, "/"); show(n[1] " of " n[2]); next }
+            /^(Unpacking|Setting up) / { show($2) }'
+    pms_status=$(cat "$pms_rc" 2>/dev/null || echo 1)
+    rm -f "$pms_rc"
+    STATUS_ON=1
+    [ "$pms_status" = 0 ] && return 0
+    status_clear
+    tail -n 10 "$PM_LOG" | sed "s/^/  $C_DIM/; s/\$/$C_OFF/"
+    printf '  %s\n' "The package manager stopped. Everything it said is in ~/${PM_LOG#"$HOME"/}"
+    return 1
 }
 
 # -Sy as Termux's own pkg does on pacman: a fresh bootstrap has never synced its
@@ -1372,7 +1576,7 @@ drop_build_tools() {
     for db_f in "${CACHE_DIR:?}"/*; do
         [ -e "$db_f" ] || continue
         case "${db_f##*/}" in
-            pictures|readme|snapshot.tsv) ;;
+            pictures|readme|snapshot.tsv|last-update.log) ;;
             *) rm -rf "$db_f" 2>/dev/null || true ;;
         esac
     done
@@ -1476,30 +1680,43 @@ do_binary() {
     return 0
 }
 
-# Shows what would change in a config file and asks. Only --configs answers this
-# for you; -y deliberately does not, because a config is the user's own work.
-# confirm_replace <name> <current> <new>
+# Asks, on one line, before a config file the person may have changed is
+# replaced; d shows the change and asks again. Only --configs answers this for
+# you; -y deliberately does not, because a config is the user's own work.
+# confirm_replace <current> <new> [edited] — edited is 1 when tlstore knows the
+# file is no longer what it wrote, empty when it cannot tell.
 confirm_replace() {
-    cf_name="$1"
-    cf_cur="$2"
-    cf_new="$3"
+    cf_cur="$1"
+    cf_new="$2"
     # --progress never opens a prompt tlstore-ui cannot answer: the user's file
     # is always kept, whatever --configs says.
     [ "$PROGRESS" = 1 ] && return 1
     [ "$REPLACE_CONFIGS" = 1 ] && return 0
     interactive || return 1
-    say "$cf_name"
-    if have diff; then
-        diff -u "$cf_cur" "$cf_new" || true
-    else
-        say "  before:"
-        head -25 "$cf_cur" | sed 's/^/    /'
-        say "  after:"
-        head -25 "$cf_new" | sed 's/^/    /'
-    fi
-    printf 'Replace your %s? [y/N] ' "$(basename "$cf_cur")"
-    read -r cf_answer || cf_answer=""
-    yes_reply "$cf_answer"
+    cf_show="$cf_cur"
+    # shellcheck disable=SC2088  # the ~ is for the person to read
+    case "$cf_cur" in "$HOME"/*) cf_show="~/${cf_cur#"$HOME"/}" ;; esac
+    cf_ask="Replace your $cf_show with the new one?"
+    [ "${3:-}" != 1 ] || cf_ask="You changed $cf_show. Replace it with the new one?"
+    cf_mark=""
+    ! styled || cf_mark="$C_ASK$I_ASK$C_OFF$GAP"
+    while :; do
+        status_clear
+        printf '%s%s [y/N/d] ' "$cf_mark" "$cf_ask"
+        read -r cf_answer || cf_answer=""
+        case "$cf_answer" in
+            d|D) ;;
+            *) yes_reply "$cf_answer"; return ;;
+        esac
+        if have diff; then
+            diff -u "$cf_cur" "$cf_new" || true
+        else
+            printf '  before:\n'
+            head -25 "$cf_cur" | sed 's/^/    /'
+            printf '  after:\n'
+            head -25 "$cf_new" | sed 's/^/    /'
+        fi
+    done
 }
 
 # do_file <once>
@@ -1518,29 +1735,40 @@ do_file() {
         is_installed "$ii_name" || state_record "$ii_name" file-once "$ii_version"
         return 0
     fi
-    # A config file you already have is never replaced without being shown the
-    # change first. It is recorded either way, so declining is not asked again
-    # until the shipped file itself moves on.
+    # A config file you already have is replaced without a word only while it
+    # is still exactly what tlstore last wrote there (column 12): nobody edited
+    # it, so there is nothing of yours to keep a copy of. One you changed, or
+    # one tlstore has no record of writing, is asked about first. It is
+    # recorded either way, so declining is not asked again until the shipped
+    # file itself moves on.
     if [ "$df_once" = 0 ] && [ -e "$df_dest" ]; then
         mkdir -p "$CACHE_DIR"
         df_new="$CACHE_DIR/$ii_name.new"
         payload_to "$(source_url "$ii_source")" "$df_new" "$ii_digest" || return 1
+        df_wrote=$(file_digest "$df_new")
         if same_file "$df_dest" "$df_new"; then
             rm -f "$df_new"
+            SR_WRITTEN="$df_wrote"
             state_record "$ii_name" file "$ii_version" "$df_dest"
             return 0
         fi
-        if ! confirm_replace "$ii_name" "$df_dest" "$df_new"; then
+        df_was=$(field "$(state_row "$ii_name" 2>/dev/null || true)" 12)
+        df_edited=""
+        [ -z "$df_was" ] || df_edited=1
+        if [ -n "$df_was" ] && [ "$(file_digest "$df_dest")" = "$df_was" ]; then
+            df_edited=0
+        elif ! confirm_replace "$df_dest" "$df_new" "$df_edited"; then
             rm -f "$df_new"
             say "kept your $(basename "$df_dest")"
             PROGRESS_NOTE="kept your $(basename "$df_dest")"
             state_record "$ii_name" file "$ii_version" "$df_dest"
             return 0
         fi
-        backup_existing "$df_dest"
+        [ "$df_edited" = 0 ] || backup_existing "$df_dest"
         cp "$df_new" "$df_dest" || return 1
         rm -f "$df_new"
         chmod "$df_mode" "$df_dest"
+        SR_WRITTEN="$df_wrote"
         state_record "$ii_name" file "$ii_version" "$df_dest"
         say "  $df_dest"
         return 0
@@ -1553,6 +1781,7 @@ do_file() {
     if [ "$df_once" = 1 ]; then
         state_record "$ii_name" file-once "$ii_version" "$df_dest"
     else
+        SR_WRITTEN=$(file_digest "$df_dest")
         state_record "$ii_name" file "$ii_version" "$df_dest"
     fi
     say "  $df_dest"
@@ -1693,6 +1922,11 @@ do_npm_musl() {
 
     say "installing $ii_name"
     np_want="${ii_version:-latest}"
+    if [ "$np_want" = latest ]; then
+        status "Asking npm for $ii_name's latest version"
+    else
+        status "Asking npm for $ii_name $np_want"
+    fi
     np_meta=$(curl -fsSL --connect-timeout 5 --max-time 60 "$NPM_REGISTRY/$np_package/$np_want") || {
         err "could not reach the $ii_name download"
         return 1
@@ -1730,7 +1964,9 @@ do_npm_musl() {
         np_tmp="$CACHE_DIR/$ii_name.tgz"
         mkdir -p "$CACHE_DIR"
         CANCEL_TMP="$np_tmp"
-        curl_to "$np_tarball" "$np_tmp" || { rm -f "$np_tmp"; CANCEL_TMP=""; err "could not download $ii_name"; return 1; }
+        DL_WHAT="$ii_name $np_version"
+        curl_to "$np_tarball" "$np_tmp" || { rm -f "$np_tmp"; CANCEL_TMP=""; DL_WHAT=""; err "could not download $ii_name"; return 1; }
+        DL_WHAT=""
         np_actual=$(sha512sum "$np_tmp" | cut -d' ' -f1)
         if [ "$np_actual" != "$np_expect" ]; then
             rm -f "$np_tmp"
@@ -4374,7 +4610,7 @@ plan_show_update() {
         for sp_n in $sp_up; do
             sp_row=$(row "$sp_n")
             if [ "$(field "$sp_row" 2)" = file ]; then
-                say "$sp_n has a new version; update shows the change and asks"
+                say "$sp_n has a new version; update asks first if you changed it"
             else
                 say "$sp_n $(field "$sp_row" 3) is available; you have $(installed_version "$sp_n")"
             fi
@@ -4617,6 +4853,8 @@ plan_apply() {
     pa_fetch_bad=""
     pa_fetch_at=" "
     journal_open
+    ROWS_OK=0 ROWS_BAD=0 ROWS_SAME=0
+    ! styled || STATUS_SCOPE=1
     case "$PLAN_VERB" in
         install|update)
             plan_packages
@@ -4635,12 +4873,14 @@ plan_apply() {
         pa_why="$ps_why"
         LAST_ERR=""
         PROGRESS_NOTE=""
+        ROW_NAME="$pa_n"
         pa_outcome=ok
         case "$pa_action" in
             install) plan_apply_install ;;
             skip)
                 if [ "$PLAN_VERB" = update ]; then
                     plan_let_go "$pa_n"
+                    row_mark same "$pa_n"
                 else
                     plan_apply_skip
                 fi
@@ -4653,6 +4893,7 @@ plan_apply() {
                     *) pa_said="$pa_n is $pa_why" ;;
                 esac
                 say "$pa_said"
+                row_mark note "$pa_n" "${pa_said#"$pa_n" }"
                 [ "$PROGRESS" != 1 ] || progress_done "$pa_n" ok "$pa_said"
                 ;;
             remove|forget|absent) plan_apply_remove ;;
@@ -4661,11 +4902,18 @@ plan_apply() {
         journal_done "$pa_n" "$pa_outcome"
     done
     IFS="$pa_ifs"
+    ROW_NAME=""
+    STATUS_SCOPE=0
     [ "$PA_STAGING" != 1 ] || rm -rf "$STAGE_DIR"
     PA_STAGING=0
     PA_STAGED=""
     drop_build_tools
     rm -f "$JOURNAL"
+    case "$PLAN_VERB" in
+        update) row_summary updated "already current" ;;
+        install) row_summary installed "already installed" ;;
+        *) row_summary removed "not installed" ;;
+    esac
     return "$pa_rc"
 }
 
@@ -4720,6 +4968,8 @@ plan_fetch() {
         say "fetching $pf_n"
         LAST_ERR=""
         CANCEL_ITEM="$pf_n"
+        ROW_NAME="$pf_n"
+        DL_WHAT="$pf_n $it_version"
         PROGRESS_AT=0
         progress_stage 10 fetched
         DL_STAGE=1
@@ -4731,9 +4981,12 @@ plan_fetch() {
             pa_fetch_bad="$pa_fetch_bad $pf_n"
             pf_doomed="$pf_doomed $pf_n"
             pa_rc=1
+            row_mark failed "$pf_n" "${LAST_ERR:-could not download $pf_n}"
             [ "$PROGRESS" != 1 ] || progress_done "$pf_n" failed "${LAST_ERR:-could not download $pf_n}"
         fi
         DL_STAGE=0
+        DL_WHAT=""
+        ROW_NAME=""
         CANCEL_ITEM=""
     done
     IFS="$pf_ifs"
@@ -4789,6 +5042,7 @@ plan_apply_skip() {
         state_set_by "$pa_n" requested
     fi
     say "$pa_n is already installed"
+    row_mark same "$pa_n"
     [ "$PROGRESS" = 1 ] || return 0
     CANCEL_ITEM="$pa_n"
     PROGRESS_AT=0
@@ -4802,9 +5056,12 @@ plan_apply_skip() {
 
 plan_apply_install() {
     pa_word=installed
+    pa_doing=Installing
     pa_fail="could not install $pa_n"
+    pa_was=$(installed_version "$pa_n")
     if [ "$PLAN_VERB" = update ] && is_installed "$pa_n"; then
         pa_word=updated
+        pa_doing=Updating
         pa_fail="could not update $pa_n"
     fi
     # Its payload did not arrive in the fetch phase, which already failed it
@@ -4826,6 +5083,7 @@ plan_apply_install() {
         pa_rc=1
         pa_outcome=skipped
         err "skipped $pa_n: $pa_reason"
+        row_mark failed "$pa_n" "$pa_reason"
         [ "$PROGRESS" != 1 ] || progress_done "$pa_n" failed "$pa_reason"
         return 0
     fi
@@ -4859,6 +5117,7 @@ plan_apply_install() {
         pa_force=0
         [ "$PLAN_VERB" != update ] || pa_force=1
         SR_BY="$pa_by"
+        status "$pa_doing $pa_n"
         install_item "$pa_n" "$pa_force" || pa_ok=0
         SR_BY=""
     fi
@@ -4866,14 +5125,35 @@ plan_apply_install() {
         progress_stage 60 "signature checked"
         progress_stage 90 "putting files in place"
         progress_stage 100 ready
+        plan_mark_ok
         [ "$PROGRESS" != 1 ] || progress_done "$pa_n" ok "${PROGRESS_NOTE:-$pa_word}"
     else
         pa_bad="$pa_bad $pa_n"
         pa_rc=1
         pa_outcome=failed
+        row_mark failed "$pa_n" "${LAST_ERR:-$pa_fail}"
         [ "$PROGRESS" != 1 ] || progress_done "$pa_n" failed "${LAST_ERR:-$pa_fail}"
     fi
     CANCEL_ITEM=""
+}
+
+# plan_mark_ok — an installed row's closing line on a styled terminal: its new
+# version (or what happened, for a kind without one) and any note. An update
+# that left the version where it was (a package, an npm item already at its
+# latest) is counted as current instead.
+plan_mark_ok() {
+    styled || return 0
+    pa_now=$(installed_version "$pa_n")
+    if [ "$pa_word" = updated ] && [ "$pa_now" = "$pa_was" ] && [ -z "$PROGRESS_NOTE" ]; then
+        row_mark same "$pa_n"
+        return 0
+    fi
+    case "$pa_now" in
+        ''|-|latest) pa_said="$pa_word" ;;
+        *) pa_said="$C_ACC$pa_now$C_OFF" ;;
+    esac
+    [ -z "$PROGRESS_NOTE" ] || pa_said="$pa_said $C_DIM· $PROGRESS_NOTE$C_OFF"
+    row_mark ok "$pa_n" "$pa_said"
 }
 
 plan_apply_remove() {
@@ -4884,6 +5164,11 @@ plan_apply_remove() {
         progress_line step "$pa_n" 30 fetched
     fi
     if remove_item "$pa_n"; then
+        if [ "$pa_action" = absent ]; then
+            row_mark same "$pa_n"
+        else
+            row_mark ok "$pa_n" "$pa_word"
+        fi
         if [ "$PROGRESS" = 1 ]; then
             progress_line step "$pa_n" 75 "putting files in place"
             progress_line step "$pa_n" 100 ready
@@ -4893,6 +5178,7 @@ plan_apply_remove() {
         pa_bad="$pa_bad $pa_n"
         pa_rc=1
         pa_outcome=failed
+        row_mark failed "$pa_n" "${LAST_ERR:-could not remove $pa_n}"
         [ "$PROGRESS" != 1 ] || progress_done "$pa_n" failed "${LAST_ERR:-could not remove $pa_n}"
     fi
     CANCEL_ITEM=""
@@ -4904,6 +5190,7 @@ plan_apply_retire() {
         progress_line step "$pa_n" 30 fetched
     fi
     if retire_item "$pa_n"; then
+        row_mark ok "$pa_n" retired
         if [ "$PROGRESS" = 1 ]; then
             progress_line step "$pa_n" 75 "putting files in place"
             progress_line step "$pa_n" 100 ready
@@ -4913,6 +5200,7 @@ plan_apply_retire() {
         pa_bad="$pa_bad $pa_n"
         pa_rc=1
         pa_outcome=failed
+        row_mark failed "$pa_n" "${LAST_ERR:-could not retire $pa_n}"
         [ "$PROGRESS" != 1 ] || progress_done "$pa_n" failed "${LAST_ERR:-could not retire $pa_n}"
     fi
     CANCEL_ITEM=""
@@ -5019,7 +5307,10 @@ update_items() {
         esac
     done
     need_catalog
-    [ "$cu_offline" = 1 ] || update_refresh
+    if [ "$cu_offline" = 0 ]; then
+        [ "$cu_tsv" = 1 ] || status "Checking the item list"
+        update_refresh
+    fi
     need_catalog
 
     if [ -z "$cu_names" ] && [ -z "$(installed_names)" ]; then
@@ -5050,18 +5341,46 @@ update_items() {
     plan_apply
 }
 
+# An update offers the newer tlstore, and the store program that pairs with
+# it, when there is one — never offline, never on `--check` (the refresh
+# tlstore-ui runs in the background; swapping the files under a running UI is
+# what `self-update --progress` exists to do in plain view), and not inside a
+# --progress stream, which carries the item lines alone. A plain update
+# (Revision 16) asks first, before any item is planned: taken, the newer
+# tlstore is run in this one's place with the same arguments, so the newer
+# engine plans the items, and TLSTORE_UPDATED_FROM keeps it from offering or
+# restarting again. Declined, never, offline or nothing newer, this one carries
+# on. `update --tsv` without --check still asks at the end, as it always has.
 cmd_update() {
+    cu_plain=1
+    cu_su=0
+    su_moved=0
+    for cu_a in "$@"; do
+        case "$cu_a" in
+            -y|--yes) ASSUME_YES=1 ;;
+            --configs) ;;
+            -*) cu_plain=0 ;;
+        esac
+    done
+    if [ "$cu_plain" = 1 ] && [ -z "$SU_FROM" ]; then
+        status "Checking for a newer tlstore"
+        self_update_offer || cu_su=1
+        if [ "$su_moved" = 1 ]; then
+            status_clear
+            export TLSTORE_UPDATED_FROM="$TLSTORE_VERSION"
+            export TLSTORE_ASSUME_YES="$ASSUME_YES"
+            exec "$su_target" update "$@"
+        fi
+    fi
     update_items "$@"
     cu_status=$?
-    # A plain `update` offers the newer tlstore, and the store program that
-    # pairs with it, when there is one — never offline, never on `--check` (the refresh
-    # tlstore-ui runs in the background; swapping the files under a running
-    # UI is what `self-update --progress` exists to do in plain view), and
-    # not inside a --progress stream, which carries the item lines alone.
-    if [ "$cu_status" != 2 ] && [ "${cu_offline:-0}" = 0 ] && [ "${cu_check:-0}" = 0 ] && [ "$PROGRESS" != 1 ]; then
-        # A refused or failed self-update fails the command, as a failed item does.
-        self_update_offer || [ "$cu_status" != 0 ] || cu_status=1
+    if [ "$cu_plain" = 0 ] && [ -z "$SU_FROM" ] && [ "$cu_status" != 2 ] && [ "${cu_offline:-0}" = 0 ] &&
+        [ "${cu_check:-0}" = 0 ] && [ "$PROGRESS" != 1 ]; then
+        self_update_offer || cu_su=1
     fi
+    # A refused or failed self-update fails the command, as a failed item does.
+    [ "$cu_su" = 0 ] || [ "$cu_status" != 0 ] || cu_status=1
+    status_clear
     return "$cu_status"
 }
 
@@ -5503,6 +5822,7 @@ self_update_offer() {
         su_say "tlstore $su_version is available. Run tlstore self-update to get it."
         return 0
     fi
+    status_clear
     if [ "${cu_tsv:-0}" = 1 ]; then
         printf 'tlstore %s is available; you have %s. Update now? [Y/n/never] ' "$su_version" "$TLSTORE_VERSION" >&2
     else

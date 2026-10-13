@@ -97,29 +97,27 @@ fails, the items that need it are skipped and the rest carry on; the exit status
 failure gives its reason. If an install is cut short (the phone died, the app was killed), the next
 install and `tlstore doctor` say which items did not finish.
 
-## Your config files are never replaced silently
+## Config files you changed are never replaced silently
 
-When tlstore is about to write a config file you already have and yours is different, it shows you
-the change and asks:
+tlstore remembers what it wrote. A config file you never touched simply moves on with its item when
+an update brings a new one. One you changed is asked about first, on one line:
 
 ```
 $ tlstore update
-config-fish
---- /data/data/com.termux/files/home/.config/fish/config.fish
-+++ ...
-@@ -12,7 +12,7 @@
--    set -gx EDITOR vi
-+    set -gx EDITOR nvim
-Replace your config.fish? [y/N]
+! You changed ~/.config/fish/config.fish. Replace it with the new one? [y/N/d]
 ```
 
-The answer defaults to no, and `-y` does not answer it — a config file is your work, not part of
-"yes to everything". Answering yes leaves a timestamped backup of your file right beside it.
+Answer `d` to see the change, then answer again. The answer defaults to no, and `-y` does not answer
+it — a config file is your work, not part of "yes to everything". Answering yes leaves a timestamped
+backup of your file right beside it.
 
 Either answer is remembered at the shipped version, so declining once is not asked about again
 until that file itself changes. `tlstore update --check` lists those as *has a new version; update
-shows the change and asks*. In a script, or anywhere there is nobody to ask, your file is kept and
-one line says so — add `--configs` if you want the new one.
+asks first if you changed it*. In a script, or anywhere there is nobody to ask, your file is kept
+and one line says so — add `--configs` if you want the new one.
+
+Files installed before tlstore 0.18 have no such record, so tlstore cannot tell whether you changed
+them: it asks about each once (*Replace your … with the new one?*) and remembers from then on.
 
 A few files are only ever installed once and then left alone for you to edit for good: your
 personal fish settings and the fastfetch layout.
@@ -221,8 +219,26 @@ it.
 
 ## Keeping things up to date
 
-`tlstore update` checks for a newer list of items, then upgrades anything you have that has moved
-on. `tlstore refresh` only fetches that list, without installing or changing anything.
+`tlstore update` first checks for a newer tlstore and offers it (`-y` takes it without asking); a
+newer tlstore then does the rest of the update itself. After that it checks for a newer list of
+items, then upgrades anything you have that has moved on. `tlstore refresh` only fetches that list,
+without installing or changing anything.
+
+In a terminal, one line at the bottom says what is happening now, each item leaves one line when it
+is done, and the run ends with a count:
+
+```
+$ tlstore update
+✓ claude-code 2.1.300
+✓ fish-prompt 3
+✗ opencode: could not download opencode
+2 updated · 1 failed · 6 already current
+```
+
+What the package manager says goes to `~/.cache/tlstore/last-update.log` instead of the screen;
+when it fails, its last lines are shown along with where the rest is. Colours are the terminal's
+own sixteen, so they follow your theme, and the icons come from the launcher's font when you are in
+its terminal. Set `NO_COLOR=1` for plain text; a script or a pipe always gets plain text.
 
 The list of items is signed by the launcher's maintainer, and tlstore only accepts an update to it
 when the signature checks out and it is genuinely newer than the one you have — so a compromised
