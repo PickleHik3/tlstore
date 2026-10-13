@@ -148,14 +148,30 @@ function __tl_prompt_git
     if test "$__tlp_where_pwd" != "$PWD"
         set -g __tlp_where_pwd $PWD
         set -g __tlp_where (command git rev-parse --show-toplevel --absolute-git-dir 2>/dev/null)
+        set -e __tlp_no_refresh
     end
     set -q __tlp_where[2]; or return 1
     set -l top $__tlp_where[1]
     set -l gitdir $__tlp_where[2]
 
+    # The status never takes the index lock, so another git command is never refused it; git's
+    # trace, on descriptor 3, says how many files it had to read and how many had changed.
     set -l args --no-optional-locks status --porcelain=v2 --branch --show-stash --ignore-submodules=dirty
     test "$tl_prompt_git_untracked" = 0; and set -a args --untracked-files=no
-    set -l st (command git $args 2>/dev/null); or return 1
+    set -l st (GIT_TRACE2_EVENT=3 GIT_TRACE2_EVENT_NESTING=2 command git $args 3>&1 2>/dev/null)
+    or return 1
+    # Files read, then files changed: git refreshes the index before it counts.
+    set -l counts (string replace -rf '.*"key":"(?:refresh/sum_scan|count/changed)","value":"(\d+)".*' '$1' -- $st)
+    set st (string match -v -- '{*' $st)
+
+    # A file touched but not changed (a build, a formatter, an agent) is read again on every
+    # prompt until the index is refreshed, which a lock-free status cannot do: 66 ms a prompt
+    # instead of 12 in a 700-file repository. More files read than changed means that, so refresh
+    # the index once. Where it cannot be written, stop trying until the folder or a git command.
+    if set -q counts[2]; and test $counts[1] -gt $counts[2]; and not set -q __tlp_no_refresh
+        command git update-index -q --refresh >/dev/null 2>&1
+        test $status -le 1; or set -g __tlp_no_refresh
+    end
 
     set -l head (string replace -rf '^# branch\.head ' '' -- $st)
     set -l oid (string replace -rf '^# branch\.oid ' '' -- $st)
