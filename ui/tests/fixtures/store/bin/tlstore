@@ -130,8 +130,24 @@ case "$cmd" in
 esac
 [ "$1" = --progress ] || exit 2
 shift
+# The plan first, one `row` line per row (Revision 17). part-<name> holds the name of a
+# part that item needs: announced auto before it and run through before it.
+action=install
+[ "$cmd" = remove ] && action=remove
+for n in "$@"; do
+    [ -f "$d/part-$n" ] && printf 'row\t%s\tinstall\tpkg\t-\tauto\tneeded by %s\n' "$(cat "$d/part-$n")" "$n"
+    printf 'row\t%s\t%s\tbinary\t-\trequested\t-\n' "$n" "$action"
+done
 failed=0
 for n in "$@"; do
+    if [ -f "$d/part-$n" ]; then
+        p=$(cat "$d/part-$n")
+        printf 'step\t%s\t10\tfetched\n' "$p"
+        printf 'step\t%s\t60\tsignature checked\n' "$p"
+        printf 'step\t%s\t90\tputting files in place\n' "$p"
+        printf 'step\t%s\t100\tready\n' "$p"
+        printf 'done\t%s\tok\tinstalled\n' "$p"
+    fi
     printf 'step\t%s\t10\tfetched\n' "$n"
     if [ -f "$d/hold" ]; then
         printf 'step\t%s\t60\tsignature checked\n' "$n"

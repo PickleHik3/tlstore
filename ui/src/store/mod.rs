@@ -119,15 +119,82 @@ pub struct Done {
     pub message: String,
 }
 
+/// Where one row of a job's plan has got to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RowState {
+    Pending,
+    Live,
+    Done { ok: bool, message: String },
+}
+
+/// One row of a job's plan: announced by a `row` line, or implied by a `step` for a name
+/// nothing announced (the store's own update, an engine older than Revision 17).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Row {
+    pub name: String,
+    /// install, skip, unavailable, remove, forget, retire, absent (`install` when implied).
+    pub action: String,
+    /// pkg, binary, archive, file, file-once, fisher, npm-musl, npm-android, bundle, `-`.
+    pub kind: String,
+    /// requested | auto.
+    pub by: String,
+    /// `needed by X`, `part of X`, `needs X`, `only X needed it`, `-`.
+    pub why: String,
+    /// The row's own 10 → 100, never stepping back.
+    pub pct: u8,
+    /// The words of its latest step.
+    pub words: String,
+    pub state: RowState,
+    /// Made up by the UI, not announced by the engine.
+    implied: bool,
+}
+
+impl Row {
+    fn implied(name: &str, requested: bool) -> Row {
+        Row {
+            name: name.to_string(),
+            action: "install".into(),
+            kind: "-".into(),
+            by: if requested { "requested" } else { "auto" }.into(),
+            why: "-".into(),
+            pct: 0,
+            words: String::new(),
+            state: RowState::Pending,
+            implied: true,
+        }
+    }
+
+    /// Its share of the job's bar: what it brings by kind, or a little for a removal.
+    pub fn weight(&self) -> u32 {
+        match self.action.as_str() {
+            "install" => match self.kind.as_str() {
+                "pkg" => 3,
+                "binary" | "archive" | "npm-musl" | "npm-android" => 4,
+                "fisher" => 2,
+                "file" | "file-once" => 1,
+                "bundle" => 0,
+                _ => 2,
+            },
+            "remove" | "forget" | "absent" | "retire" => 1,
+            "skip" | "unavailable" => 0,
+            _ => 2,
+        }
+    }
+}
+
 /// A running (or finished) install/update/remove.
 pub struct Job {
     pub verb: Verb,
     /// What the person asked for (the stream may also report the parts they need).
     pub names: Vec<String>,
     task: Option<Task>,
-    /// Item the stream is on now.
+    /// The requested item the stream is working for now: the live row's owner.
     pub current: Option<String>,
+    /// The whole job's percentage: the rows weighted by kind; it only ever grows.
     pub pct: u8,
+    /// The plan in apply order (seeded with the requested names until the stream announces
+    /// its own).
+    pub rows: Vec<Row>,
     /// Index into [`STEPS`] of the step in progress (4 = all four done).
     pub step: usize,
     pub done: Vec<Done>,
@@ -203,30 +270,144 @@ impl Job {
         self.done.iter().any(|d| d.name == name && !d.ok)
     }
 
+    /// A job for `names`, nothing run yet: one implied row per name until the stream says more.
+    fn new(verb: Verb, names: Vec<String>) -> Job {
+        let rows = names.iter().map(|n| Row::implied(n, true)).collect();
+        Job {
+            verb,
+            names,
+            task: None,
+            current: None,
+            pct: 0,
+            rows,
+            step: 0,
+            done: Vec::new(),
+            exit: None,
+            cancelled: false,
+        }
+    }
+
+    /// The requested item `row` works for: itself when asked for, else the item it is
+    /// `needed by` or `part of` (followed up the plan), else the first requested name.
+    pub fn owner(&self, row: &Row) -> String {
+        let mut r = row;
+        for _ in 0..=self.rows.len() {
+            if r.by == "requested" || self.names.contains(&r.name) {
+                return r.name.clone();
+            }
+            let up =
+                r.why.strip_prefix("needed by ").or_else(|| r.why.strip_prefix("part of ")).map(str::trim);
+            let Some(up) = up else { break };
+            if self.names.iter().any(|n| n == up) {
+                return up.to_string();
+            }
+            match self.rows.iter().find(|x| x.name == up) {
+                Some(x) => r = x,
+                None => break,
+            }
+        }
+        self.names.first().cloned().unwrap_or_else(|| row.name.clone())
+    }
+
+    /// The row in progress.
+    pub fn live(&self) -> Option<&Row> {
+        self.rows.iter().find(|r| r.state == RowState::Live)
+    }
+
+    /// The rows' percentages weighted by kind (every row weighs 1 when they all weigh 0).
+    fn weighted(&self) -> u8 {
+        let even = self.rows.iter().all(|r| r.weight() == 0);
+        let w = |r: &Row| if even { 1 } else { r.weight() };
+        let total: u32 = self.rows.iter().map(w).sum();
+        if total == 0 {
+            return 0;
+        }
+        let sum: u32 = self.rows.iter().map(|r| w(r) * r.pct as u32).sum();
+        (sum / total).min(100) as u8
+    }
+
+    /// The row called `name`, appended (implied) when the plan did not have it.
+    fn row_index(&mut self, name: &str) -> usize {
+        match self.rows.iter().position(|r| r.name == name) {
+            Some(i) => i,
+            None => {
+                let requested = self.names.iter().any(|n| n == name);
+                self.rows.push(Row::implied(name, requested));
+                self.rows.len() - 1
+            }
+        }
+    }
+
     /// Takes one progress line; returns the name it reported done ok.
     fn feed(&mut self, line: &str) -> Option<String> {
+        let mut out = None;
         match parse_progress(line) {
-            Some(Progress::Step { name, pct, words }) => {
-                if self.current.as_deref() != Some(&name) {
-                    self.current = Some(name);
-                    self.step = 0;
+            Some(Progress::Row { name, action, kind, version: _, by, why }) => {
+                // The engine's plan replaces the names seeded at the start.
+                if !self.rows.iter().any(|r| !r.implied) {
+                    self.rows.retain(|r| !(r.implied && r.state == RowState::Pending));
                 }
-                self.pct = pct;
-                if let Some(i) = STEPS.iter().position(|s| *s == words) {
-                    self.step = if i == STEPS.len() - 1 { STEPS.len() } else { i };
+                let row = Row {
+                    name,
+                    action,
+                    kind,
+                    by,
+                    why,
+                    pct: 0,
+                    words: String::new(),
+                    state: RowState::Pending,
+                    implied: false,
+                };
+                match self.rows.iter_mut().find(|r| r.name == row.name) {
+                    Some(r) => {
+                        let (pct, words, state) = (r.pct, std::mem::take(&mut r.words), r.state.clone());
+                        *r = Row { pct, words, state, ..row };
+                    }
+                    None => self.rows.push(row),
                 }
             }
+            Some(Progress::Step { name, pct, words }) => {
+                let i = self.row_index(&name);
+                for (k, r) in self.rows.iter_mut().enumerate() {
+                    if k != i && r.state == RowState::Live {
+                        r.state = RowState::Pending;
+                    }
+                }
+                if self.rows[i].state != RowState::Live {
+                    self.step = 0;
+                }
+                let r = &mut self.rows[i];
+                r.pct = r.pct.max(pct);
+                r.state = RowState::Live;
+                if let Some(k) = STEPS.iter().position(|s| *s == words) {
+                    self.step = if k == STEPS.len() - 1 { STEPS.len() } else { k };
+                }
+                r.words = words;
+                self.current = Some(self.owner(&self.rows[i]));
+            }
             Some(Progress::Done { name, ok, message }) => {
+                let i = self.row_index(&name);
+                let r = &mut self.rows[i];
+                r.pct = 100;
+                r.state = RowState::Done { ok, message: message.clone() };
                 if ok && self.current.as_deref() == Some(&name) {
-                    self.pct = 100;
                     self.step = STEPS.len();
                 }
                 self.done.push(Done { name: name.clone(), ok, message });
-                return ok.then_some(name);
+                out = ok.then_some(name);
             }
-            None => {}
+            None => return None,
         }
-        None
+        self.pct = self.pct.max(self.weighted());
+        out
+    }
+
+    /// The script is gone with `code`: a job where every row went through is at 100.
+    fn exited(&mut self, code: i32) {
+        self.exit = Some(code);
+        if !self.done.is_empty() && self.done.iter().all(|d| d.ok) {
+            self.pct = 100;
+        }
     }
 
     /// Plain sentences for the end of the job: what worked, what did not, kept files.
@@ -637,17 +818,7 @@ impl Store {
             self.notice = Some("Wait for the current one to finish.".into());
             return false;
         }
-        self.job = Some(Job {
-            verb,
-            names,
-            task: None,
-            current: None,
-            pct: 0,
-            step: 0,
-            done: Vec::new(),
-            exit: None,
-            cancelled: false,
-        });
+        self.job = Some(Job::new(verb, names));
         // The store's own update needs no catalog, so it does not wait for the refresh.
         if !self.refreshing || verb == Verb::SelfUpdate {
             self.spawn_job();
@@ -782,7 +953,7 @@ impl Store {
                     }
                 }
                 if let Some(code) = out.exit {
-                    job.exit = Some(code);
+                    job.exited(code);
                     self.finish_job();
                 }
                 return marked;
@@ -1325,38 +1496,50 @@ pub fn picture_in(st: &mut Store, pics: &mut Pictures, path: &Path, box_w: u32, 
 /// the script, and a way onto the Installing view without a key press.
 #[cfg(feature = "shot")]
 impl Store {
-    /// Pretends `tlstore <verb> --progress <name>` is at `pct` percent (100 = finished, ok).
-    /// Replaces any job; nothing is spawned, and nothing is watched.
+    /// Pretends `tlstore <verb> --progress <name>` is at `pct` percent (100 = finished, ok):
+    /// a plan of one part (`musl-loader`, needed by `name`, done) and `name` itself, live at
+    /// `pct` with the words the stream says there. Replaces any job; nothing is spawned, and
+    /// nothing is watched.
     pub fn fake_job(&mut self, verb: Verb, name: &str, pct: u8) {
         let pct = pct.min(100);
-        let step = match pct {
-            0..=9 => 0,
-            10..=59 => 1,
-            60..=89 => 2,
-            90..=99 => 3,
-            _ => STEPS.len(),
-        };
-        let finished = pct == 100;
         let message = match verb {
             Verb::Install => "installed",
             Verb::Update | Verb::SelfUpdate => "updated",
             Verb::Remove => "removed",
         };
-        self.job = Some(Job {
-            verb,
-            names: vec![name.to_string()],
-            task: None,
-            current: Some(name.to_string()),
-            pct,
-            step,
-            done: if finished {
-                vec![Done { name: name.to_string(), ok: true, message: message.into() }]
-            } else {
-                vec![]
-            },
-            exit: finished.then_some(0),
-            cancelled: false,
-        });
+        let words = match pct {
+            0..=59 => "fetched",
+            60..=89 => "signature checked",
+            90..=99 => "putting files in place",
+            _ => "ready",
+        };
+        let part = "musl-loader";
+        let mut job = Job::new(verb, vec![name.to_string()]);
+        let mut lines = vec![
+            format!("row\t{part}\tinstall\tbinary\t-\tauto\tneeded by {name}"),
+            format!("row\t{name}\tinstall\tbinary\t-\trequested\t-"),
+        ];
+        if pct > 0 {
+            let steps =
+                [(10, "fetched"), (60, "signature checked"), (90, "putting files in place"), (100, "ready")];
+            for (n, w) in steps {
+                lines.push(format!("step\t{part}\t{n}\t{w}"));
+            }
+            lines.push(format!("done\t{part}\tok\tinstalled"));
+            lines.push(format!("step\t{name}\t{pct}\t{words}"));
+        }
+        if pct == 100 {
+            lines.push(format!("done\t{name}\tok\t{message}"));
+        }
+        for l in &lines {
+            job.feed(l);
+        }
+        // The spec names the number on screen, whatever the rows weigh.
+        job.pct = pct;
+        if pct == 100 {
+            job.exited(0);
+        }
+        self.job = Some(job);
     }
 }
 
@@ -1674,5 +1857,113 @@ impl Drop for Router {
             eprintln!("tlstore: finishing what was started; this takes a moment.");
             let _ = t.finish();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Feeds the lines one by one; the job's percentage after each.
+    fn feed_all(job: &mut Job, lines: &[&str]) -> Vec<u8> {
+        lines
+            .iter()
+            .map(|l| {
+                job.feed(l);
+                job.pct
+            })
+            .collect()
+    }
+
+    #[test]
+    fn one_bar_for_a_part_and_the_item_only_grows() {
+        let mut job = Job::new(Verb::Install, vec!["dawn".into()]);
+        let mut seen = feed_all(
+            &mut job,
+            &[
+                "row\tmusl-loader\tinstall\tpkg\t-\tauto\tneeded by dawn",
+                "row\tdawn\tinstall\tbinary\t0.1.3\trequested\t-",
+                "step\tmusl-loader\t10\tfetched",
+                "step\tmusl-loader\t60\tsignature checked",
+                "step\tmusl-loader\t90\tputting files in place",
+                "step\tmusl-loader\t100\tready",
+                "done\tmusl-loader\tok\tinstalled",
+                "step\tdawn\t10\tfetched",
+            ],
+        );
+        assert_eq!(job.rows.len(), 2, "the plan replaced the seeded name: {:?}", job.rows);
+        assert_eq!(job.rows[0].name, "musl-loader");
+        // pkg 3 at 100, binary 4 at 10: (300 + 40) / 7.
+        assert_eq!(job.pct, 48);
+        assert_eq!(job.current.as_deref(), Some("dawn"));
+        assert_eq!(job.live().map(|r| r.name.as_str()), Some("dawn"));
+        assert_eq!(job.word_for("dawn"), Some(("fetching…", false)));
+        seen.extend(feed_all(
+            &mut job,
+            &[
+                "step\tdawn\t60\tsignature checked",
+                "step\tdawn\t90\tputting files in place",
+                "step\tdawn\t100\tready",
+                "done\tdawn\tok\tinstalled",
+            ],
+        ));
+        job.exited(0);
+        seen.push(job.pct);
+        assert!(seen.windows(2).all(|w| w[0] <= w[1]), "never steps back: {seen:?}");
+        assert_eq!(seen.last(), Some(&100));
+        assert_eq!(job.shown_name(), "dawn");
+    }
+
+    #[test]
+    fn steps_without_a_plan_get_implied_rows() {
+        // The store's own update (and an engine older than Revision 17) announces nothing.
+        let mut job = Job::new(Verb::SelfUpdate, vec!["tlstore".into()]);
+        feed_all(&mut job, &["step\ttlstore\t44\tfetched"]);
+        assert_eq!(job.rows.len(), 1);
+        assert_eq!((job.rows[0].by.as_str(), job.rows[0].pct), ("requested", 44));
+        assert_eq!(job.pct, 44);
+        let mut job = Job::new(Verb::Install, vec!["a".into(), "b".into()]);
+        let seen = feed_all(
+            &mut job,
+            &[
+                "step\tlib\t10\tfetched",
+                "done\tlib\tok\tinstalled",
+                "step\ta\t60\tsignature checked",
+                "done\ta\tok\tinstalled",
+                "step\tb\t10\tfetched",
+            ],
+        );
+        assert_eq!(job.rows.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(), ["a", "b", "lib"]);
+        assert_eq!(job.rows[2].by, "auto");
+        assert_eq!(job.current.as_deref(), Some("b"));
+        assert!(seen.windows(2).all(|w| w[0] <= w[1]), "{seen:?}");
+        // Two each: a 100, b 10, lib 100.
+        assert_eq!(job.pct, 70);
+    }
+
+    #[test]
+    fn a_row_belongs_to_the_item_it_is_needed_by() {
+        let mut job = Job::new(Verb::Install, vec!["fish".into(), "dawn".into()]);
+        feed_all(
+            &mut job,
+            &[
+                "row\tlib\tinstall\tpkg\t-\tauto\tneeded by musl-loader",
+                "row\tmusl-loader\tinstall\tbinary\t-\tauto\tneeded by dawn",
+                "row\tplugin\tinstall\tfisher\t-\tauto\tpart of fish",
+                "row\tstray\tinstall\tfile\t-\tauto\tneeds nobody",
+                "row\tfish\tinstall\tpkg\t-\trequested\t-",
+                "row\tdawn\tinstall\tbinary\t-\trequested\t-",
+            ],
+        );
+        let owner = |n: &str| job.owner(job.rows.iter().find(|r| r.name == n).unwrap());
+        assert_eq!(owner("musl-loader"), "dawn");
+        assert_eq!(owner("lib"), "dawn", "followed up the plan");
+        assert_eq!(owner("plugin"), "fish");
+        assert_eq!(owner("stray"), "fish", "no owner: the first name");
+        assert_eq!(owner("dawn"), "dawn");
+        // Skips weigh nothing; a plan of nothing but skips still moves.
+        let mut job = Job::new(Verb::Install, vec!["x".into()]);
+        feed_all(&mut job, &["row\tx\tskip\tbinary\t-\trequested\t-", "step\tx\t60\tsignature checked"]);
+        assert_eq!(job.pct, 60);
     }
 }

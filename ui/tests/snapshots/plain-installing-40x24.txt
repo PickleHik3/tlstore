@@ -5,10 +5,10 @@
 04| a clock built for the terminal
 05| installing 0.6.0 · MIT · am2rican5
 06|
-07| 60%         fetched
-08|             signature checked
-09|             putting files in place
-10|             ready
+07| 60%         sigye  signature checked
+08|
+09|
+10|
 11|
 12| ──────────────────────────────────────
 13|
