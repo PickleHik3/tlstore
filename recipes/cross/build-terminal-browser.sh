@@ -20,10 +20,10 @@
 #                         fallbacks, and one of them (a Playwright cache path) is missing
 #   bin/terminal-browser  upstream's launcher, plus: `upgrade` is refused (tlstore updates this
 #                         copy) and telemetry is off unless the user opts back in
-#   tlstore/launcher-terminal.js
-#                         added (terminal-browser/ next to this recipe): inside Termux Launcher the
-#                         launcher script starts it and sets TERMINAL_BROWSER_TERMINAL_SOCKET, so
-#                         `open --split`, `ls` and `action` see the launcher's panes and windows
+#
+# The fork knows Termux Launcher as a terminal of its own (pixel's terminals/termux-launcher.ts,
+# over the launcher's pane API), so `open --split`, `ls` and `action` see the launcher's panes and
+# windows without a terminal socket.
 #
 # Upstream's JavaScript runs on Electron 42 unchanged: process.platform is "linux" there too, so
 # the addon keeps its pixel-native-linux-<arm64|x64> path. Device-verified on Pong (A065,
@@ -47,9 +47,9 @@
 set -euo pipefail
 
 TB_UPSTREAM=v0.13.4                 # the upstream release the fork's tl branch is built on
-TB_VERSION=$TB_UPSTREAM+478e2a7     # ... plus the fork's commit
+TB_VERSION=$TB_UPSTREAM+2d1bbe0     # ... plus the fork's commit
 TB_URL="https://github.com/PickleHik3/terminal-browser.git"
-TB_COMMIT="478e2a79a187b266c7712a5dc463239a9c131fe7"   # tl: v0.13.4 (fd5f179) + pixel for Android
+TB_COMMIT="2d1bbe0b9033b9055ac989d0392de8c793936049"   # tl: v0.13.4 (fd5f179) + Android, the launcher as a terminal, site mode, touch
 TB_PNPM=10.13.1
 AB_VERSION=v0.38.1
 AB_URL="https://github.com/vercel-labs/agent-browser.git"
@@ -283,39 +283,6 @@ if [ ! -d "$XDG_RUNTIME_DIR" ] || [ ! -w "$XDG_RUNTIME_DIR" ]; then
 fi
 export XDG_RUNTIME_DIR
 
-# Upstream knows kitty, tmux and the like, not the launcher, so `open --split` (what its skill has
-# coding agents run) would find no terminal to open a pane in. tlstore/launcher-terminal.js speaks
-# upstream's terminal socket protocol over the launcher's pane API: one per user, started here on
-# first use and gone after 15 idle minutes. The browser in the new pane runs this script too, so it
-# finds the same one. Nothing is exported if it does not come up: upstream then behaves as before.
-if [ -z "${TERMINAL_BROWSER_TERMINAL_SOCKET:-}" ] && [ -f "${HOME:-}/.launcherctl/endpoint" ] &&
-  { [ -n "${TERMUX_LAUNCHER_PANE:-}" ] || [ "${TERM_PROGRAM:-}" = termux-launcher ]; }; then
-  TB_SOCK="$XDG_RUNTIME_DIR/terminal-browser-launcher.sock"
-  # Up: the socket is there, and the pid the server writes once it listens is still the server.
-  tb_sock_up() {
-    [ -S "$TB_SOCK" ] && [ -r "$TB_SOCK.pid" ] && read -r TB_PID < "$TB_SOCK.pid" &&
-      kill -0 "$TB_PID" 2>/dev/null && grep -q launcher-terminal "/proc/$TB_PID/cmdline" 2>/dev/null
-  }
-  if ! tb_sock_up; then
-    rm -f "$TB_SOCK.pid"
-    # Out of this pane's session where setsid exists; the server ignores SIGHUP and SIGINT itself,
-    # so closing the pane or ctrl+c here does not stop it either way.
-    TB_DETACH=
-    command -v setsid >/dev/null 2>&1 && TB_DETACH=setsid
-    ELECTRON_RUN_AS_NODE=1 $TB_DETACH "$ROOT/electron/pixel" "$ROOT/tlstore/launcher-terminal.js" \
-      "$TB_SOCK" </dev/null >/dev/null 2>&1 &
-    TB_TRIES=0
-    while [ "$TB_TRIES" -lt 20 ] && ! tb_sock_up; do
-      sleep 0.1
-      TB_TRIES=$((TB_TRIES + 1))
-    done
-  fi
-  if tb_sock_up; then
-    export TERMINAL_BROWSER_TERMINAL_SOCKET="$TB_SOCK"
-  fi
-  unset TB_SOCK TB_PID TB_DETACH TB_TRIES
-fi
-
 # With neither set, the CLI starts Chromium with the headless ozone platform, the only one that
 # works here; a termux-x11 DISPLAY would make Electron try X11.
 unset DISPLAY WAYLAND_DISPLAY
@@ -328,7 +295,6 @@ EOF
 chmod 755 "$stage/bin/terminal-browser"
 
 # The launcher's side of upstream's terminal socket, which the launcher script above starts.
-install -D -m 644 "$SCRIPT_DIR/terminal-browser/launcher-terminal.js" "$stage/tlstore/launcher-terminal.js"
 
 cat > "$stage/TLSTORE-BUILD" <<EOF
 terminal-browser $TB_VERSION for $TL_TRIPLE, built by tlstore's recipes/cross/build-terminal-browser.sh
@@ -338,8 +304,6 @@ cli/ browser/ skills/ assets/ scripts/
 pixel.node        the same source, built for $TL_TRIPLE
 agent-browser     vercel-labs/agent-browser@$AB_COMMIT ($AB_VERSION) + 0002-terminal-browser-agent-browser-android.patch
 electron          Termux's electron42 package, \$PREFIX/lib/electron42/electron
-tlstore/          launcher-terminal.js from tlstore's recipes/cross/terminal-browser/: Termux Launcher's
-                  pane API behind upstream's TERMINAL_BROWSER_TERMINAL_SOCKET, for --split
 EOF
 
 # --- 5. the archive -----------------------------------------------------------------------------

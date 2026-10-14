@@ -18,7 +18,7 @@ NDK plus a sysroot assembled with `dpkg-deb -x`.
 | `build-btop.sh` | patched btop, fully static, for the launcher's Shizuku lane | NDK + GNU make |
 | `build-tl-priv.sh` | `tl-priv`, the lane's client (`tl-priv/tl-priv.c`), fully static | NDK |
 | `fetch-herdr.sh` | herdr, upstream's own static musl build, digest-pinned (not built) | curl |
-| `build-terminal-browser.sh` | terminal-browser as a `.tar.gz` app tree, from our fork: its JavaScript built as upstream releases it, `pixel.node` and `agent-browser` built for Android, Termux's `electron42` in place of upstream's Electron, plus `terminal-browser/launcher-terminal.js` (the launcher's panes for `--split`) | rustup `<arch>-linux-android` + NDK, Node 22 + pnpm 10.13.1, GNU tar |
+| `build-terminal-browser.sh` | terminal-browser as a `.tar.gz` app tree, from our fork: its JavaScript built as upstream releases it, `pixel.node` and `agent-browser` built for Android, Termux's `electron42` in place of upstream's Electron | rustup `<arch>-linux-android` + NDK, Node 22 + pnpm 10.13.1, GNU tar |
 
 `btop` and `tl-priv` are edition-agnostic: both are linked `-static` against the NDK's Bionic
 `libc.a`, have no interpreter, no `NEEDED` entries and no prefix baked in. They have to be — the

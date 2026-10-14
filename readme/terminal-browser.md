@@ -47,7 +47,16 @@ terminal-browser action -- snapshot
 This needs **Let programs and agents control panes** turned on in the launcher's settings (it is
 on unless you turned it off). Where the pane goes and how big it is follow `--split` and `--size`
 when your launcher's pane API supports placing panes; on an older launcher, the pane layout
-decides. Quitting the browser closes its pane.
+decides. A pane too narrow to share (under 88 columns side by side, under 48 rows stacked) gets
+the browser in a new launcher window instead, and `ls` and `action` still find it. Quitting the
+browser closes its pane.
+
+## Mobile or desktop sites
+
+Inside the launcher, sites are asked for their mobile version, as a phone's browser would, so
+pages fit the pane and touch works the way sites expect. `terminal-browser site desktop` switches
+to desktop sites (`site mobile` back, `site auto` for the default), live for every open tab; in
+the browser, ctrl+shift+m toggles it. The setting is `site.mode` in the settings screen.
 
 ## Keys
 
