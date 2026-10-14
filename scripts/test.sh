@@ -999,6 +999,8 @@ run_suite() {
     expect_out "fetch first: it fails with the download's own reason" $'^done\tbadsum\tfailed\tbadsum does not match what the list expects — nothing was installed$'
     expect_out "fetch first: what needs it is skipped" $'^done\tneedsbad\tfailed\tneeds badsum, which did not install$'
     expect_out "fetch first: the row around it carries on" $'^done\tfakebin\tok\tinstalled$'
+    expect_out "every row is announced, the pulled-in one with its reason" $'^row\tbadsum\tinstall\tbinary\t[^\t]*\tauto\tneeded by needsbad$'
+    expect_out "and the one named on the command line as requested" $'^row\tneedsbad\tinstall\tbinary\t[^\t]*\trequested\t'
     expect_file "fetch first: and is in place" "$TESTHOME/.local/bin/fakebin"
     fb_bad=$(printf '%s\n' "$OUT" | grep -n $'^done\tbadsum\t' | cut -d: -f1)
     fb_placed=$(printf '%s\n' "$OUT" | grep -n $'^step\tfakebin\t90\t' | cut -d: -f1)
@@ -2830,6 +2832,10 @@ EOF
     tl remove fakebin -y
     tl_stdout install fakebin --progress
     expect_status "a successful --progress install" 0
+    expect_out "the plan's row comes first" $'^row\tfakebin\tinstall\tbinary\t[^\t]*\trequested\t'
+    fb_row=$(printf '%s\n' "$OUT" | grep -n $'^row\tfakebin\t' | cut -d: -f1)
+    fb_step=$(printf '%s\n' "$OUT" | grep -n $'^step\tfakebin\t' | head -1 | cut -d: -f1)
+    if [ -n "$fb_row" ] && [ -n "$fb_step" ] && [ "$fb_row" -lt "$fb_step" ]; then pass; else fail "the row line precedes its steps" "$OUT"; fi
     expect_out "the fetched step" $'^step\tfakebin\t10\tfetched$'
     expect_out "the signature-checked step" $'^step\tfakebin\t60\tsignature checked$'
     expect_out "the putting-files step" $'^step\tfakebin\t90\tputting files in place$'

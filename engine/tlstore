@@ -4848,6 +4848,18 @@ plan_apply() {
     pa_fetch_bad=""
     pa_fetch_at=" "
     journal_open
+    # Under --progress the plan goes first: one row line per item, in apply
+    # order, so tlstore-ui can draw one bar over the whole job and a line per
+    # part. The step and done lines that follow belong to these rows.
+    if [ "$PROGRESS" = 1 ]; then
+        pa_ifs="$IFS"
+        IFS="$NL"
+        for pa_line in $PLAN; do
+            IFS="$pa_ifs"
+            printf 'row\t%s\n' "$pa_line"
+        done
+        IFS="$pa_ifs"
+    fi
     ROWS_OK=0 ROWS_BAD=0 ROWS_SAME=0
     ! styled || STATUS_SCOPE=1
     case "$PLAN_VERB" in

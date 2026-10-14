@@ -1135,3 +1135,33 @@ unreachable and guarded runs, `--check`/`--progress`/`--tsv`, the unedited and e
 (`d` then `n`, then `--configs`), a row written the pre-0.18 way, `TLSTORE_STYLE=0` without escapes,
 `TLSTORE_STYLE=1` with plain and nerd icons and only the sixteen colours, and the package
 manager's log on success and failure.
+
+## Revision 17 — one bar per job: the plan is announced on the --progress stream
+
+The Installing screen drew one bar from the latest `step` line, and every row of a plan reports
+its own 10 → 100 run (the first `pkg` row's package-manager call, each fetch, each apply, and the
+instant `10 60 90 100` of an already-installed row), so an install that pulls in parts filled the
+bar once per row: it restarted, and flashed. The stream now says what the job consists of before
+any of it runs, and the UI sums the rows into one bar that only ever grows.
+
+Under `--progress`, `plan_apply` prints the plan first, one line per row in apply order, before the
+package-manager call, the fetch phase or any row's steps:
+
+```
+row<TAB><name><TAB><action><TAB><kind><TAB><version><TAB><by><TAB><why>
+```
+
+the six fields being the `PLAN` row as `plan_add` writes it (an empty field is `-`; `why` is
+`needed by <item>`, `part of <item>`, `needs <item>`, `only <item> needed it` or `-`). The `step`
+and `done` lines that follow are unchanged and belong to those rows; every row still gets its `done`
+line. `self-update --progress` announces no rows (its one item is `tlstore`), and a UI reading a
+stream that announces none behaves as before. A UI older than this ignores the `row` lines
+(`parse_progress` returns nothing for a first field it does not know).
+
+tlstore-ui (Revision 9 of `ui/CONTRACT.md`): one bar for the whole job, from the rows' own
+percentages weighted by kind, never stepping back; the rows drawn as lines beside the number, the
+live one with its step words; the header stays with the item the person asked for while its parts
+go by.
+
+Tests (`scripts/test.sh`): the `row` line precedes the first `step` of a `--progress` install, and
+a pulled-in row is announced `auto` with its reason, the named one `requested`.
