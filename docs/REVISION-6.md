@@ -126,22 +126,30 @@ absent for setups) · `o repo` · `esc back`.
 
 ## Installing
 
-Header of the item in progress (facts strip verb: installing/updating/removing). Body, from the
-first body row b:
+Header of the requested item in progress — a part it brings counts as it (facts strip verb:
+installing/updating/removing). Body, from the first body row b:
 
 - `NN` at 3× in the accent at the gutter over rows b–b+2; `%` at 2× dim at gutter+6 on row b+1.
-  The number counts up to each new percentage from what is shown, 200 + 6·|Δ| ms (≤ 700), out easing.
-- Steps at gutter+12, rows b…b+3: `fetched`, `signature checked`, `putting files in place`,
-  `ready`. Done steps dim, the live step accent with a dotted underline, pending steps rule colour.
+  One number for the whole job (Revision 17): the plan's rows' own 10 → 100 weighted by kind
+  (install: pkg 3; binary, archive, npm-musl, npm-android 4; fisher 2; file, file-once 1; bundle 0;
+  implied 2 — remove, forget, absent, retire 1; skip, unavailable 0; all 0 → all 1), never lower
+  than before; 100 when the script ends with every row ok. It counts up to each new value from what
+  is shown, 200 + 6·|Δ| ms (≤ 700), out easing; it never counts down.
+- The plan at gutter+12, rows b…b+3, one line per row in order, `<name>  <words>`: waiting → the
+  name in rule colour; live → name accent, its step words accent with a dotted underline; done →
+  name and `ready` dim (or the engine's words when more than `installed`/`updated`: `already
+  installed`, `removed`); failed → name and reason in ink bold. Longer plans show four: the live row
+  on the third line (one waiting row beneath it), the first four before anything ran, the last four
+  after. A one-row plan is one line (`dawn  signature checked`). `fit_line`d to the column.
 - Row b+5: progress line, an RGBA picture 49 columns wide and about a sixth of a cell tall, rounded
   ends, track in the rule colour at 50 % alpha, fill in the accent with a 2-px soft glow. Redrawn
   only when the percentage target changes (at most a handful of uploads per item), never per frame.
-- Row b+6: `also bringing <parts>` dim italic, or `then <next names>` when more items are queued.
-- Finished: steps replaced by the job summary sentences (existing `Job::summary`); the number reads
+- Row b+6: `then <next names>` dim when more requested items are queued.
+- Finished: the lines replaced by the job summary sentences (existing `Job::summary`); the number reads
   `100`; keys become `⏎ done` · … · `esc back`. Failure: `failed` in the facts strip and the message
   in the notice row.
 - Keys while running: `x cancel` · (empty) · (empty) · (empty) · `esc back` (the job continues; the
-  Front row shows its step word; the finish notice to the phone stays as today).
+  Front row of the requested item shows the live row's step word; the finish notice to the phone stays as today).
 
 ## Key row: fixed slots
 
