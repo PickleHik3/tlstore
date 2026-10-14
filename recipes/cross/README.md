@@ -18,7 +18,7 @@ NDK plus a sysroot assembled with `dpkg-deb -x`.
 | `build-btop.sh` | patched btop, fully static, for the launcher's Shizuku lane | NDK + GNU make |
 | `build-tl-priv.sh` | `tl-priv`, the lane's client (`tl-priv/tl-priv.c`), fully static | NDK |
 | `fetch-herdr.sh` | herdr, upstream's own static musl build, digest-pinned (not built) | curl |
-| `build-terminal-browser.sh` | terminal-browser as a `.tar.gz` app tree: upstream's JavaScript, `pixel.node` and `agent-browser` rebuilt for Android, Termux's `electron42` in place of upstream's Electron, plus `terminal-browser/launcher-terminal.js` (the launcher's panes for `--split`) | rustup `<arch>-linux-android` + NDK, GNU tar |
+| `build-terminal-browser.sh` | terminal-browser as a `.tar.gz` app tree, from our fork: its JavaScript built as upstream releases it, `pixel.node` and `agent-browser` built for Android, Termux's `electron42` in place of upstream's Electron, plus `terminal-browser/launcher-terminal.js` (the launcher's panes for `--split`) | rustup `<arch>-linux-android` + NDK, Node 22 + pnpm 10.13.1, GNU tar |
 
 `btop` and `tl-priv` are edition-agnostic: both are linked `-static` against the NDK's Bionic
 `libc.a`, have no interpreter, no `NEEDED` entries and no prefix baked in. They have to be — the
@@ -230,9 +230,18 @@ Device-verified 2026-08-16 on Pong (A065, Android 16), running inside the launch
   binary; the catalog unpacks it and runs `bin/terminal-browser`. Names are sorted, every mtime is
   the pinned commit's, owners are numeric 0 and gzip stores no name or time, so the same inputs give
   the same archive.
+- Built from our fork, `PickleHik3/terminal-browser` branch `tl` (an upstream release plus our
+  changes, committed there rather than carried here as patches), so the fork's JavaScript ships
+  too. The recipe runs what upstream's `scripts/release.sh` runs for the JavaScript, skills and
+  assets — `pnpm install --frozen-lockfile` (scripts skipped: pixel's would fetch upstream's
+  Electron), pixel's TypeScript, the two esbuild bundles with their source maps,
+  `generate-skill.sh`, `copy-react-grab.sh` — and stages the tree as release.sh does, without
+  electron or agent-browser. Needs Node 22+ and pnpm 10.13.1. At v0.13.4 the result matches
+  upstream's Linux tarball byte for byte, but for the pieces replaced below. `VERSION` stays
+  upstream's (`v0.13.4`): the browser compares it with upstream's latest release.
 - Runs on Termux's `electron42` (42.x, x11 repository), not upstream's patched Electron 44, which is
   glibc. `electron/pixel` is a two-line script that execs `$PREFIX/lib/electron42/electron`.
-- `pixel.node` carries `0001-terminal-browser-pixel-android.patch`: no clipboard image paste (arboard
+- `pixel.node` is the fork's, built for Android: no clipboard image paste (arboard
   has no Android backend) and no POSIX shared memory (the frame transport probe falls back to file
   frames, which the launcher's terminal supports). libc++ is linked statically; the recipe fails if
   either native piece needs a library a phone does not have, or leaves a symbol undefined other

@@ -3,13 +3,15 @@
 # as one .tar.gz of its app tree, from a Linux host.
 #
 # terminal-browser (zenbu-labs/terminal-browser) is a JavaScript app run by Electron, plus two
-# native pieces. Upstream's Linux tarball is glibc throughout, so this keeps its JavaScript, skills
-# and assets as they are and replaces the rest:
+# native pieces. It is built from our fork, PickleHik3/terminal-browser (branch tl: an upstream
+# release plus our changes, committed in-tree), so whatever the fork changes ships. The
+# JavaScript, skills and assets are built the way upstream's scripts/release.sh builds them
+# (release.sh itself also wants upstream's Electron and macOS tools), into the same tree its
+# Linux tarball has; the rest of that tarball is glibc, and is replaced:
 #
 #   electron/pixel        upstream's patched glibc Electron 44 (285 MB) is dropped; a two-line
 #                         script execs Termux's own `electron42` package (x11 repo) instead
-#   pixel.node            the pixel engine's napi addon, rebuilt from the pinned source for
-#                         <arch>-linux-android with 0001-terminal-browser-pixel-android.patch
+#   pixel.node            the pixel engine's napi addon, from the fork for <arch>-linux-android
 #                         (no clipboard images: arboard has no Android backend; no POSIX shm:
 #                         the frame transport probe falls back to file frames)
 #   agent-browser         vercel-labs/agent-browser, rebuilt for <arch>-linux-android with
@@ -25,8 +27,9 @@
 #
 # Upstream's JavaScript runs on Electron 42 unchanged: process.platform is "linux" there too, so
 # the addon keeps its pixel-native-linux-<arm64|x64> path. Device-verified on Pong (A065,
-# Android 16, aarch64), 2026-10-12: v0.13.4 with electron42 42.7.1 and a pixel.node built from this
-# patch renders pages in the launcher's terminal; taps, typing, scrolling and Ctrl+Q all work.
+# Android 16, aarch64), 2026-10-12: v0.13.4 with electron42 42.7.1 and a pixel.node built with
+# the fork's Android changes renders pages in the launcher's terminal; taps, typing, scrolling
+# and Ctrl+Q all work.
 #
 # Both native pieces need nothing but Bionic: libc++ is linked statically (a phone has no
 # libc++_shared.so), and the only undefined symbols pixel.node may keep are napi_*, which the
@@ -34,32 +37,34 @@
 #
 # The archive's top level is the app root (bin/, cli/, browser/, ...; no leading directory),
 # with sorted names, one fixed mtime (the pinned commit's), numeric owner 0 and gzip -n, so the
-# same inputs give the same bytes.
+# same inputs give the same bytes. The bundles and their source maps are written where
+# release.sh writes them (dist-release/terminal-browser/ in the source), so the maps' relative
+# paths are upstream's too: at v0.13.4 cli/dist and browser/dist match upstream's tarball byte
+# for byte.
 #
 # Requires: rustup with the <arch>-linux-android target on the stable toolchain, the Android
-# NDK, git, curl, GNU tar, gzip.
+# NDK, Node 22 or later, pnpm 10.13.1 (the fork's packageManager), git, curl, GNU tar, gzip.
 set -euo pipefail
 
-TB_VERSION=v0.13.4
-TB_URL="https://github.com/zenbu-labs/terminal-browser.git"
-TB_COMMIT="fd5f1798b128cd71508aa534ddbf67caf05ec0b8"   # v0.13.4
+TB_UPSTREAM=v0.13.4                 # the upstream release the fork's tl branch is built on
+TB_VERSION=$TB_UPSTREAM+478e2a7     # ... plus the fork's commit
+TB_URL="https://github.com/PickleHik3/terminal-browser.git"
+TB_COMMIT="478e2a79a187b266c7712a5dc463239a9c131fe7"   # tl: v0.13.4 (fd5f179) + pixel for Android
+TB_PNPM=10.13.1
 AB_VERSION=v0.38.1
 AB_URL="https://github.com/vercel-labs/agent-browser.git"
 AB_COMMIT="aff6125c023b810ea3f2e5deec5379e9a4270bdc"   # v0.38.1, the version upstream ships
 
 TL_ARCH=${TL_ARCH:-aarch64}
-# Upstream's release tarball for each processor, pinned by digest (the same files
-# terminal-browser.sh/install serves for v0.13.4).
+# Upstream's name for the processor: its pixel-native-<platform> package, which the JavaScript
+# loads pixel.node from (process.platform is "linux" in Termux's Electron too).
 case "$TL_ARCH" in
-    aarch64) TB_PLATFORM=linux-arm64
-        TB_SHA256=0cf567d8218995a24fb6ce4b06c07ccf58a8c517906058087355f1e2fad1969f ;;
-    x86_64)  TB_PLATFORM=linux-x64
-        TB_SHA256=6277daaabab16711ab3f1961cdffad9efac5e70ac55d5076e2c86496d649d3a4 ;;
-    *) echo "error: no pinned terminal-browser build for $TL_ARCH" >&2; exit 2 ;;
+    aarch64) TB_PLATFORM=linux-arm64 ;;
+    x86_64)  TB_PLATFORM=linux-x64 ;;
+    *) echo "error: no terminal-browser build for $TL_ARCH" >&2; exit 2 ;;
 esac
 
 SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
-PATCH="$SCRIPT_DIR/0001-terminal-browser-pixel-android.patch"
 AB_PATCH="$SCRIPT_DIR/0002-terminal-browser-agent-browser-android.patch"
 
 TL_NDK=${TL_NDK:-"$HOME/Android/Sdk/ndk/29.0.14206865"}
@@ -83,6 +88,15 @@ rustup target list --installed 2>/dev/null | grep -qx "$TL_TRIPLE" || {
     echo "error: rust target missing — run: rustup target add --toolchain $RUSTUP_TOOLCHAIN $TL_TRIPLE" >&2
     exit 1
 }
+node_major=$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)
+[ "$node_major" -ge 22 ] || {
+    echo "error: Node 22 or later is needed (found: $(node --version 2>/dev/null || echo none))" >&2
+    exit 1
+}
+[ "$(pnpm --version 2>/dev/null)" = "$TB_PNPM" ] || {
+    echo "error: pnpm $TB_PNPM is needed (found: $(pnpm --version 2>/dev/null || echo none)) — npm i -g pnpm@$TB_PNPM" >&2
+    exit 1
+}
 
 mkdir -p "$TL_OUT" "$TL_BUILD_DIR"
 
@@ -99,23 +113,43 @@ fetch() {
     return 1
 }
 
-# --- 1. upstream's release tarball --------------------------------------------------------------
-tarball="$TL_BUILD_DIR/terminal-browser-$TB_PLATFORM-$TB_VERSION.tar.gz"
-[ -f "$tarball" ] || curl -fsSL -o "$tarball" \
-    "https://github.com/zenbu-labs/terminal-browser/releases/download/$TB_VERSION/terminal-browser-$TB_PLATFORM.tar.gz"
-echo "$TB_SHA256  $tarball" | sha256sum -c - >/dev/null
-
-# --- 2. the sources -----------------------------------------------------------------------------
+# --- 1. the sources -----------------------------------------------------------------------------
 tb_src="$TL_BUILD_DIR/terminal-browser"
 ab_src="$TL_BUILD_DIR/agent-browser"
-if fetch "$TB_URL" "$TB_COMMIT" "$tb_src"; then
-    echo "Applying the Android pixel patch..."
-    git -C "$tb_src" apply "$PATCH"
+fetch "$TB_URL" "$TB_COMMIT" "$tb_src" || true
+# A build directory left by an older pin (upstream's checkout plus a patch) would build the wrong
+# tree.
+if [ "$(git -C "$tb_src" rev-parse HEAD)" != "$TB_COMMIT" ] ||
+    [ -n "$(git -C "$tb_src" status --porcelain --untracked-files=no)" ]; then
+    echo "error: $tb_src is not a clean checkout of $TB_COMMIT; delete it" >&2
+    exit 1
 fi
 if fetch "$AB_URL" "$AB_COMMIT" "$ab_src"; then
     echo "Applying the agent-browser Android patch..."
     git -C "$ab_src" apply "$AB_PATCH"
 fi
+
+# --- 2. the JavaScript, skills and assets -------------------------------------------------------
+# What upstream's scripts/release.sh and its CI run before it, minus Electron: the workspace's
+# packages from the lockfile, pixel's TypeScript, the two esbuild bundles (with their source
+# maps, as upstream ships them), the skills and the react-grab bundle. Install scripts are skipped:
+# pixel's would download upstream's Electron (it is run below with PIXEL_SKIP_DOWNLOAD=1, for the
+# electron.d.ts its TypeScript build needs), the root's runs `claude` to write plugin types when
+# that is on PATH, and better-sqlite3 (the monitor app's) and esbuild's are not needed for a bundle.
+echo "Building the JavaScript..."
+rel="$tb_src/dist-release/terminal-browser"
+(
+    cd "$tb_src"
+    pnpm install --frozen-lockfile --ignore-scripts --reporter=silent
+    (cd pixel/packages/pixel && PIXEL_SKIP_DOWNLOAD=1 node scripts/postinstall.mjs)
+    pnpm --filter @zenbu-labs/pixel build >/dev/null
+    rm -rf dist-release
+    mkdir -p "$rel/cli/dist" "$rel/browser/dist"
+    scripts/bundle.sh "$tb_src/cli/src/main.ts" "$rel/cli/dist/main.js"
+    scripts/bundle.sh "$tb_src/browser/src/main.tsx" "$rel/browser/dist/main.js"
+    scripts/generate-skill.sh >/dev/null
+    scripts/copy-react-grab.sh
+)
 
 # --- 3. the two native pieces -------------------------------------------------------------------
 cc="$NDK_BIN/$TL_TRIPLE$TL_ANDROID_API-clang"
@@ -177,15 +211,26 @@ check_bionic_only "$agent_browser" '^$'
 # --- 4. the app tree ----------------------------------------------------------------------------
 stage="$TL_BUILD_DIR/stage"
 rm -rf "$stage"
-mkdir -p "$stage"
-# Everything of upstream's but its glibc binaries, without the leading terminal-browser/.
-tar -xzf "$tarball" -C "$stage" --strip-components=1 \
-    --exclude='terminal-browser/electron' \
-    --exclude='terminal-browser/agent-browser/bin/agent-browser' \
-    --exclude='terminal-browser/browser/node_modules/@zenbu-labs/*/pixel.node'
-
 native_dir="$stage/browser/node_modules/@zenbu-labs/pixel-native-$TB_PLATFORM"
-[ -d "$native_dir" ] || { echo "error: upstream's tarball has no $native_dir" >&2; exit 1; }
+mkdir -p "$stage"/{bin,browser,electron,agent-browser/bin,assets/fonts,scripts} "$native_dir"
+# Staged as release.sh stages upstream's tarball, but for electron/, agent-browser and
+# pixel.node. Its pixel-native package is the workspace's own, which release.sh resolves
+# through node: pixel/packages/native/<platform>.
+cp -a "$rel/cli" "$stage/cli"
+cp -a "$rel/browser/dist" "$stage/browser/dist"
+cp -p "$tb_src/scripts/apparmor.sh" "$stage/scripts/apparmor.sh"
+cp -R "$tb_src/skill/build" "$stage/skills"
+cp "$tb_src/assets/fonts/JetBrainsMono-Regular.ttf" "$stage/assets/fonts/"
+for dir in react-grab search chromium; do
+    mkdir -p "$stage/assets/$dir"
+    cp "$tb_src/assets/$dir/"* "$stage/assets/$dir/"
+done
+# VERSION is upstream's release, not the fork's: the browser compares it with upstream's latest
+# release to offer an update, and setup keys its done-marker on it.
+echo "$TB_UPSTREAM" > "$stage/VERSION"
+echo stable > "$stage/CHANNEL"
+
+install -m 644 "$tb_src/pixel/packages/native/$TB_PLATFORM/package.json" "$native_dir/package.json"
 install -m 644 "$pixel_node" "$native_dir/pixel.node"
 install -m 755 "$agent_browser" "$stage/agent-browser/bin/agent-browser"
 install -m 644 "$ab_src/LICENSE" "$stage/agent-browser/LICENSE"
@@ -287,8 +332,10 @@ install -D -m 644 "$SCRIPT_DIR/terminal-browser/launcher-terminal.js" "$stage/tl
 
 cat > "$stage/TLSTORE-BUILD" <<EOF
 terminal-browser $TB_VERSION for $TL_TRIPLE, built by tlstore's recipes/cross/build-terminal-browser.sh
-upstream tarball  terminal-browser-$TB_PLATFORM.tar.gz  sha256 $TB_SHA256
-pixel.node        zenbu-labs/terminal-browser@$TB_COMMIT + 0001-terminal-browser-pixel-android.patch
+source            PickleHik3/terminal-browser@$TB_COMMIT (tl: zenbu-labs' $TB_UPSTREAM + our changes)
+cli/ browser/ skills/ assets/ scripts/
+                  built from that source as upstream's scripts/release.sh builds them
+pixel.node        the same source, built for $TL_TRIPLE
 agent-browser     vercel-labs/agent-browser@$AB_COMMIT ($AB_VERSION) + 0002-terminal-browser-agent-browser-android.patch
 electron          Termux's electron42 package, \$PREFIX/lib/electron42/electron
 tlstore/          launcher-terminal.js from tlstore's recipes/cross/terminal-browser/: Termux Launcher's

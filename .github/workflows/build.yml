@@ -6,7 +6,8 @@
 #            processor (aarch64, x86_64), and per launcher edition for the tools whose binary
 #            carries an edition's prefix
 #   build    recipes/cross/build-asset.sh runs the tool's recipe on ubuntu-24.04 (the NDK from
-#            sdkmanager, Go and Rust as the runner has them, the edition's Termux sysroot from
+#            sdkmanager, Go and Rust as the runner has them, Node 22 and pnpm for terminal-browser's
+#            JavaScript, the edition's Termux sysroot from
 #            its own .deb repository, cached) with TL_ARCH set to the job's processor, and
 #            uploads the asset under its catalog name, <tool>-<arch>
 #   publish  one GitHub Release for the whole build, tag bins-YYYY.MM.DD[-N], marked prerelease
@@ -93,6 +94,20 @@ jobs:
         run: |
           rustup update stable
           rustup target add ${{ matrix.arch }}-linux-android
+
+      # terminal-browser's JavaScript is built from our fork as upstream's release builds it: Node 22
+      # and the pnpm its package.json names.
+      - name: Node
+        if: matrix.tool == 'terminal-browser'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: pnpm
+        if: matrix.tool == 'terminal-browser'
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          version: 10.13.1
 
       - name: Month
         id: month
