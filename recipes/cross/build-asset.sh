@@ -177,8 +177,8 @@ case "$tool" in
         cp "$TL_OUT/herdr" "$TL_ASSETS/$asset"
         ;;
     terminal-browser)
-        # A .tar.gz of the app tree: upstream's JavaScript, pixel.node and agent-browser rebuilt
-        # for Android, Termux's electron42 in place of upstream's Electron.
+        # A .tar.gz of the app tree from our fork: its JavaScript as upstream builds it, pixel.node
+        # and agent-browser built for Android, Termux's electron42 in place of upstream's Electron.
         "$SCRIPT_DIR/build-terminal-browser.sh"
         cp "$TL_OUT/terminal-browser" "$TL_ASSETS/$asset"
         ;;
