@@ -68,10 +68,15 @@ PickleHik3/terminal-browser@6fe3538) staged beside the installed copy as `tb-tl`
    window (fingers still act as a mouse until the launcher's touch mode ships).
 6. `tb-tl site desktop` from another shell reloads open tabs into the desktop layout; `site auto`
    returns them to mobile; Ctrl+Shift+M toggles; no blank tab or frozen size after a switch.
+   (Seen from the page's side on pong, 2026-10-14: 412x432 CSS mobile → 979x1027 desktop with
+   client hints mobile=false → back to 412x432; the screen and Ctrl+Shift+M still owed.)
 7. From a shell in a launcher pane narrower than 88 columns, `tb-tl open --split right <url>`
    opens the browser in a new launcher window (a split on a pane 88 columns or wider); `tb-tl ls
    --all` lists it; `tb-tl action --browser <key> -- snapshot` prints the page; quitting the
    browser closes its window and leaves the shell's.
+   (Seen on pong, 2026-10-14, from a 71-column pane: a new window (not a split), `ls --all`
+   lists it, `action --browser <key> -- snapshot` prints the page. Still owed: the window
+   closing on Ctrl+Q — `action -- close` only closes agent-browser's session, the window stays.)
 8. The installed `terminal-browser` is untouched by the staged copy and still opens a page.
 9. With a launcher that has touch reports (branch feat/terminal-browser-launcher of the app, not
    built yet): a long page flings, a pinch zooms, a long press on a link opens its menu, the tab
