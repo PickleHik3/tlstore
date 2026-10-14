@@ -53,6 +53,9 @@ PickleHik3/terminal-browser@6fe3538) staged beside the installed copy as `tb-tl`
    loader, `dawn` or `opencode`): one number and one bar that never step back, the parts as lines
    beside the number (waiting quiet, the live one with its step words, finished ones `ready`),
    100 and the summary at the end. Record it: the old screen restarted the bar once per part.
+   (The engine's half is seen: on pong, 2026-10-14, `install opencode --progress` in a sandbox
+   HOME printed its 14 `row` lines before the first step, every row's percentages only grew, and
+   all 14 ended `done … ok`. The screen is still owed.)
 2. An item with no parts shows one line (`sigye  signature checked`); an item already installed
    shows `already installed` on its lines and still ends at 100.
 3. Esc during a running install goes back while the job runs on; the Front row shows the step
