@@ -49,7 +49,13 @@ Router::new(env) (no motion) | Router::animated(env) (Timeline) | Router::with_m
 Router is the only app::Screen; views: Front → Item → Installing, stacked; Router::top()/depth()/header_item(); router.st is the Store.
 trait View { name()->"front"|"item"|"installing"; draw(&mut self,p:&mut Paint,st:&mut Store) /*header + body*/; keys(&self,st)->Slots;
   handle(&mut self,ev,st)->Go::{Stay,Pass,Push,Replace,Back,Home,Quit}; refresh(&mut self,st) }  Router draws notice + key row after draw().
-Store: cat (Catalog: items, updates, info(name)->&Info, loading, error), job: Option<Job{verb,names,current,pct,step,done,exit,cancelled}>, gh, stars,
+Job{verb,names,current /*owner of the live row*/,pct /*whole job, never lower*/,rows: Vec<Row>,step,done,exit,cancelled}; Row{name,action,kind,by,why,
+  pct,words,state: RowState::{Pending,Live,Done{ok,message}}} — data::Progress::Row from `row\tname\taction\tkind\tversion\tby\twhy` (Revision 17).
+  Job::new seeds an implied row per name (dropped by the first `row` line); a `step` for an unknown name appends one (by requested|auto, kind -);
+  step: row.pct=max, Live, current=owner(row) (requested → itself; `needed by X`/`part of X` → X, up the plan; else names[0]); done: row 100.
+  pct = max(pct, Σw·row.pct/Σw), w by kind for install (pkg 3; binary/archive/npm-* 4; fisher 2; file/file-once 1; bundle 0; other 2),
+  remove/forget/absent/retire 1, skip/unavailable 0, all 0 → 1; 100 at exit when every done is ok. owner(row), live(), word_for(name).
+Store: cat (Catalog: items, updates, info(name)->&Info, loading, error), job: Option<Job>, gh, stars,
   notice, notice_until (a timed notice; any key clears both), now (router clock), start_job/cancel_job/job_running, star(name)->bool (GH_NOTICE on
   the notice row when gh is signed out; waits for gh while it is still being asked), open_url/open_repo, toggle_fullscreen (launcherctl as a task,
   optimistic), facts(name,state)->Facts, self_update: SelfUpdate::{Checking,NotOffered,Offered{have,new}}, quit_at, exit: Rc<RefCell<Option<Exit>>>,
@@ -83,8 +89,11 @@ scene: El::{Mark, Context, Picture, Name, Standfirst, Facts, Pill, Row(n), Block
   Scene{screen, elements: Vec<Element{el,rect,picture:Option<(img,pid)>,text}>, cell}; Scene::body() in drawing order. Effect{alpha, value}.
   trait Motion { navigate(kind:NavKind,from:&Scene,to,now); frame(now,&Scene)->Phase::{Idle,Leaving(Fx),Entering(Fx)}; active(); drawn(now,&Scene)->bool }
 motion (D7): leave 120 ms body fade (pictures hidden at once); enter: body element i fades 0→1 over 200 ms from min(30·i,100) ms, rest by 300;
-  header/notice/keys never move; Installing count-up 200+6·|Δ| ms (≤700) on Block(0).value. Input goes to the new view at once, during the leave too.
-  TLSTORE_MOTION=0: no navigate/frame/drawn, frames at rest, header pictures placed at once.
+  header/notice/keys never move; Installing count-up 200+6·|Δ| ms (≤700) on Block(0).value (targets only grow: it never counts down).
+  Input goes to the new view at once, during the leave too. TLSTORE_MOTION=0: no navigate/frame/drawn, frames at rest, header pictures placed at once.
+Installing: number + bar = job.pct (100 when all ok); Block(1..4) at gutter+12, rows b..b+3: the plan, `<name>  <words>` — pending rule, live accent
+  + dotted words, done dim `ready` (or the message unless installed/updated), failed ink bold + reason; 4-line window, live on line min(i,2);
+  first four before any step, last four after; summary once over. Row b+6 `then <queued>`; no "also bringing". The header: shown_name().
 Installing, Verb::SelfUpdate: the same screen for the item `tlstore` — no catalog row and no picture (layout::header(…,7,None)), the name in the script
   face, standfirst "the launcher's tool store", masthead link STORE_REPO, facts `updating <have> → <new>` from Store::self_update; steps and the line
   from the stream as for any item (fetched to 80, signature checked 85, putting files in place 92, ready 100). Keys while running: `x cancel` · `esc
@@ -100,7 +109,9 @@ Binary: tlstore-ui | --probe | --version; env TLSTORE_UI_SELF_UPDATED=<version> 
   (stub tlstore speaks snapshot/prefetch/list/info/update/self-update/picture/readme/readme-asset/jobs; `picture` answers pics/<name>.png before
   .jpg, so a test can drop in an APNG; `prefetch` reports every fixture asset only when the file prefetch-lines exists (Opts.prefetch), else
   nothing, so every asset is asked for on its own; `self-update --check` offers 0.6 → 0.7 only when the file self-update exists (Opts.self_update),
-  `self-update --progress` plays the tlstore stream, sleeping at 44 with `hold`, failing with `fail-tlstore`; Opts.self_updated sets Env.self_updated).
+  `self-update --progress` plays the tlstore stream, sleeping at 44 with `hold`, failing with `fail-tlstore`; Opts.self_updated sets Env.self_updated;
+  install/update/remove --progress print a `row` per name first (binary, requested, -), then per name 10 [60 + sleep with `hold`] 60 90 100 done
+  (`broken`/fail-<n> fail); `part-<name>` holding a part's name announces it first (`pkg`, auto, `needed by <name>`) and runs it 10→100, done ok).
 
 # preview renderer (cargo feature `shot`; dev only, build-ui.sh never enables it)
 tlstore-ui --shot <cols>x<rows> --screen <spec> --out <file.png> [--store <dir>]  |  --shot-all --out <dir> [--store <dir>]

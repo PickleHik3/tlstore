@@ -1,16 +1,15 @@
 //! Installing (also updating and removing): the header of the item in progress, the 3×
-//! count-up percentage, the steps beside it, the drawn progress line, what comes next, and
-//! the summary when it ends.
+//! count-up percentage of the whole job, the plan's rows beside it (the live one with its
+//! step words), the drawn progress line, what comes next, and the summary when it ends.
 
 use crate::layout;
 use crate::picture::shapes;
 use crate::render::{Sizing, Underline};
 use crate::term::{Event, Key};
 
-use super::data::STEPS;
 use super::paint::{self, draw_header, Facts, HeaderContent, Masthead, Paint, Slot, Slots, A_BACK, A_CONTEXT};
 use super::scene::El;
-use super::{header_for, Go, SelfUpdate, Store, Verb, View, STORE_REPO};
+use super::{header_for, Go, Row, RowState, SelfUpdate, Store, Verb, View, STORE_REPO};
 
 #[derive(Default)]
 pub struct Installing;
@@ -45,18 +44,12 @@ impl View for Installing {
         let running = job.running();
         let verb = job.verb;
         let name = job.shown_name();
-        let on_shown = job.current.as_deref() == Some(name.as_str()) || job.current.is_none();
         let ok_all = !running && !job.done.is_empty() && job.done.iter().all(|d| d.ok);
         let failed = job.failed(&name);
-        let target: u8 = if ok_all {
-            100
-        } else if on_shown || !running {
-            job.pct
-        } else {
-            job.pct.min(99)
-        };
-        let step = if ok_all { STEPS.len() } else { job.step };
-        let also = job.current.clone().filter(|c| running && !job.names.contains(c));
+        // One number for the whole job; it only ever grows (Job::feed).
+        let target: u8 = if ok_all { 100 } else { job.pct };
+        let (shown, first) = window(&job.rows);
+        let plan: Vec<Row> = job.rows[first..first + shown].to_vec();
         let queued = job.queued();
         let summary = job.summary();
 
@@ -119,20 +112,38 @@ impl View for Installing {
             el.text = Some(target.to_string());
         }
 
-        // Steps beside the number; the summary once it is over.
+        // The plan's rows beside the number; the summary once it is over.
         let sx = g + 12;
         let sw = b.right().saturating_sub(sx);
         if running {
-            for (i, words) in STEPS.iter().enumerate() {
+            for (i, row) in plan.iter().enumerate() {
                 let el = El::Block(1 + i as u16);
-                let style = if step > i {
-                    pal.dim_s()
-                } else if step == i {
-                    pal.accent_s().underline(Underline::Dotted).ul_color(pal.accent)
-                } else {
-                    pal.rule_s()
-                };
-                p.text_clip(el, sx, b.y + i as u16, words, style, b.right());
+                let y = b.y + i as u16;
+                match &row.state {
+                    RowState::Done { ok: false, message } => {
+                        let why = if message.is_empty() { "failed" } else { message.as_str() };
+                        let line = layout::fit_line(&format!("{}  {why}", row.name), sw);
+                        p.text_clip(el, sx, y, &line, pal.ink_s().bold(), b.right());
+                    }
+                    state => {
+                        let (name_st, words_st) = match state {
+                            RowState::Live => (
+                                pal.accent_s(),
+                                pal.accent_s().underline(Underline::Dotted).ul_color(pal.accent),
+                            ),
+                            RowState::Pending => (pal.rule_s(), pal.rule_s()),
+                            _ => (pal.dim_s(), pal.dim_s()),
+                        };
+                        let name = layout::fit_line(&row.name, sw);
+                        let e = p.text_clip(el, sx, y, &name, name_st, b.right());
+                        let words = row_words(row);
+                        let room = b.right().saturating_sub(e + 2);
+                        if !words.is_empty() && room >= 2 {
+                            let words = layout::fit_line(words, room);
+                            p.text_clip(el, e + 2, y, &words, words_st, b.right());
+                        }
+                    }
+                }
             }
         } else {
             let mut y = b.y;
@@ -168,16 +179,11 @@ impl View for Installing {
             }
         }
 
-        // What else the job brings, or what comes next.
+        // The requested items still to come (the rows beside the number name the parts).
         let ny = b.y + 6;
-        if running && ny < b.bottom() {
-            if let Some(c) = also {
-                let s = layout::fit_line(&format!("also bringing {c}"), b.w);
-                p.text(El::Block(6), g, ny, &s, pal.dim_s().italic());
-            } else if !queued.is_empty() {
-                let s = layout::fit_line(&format!("then {}", queued.join(", ")), b.w);
-                p.text(El::Block(6), g, ny, &s, pal.dim_s());
-            }
+        if running && ny < b.bottom() && !queued.is_empty() {
+            let s = layout::fit_line(&format!("then {}", queued.join(", ")), b.w);
+            p.text(El::Block(6), g, ny, &s, pal.dim_s());
         }
     }
 
@@ -255,7 +261,86 @@ impl Installing {
     }
 }
 
+/// How many of the plan's rows show beside the number, and from which.
+const LINES: usize = 4;
+
+/// The rows to show: all of a short plan; of a longer one four, the live row (else the next
+/// to go) on the third line so one waiting row shows beneath it — the first four before
+/// anything ran, the last four once everything did. Returns (count, first index).
+fn window(rows: &[Row]) -> (usize, usize) {
+    let n = rows.len();
+    if n <= LINES {
+        return (n, 0);
+    }
+    let anchor = rows
+        .iter()
+        .position(|r| r.state == RowState::Live)
+        .or_else(|| {
+            let last_done = rows.iter().rposition(|r| matches!(r.state, RowState::Done { .. }))?;
+            Some(
+                rows.iter()
+                    .skip(last_done)
+                    .position(|r| r.state == RowState::Pending)
+                    .map_or(n - 1, |k| last_done + k),
+            )
+        })
+        .unwrap_or(0);
+    let first = (anchor - anchor.min(2)).min(n - LINES);
+    (LINES, first)
+}
+
+/// The words after a row's name: the live step's words; once done `ready`, or what the
+/// engine said when it is more than the plain word (`already installed`, `removed`);
+/// nothing while it waits.
+fn row_words(row: &Row) -> &str {
+    match &row.state {
+        RowState::Pending => "",
+        RowState::Live => &row.words,
+        RowState::Done { message, .. } => {
+            if matches!(message.as_str(), "" | "installed" | "updated") {
+                "ready"
+            } else {
+                message
+            }
+        }
+    }
+}
+
 /// The standfirst under the store's own name while it updates itself.
 const SELF_STANDFIRST: &str = "the launcher's tool store";
 
 use super::Job;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn plan(states: &[RowState]) -> Vec<Row> {
+        states
+            .iter()
+            .enumerate()
+            .map(|(i, s)| Row { state: s.clone(), ..Row::implied(&format!("r{i}"), false) })
+            .collect()
+    }
+
+    #[test]
+    fn the_window_keeps_the_live_row_on_the_third_line() {
+        use RowState::{Live, Pending as P};
+        let d = || RowState::Done { ok: true, message: "installed".into() };
+        assert_eq!(window(&plan(&[P, P])), (2, 0), "a short plan shows whole");
+        assert_eq!(window(&plan(&[P, P, P, P, P, P])), (4, 0), "nothing ran: the first four");
+        assert_eq!(window(&plan(&[d(), Live, P, P, P, P])), (4, 0));
+        assert_eq!(window(&plan(&[d(), d(), d(), Live, P, P])), (4, 1), "one waiting row beneath it");
+        assert_eq!(window(&plan(&[d(), d(), d(), d(), d(), Live])), (4, 2), "the last four");
+        assert_eq!(window(&plan(&[d(), d(), d(), d(), P, P])), (4, 2), "between rows: the next to go");
+        assert_eq!(window(&plan(&[d(), d(), d(), d(), d(), d()])), (4, 2), "all ran: the last four");
+        let r = |s: RowState, words: &str| Row { state: s, words: words.into(), ..Row::implied("x", true) };
+        assert_eq!(row_words(&r(Live, "signature checked")), "signature checked");
+        assert_eq!(row_words(&r(d(), "ready")), "ready");
+        assert_eq!(
+            row_words(&r(RowState::Done { ok: true, message: "already installed".into() }, "")),
+            "already installed"
+        );
+        assert_eq!(row_words(&r(P, "fetched")), "");
+    }
+}

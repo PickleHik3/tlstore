@@ -408,6 +408,9 @@ pub fn step_word(step: usize) -> &'static str {
 /// One line of the `--progress` stream.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Progress {
+    /// One row of the plan, announced before any step (Revision 17): `row name action kind
+    /// version by why`; an empty field is `-`.
+    Row { name: String, action: String, kind: String, version: String, by: String, why: String },
     Step { name: String, pct: u8, words: String },
     Done { name: String, ok: bool, message: String },
 }
@@ -415,6 +418,19 @@ pub enum Progress {
 pub fn parse_progress(line: &str) -> Option<Progress> {
     let f: Vec<&str> = line.split('\t').collect();
     match *f.first()? {
+        "row" if f.len() >= 2 && !f[1].is_empty() => {
+            let at = |i: usize| {
+                f.get(i).map(|s| s.trim_end()).filter(|s| !s.is_empty()).unwrap_or("-").to_string()
+            };
+            Some(Progress::Row {
+                name: f[1].to_string(),
+                action: at(2),
+                kind: at(3),
+                version: at(4),
+                by: at(5),
+                why: at(6),
+            })
+        }
         "step" if f.len() >= 3 => Some(Progress::Step {
             name: f[1].to_string(),
             pct: f[2].trim().parse::<u32>().ok()?.min(100) as u8,
@@ -524,6 +540,24 @@ mod tests {
             Some(Progress::Done { name: "kitten".into(), ok: true, message: "kept your config.fish".into() })
         );
         assert_eq!(parse_progress("Installing: kitten"), None);
+        let row = |name: &str, action: &str, kind: &str, version: &str, by: &str, why: &str| Progress::Row {
+            name: name.into(),
+            action: action.into(),
+            kind: kind.into(),
+            version: version.into(),
+            by: by.into(),
+            why: why.into(),
+        };
+        assert_eq!(
+            parse_progress("row\tmusl-loader\tinstall\tbinary\t1.2.5\tauto\tneeded by dawn"),
+            Some(row("musl-loader", "install", "binary", "1.2.5", "auto", "needed by dawn"))
+        );
+        assert_eq!(
+            parse_progress("row\tdawn\tinstall\tbinary\t0.1.3\trequested\t-"),
+            Some(row("dawn", "install", "binary", "0.1.3", "requested", "-"))
+        );
+        assert_eq!(parse_progress("row\tdawn"), Some(row("dawn", "-", "-", "-", "-", "-")), "short: dashes");
+        assert_eq!(parse_progress("row\t\tinstall"), None, "a row needs a name");
         assert_eq!(
             parse_self_check("self\t0.6\t0.7\t1\n"),
             Some(SelfCheck { have: "0.6".into(), new: "0.7".into(), available: true, channel: None })

@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use tlstore_ui::app::{Ctx, Nav, Screen};
 use tlstore_ui::layout;
-use tlstore_ui::render::{Frame, HitMap, Renderer, Sym};
+use tlstore_ui::render::{Frame, HitMap, Renderer, Sym, Underline};
 use tlstore_ui::store::motion::Timeline;
 use tlstore_ui::store::proc::Env;
 use tlstore_ui::store::scene::{El, Motion, NavKind, Phase, Scene};
@@ -838,13 +838,72 @@ fn installing_shows_the_number_steps_and_summary() {
     let hdr = layout::header(53, 26, 7, None);
     assert!(h.row(hdr.facts as usize).starts_with("  installing"), "{}", h.text);
     assert!(h.row(hdr.body.y as usize).starts_with("  60%"), "{}", h.text);
-    assert!(h.row(hdr.body.y as usize).contains("fetched"));
-    assert!(h.row(hdr.body.y as usize + 1).contains("signature checked"));
+    // A plan of one row: one line beside the number, the live step's words.
+    assert!(h.row(hdr.body.y as usize).ends_with("sigye  signature checked"), "{}", h.text);
+    assert_eq!(h.row(hdr.body.y as usize + 1).trim(), "", "{}", h.text);
     assert!(h.row(hdr.body.y as usize + 5).contains("───"), "a text track without pictures");
     assert!(h.has("x cancel") && h.has("esc back") && !h.has("\u{f0311} done"));
     h.key(Key::Char('x'));
     h.settle();
     assert!(h.has("Stopped before sigye was done.") && h.has("\u{f0311} done"), "{}", h.text);
+    std::fs::remove_file(h.dir.join("hold")).unwrap();
+}
+
+#[test]
+fn installing_fills_one_bar_for_an_item_and_its_part() {
+    let mut h = H::new(53, 26, Opts::default());
+    std::fs::write(h.dir.join("hold"), "").unwrap();
+    std::fs::write(h.dir.join("part-sigye"), "musl-loader").unwrap();
+    go_to(&mut h, "sigye");
+    h.key(Key::Char('i'));
+    assert_eq!(h.r().top(), "installing");
+    let hdr = layout::header(53, 26, 7, None);
+    let y = hdr.body.y as usize;
+    let number = |h: &H| -> u32 {
+        let l = h.row(y);
+        let n = l.trim().split('%').next().and_then(|n| n.parse().ok());
+        n.unwrap_or_else(|| panic!("no number\n{}", h.text))
+    };
+    // Frame by frame as the stream comes in, until the item itself is held at 60: the
+    // number on screen never goes back.
+    let held = |h: &mut H| {
+        h.r().st.job.as_ref().is_some_and(|j| j.rows.iter().any(|r| r.name == "sigye" && r.pct >= 60))
+    };
+    let mut seen = vec![number(&h)];
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !held(&mut h) && Instant::now() < deadline {
+        let fds = h.r().watch();
+        let polled: Vec<_> = fds.iter().map(|&f| (f, libc::POLLIN)).collect();
+        let ready = term::poll_fds(&polled, Some(Duration::from_millis(200))).unwrap();
+        for (i, &fd) in fds.iter().enumerate() {
+            if ready[i] {
+                h.ev(Event::Readable(fd));
+                seen.push(number(&h));
+            }
+        }
+    }
+    assert!(held(&mut h), "{}", h.text);
+    assert!(seen.windows(2).all(|w| w[0] <= w[1]), "the number went back: {seen:?}");
+    // pkg 3 at 100 and binary 4 at 60: one bar at 540 / 7.
+    assert_eq!(number(&h), 77, "{}", h.text);
+    assert!(h.row(y).ends_with("musl-loader  ready"), "{}", h.text);
+    assert!(h.row(y + 1).ends_with("sigye  signature checked"), "{}", h.text);
+    assert!(!h.has("also bringing"), "{}", h.text);
+    // The header stays with what was asked for while its part goes by.
+    assert_eq!(h.row(hdr.facts as usize).split_whitespace().next(), Some("installing"), "{}", h.text);
+    // The part done dim; the live step accent with its dotted underline.
+    let pal = h.ctx.palette;
+    let router = h.router.as_mut().unwrap();
+    let mut f = Frame::new(&mut h.ctx);
+    router.draw(&mut f);
+    let sx = hdr.body.x + 12;
+    assert_eq!(f.buf.get(sx, y as u16).unwrap().style.fg, pal.dim_s().fg);
+    assert_eq!(f.buf.get(sx, y as u16 + 1).unwrap().style.fg, pal.accent_s().fg);
+    let words = f.buf.get(sx + 7, y as u16 + 1).unwrap().style;
+    assert_eq!((words.fg, words.underline), (pal.accent_s().fg, Underline::Dotted));
+    drop(f);
+    h.key(Key::Char('x'));
+    h.settle();
     std::fs::remove_file(h.dir.join("hold")).unwrap();
 }
 
