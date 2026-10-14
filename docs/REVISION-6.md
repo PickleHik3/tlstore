@@ -136,7 +136,7 @@ installing/updating/removing). Body, from the first body row b:
   than before; 100 when the script ends with every row ok. It counts up to each new value from what
   is shown, 200 + 6·|Δ| ms (≤ 700), out easing; it never counts down.
 - The plan at gutter+12, rows b…b+3, one line per row in order, `<name>  <words>`: waiting → the
-  name in rule colour; live → name accent, its step words accent with a dotted underline; done →
+  name in rule colour (and `fetched` dim once the fetch phase got it); live → name accent, its step words accent with a dotted underline; done →
   name and `ready` dim (or the engine's words when more than `installed`/`updated`: `already
   installed`, `removed`); failed → name and reason in ink bold. Longer plans show four: the live row
   on the third line (one waiting row beneath it), the first four before anything ran, the last four

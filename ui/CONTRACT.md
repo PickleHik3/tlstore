@@ -91,7 +91,7 @@ scene: El::{Mark, Context, Picture, Name, Standfirst, Facts, Pill, Row(n), Block
 motion (D7): leave 120 ms body fade (pictures hidden at once); enter: body element i fades 0→1 over 200 ms from min(30·i,100) ms, rest by 300;
   header/notice/keys never move; Installing count-up 200+6·|Δ| ms (≤700) on Block(0).value (targets only grow: it never counts down).
   Input goes to the new view at once, during the leave too. TLSTORE_MOTION=0: no navigate/frame/drawn, frames at rest, header pictures placed at once.
-Installing: number + bar = job.pct (100 when all ok); Block(1..4) at gutter+12, rows b..b+3: the plan, `<name>  <words>` — pending rule, live accent
+Installing: number + bar = job.pct (100 when all ok); Block(1..4) at gutter+12, rows b..b+3: the plan, `<name>  <words>` — pending rule (its `fetched` dim when the fetch phase got it), live accent
   + dotted words, done dim `ready` (or the message unless installed/updated), failed ink bold + reason; 4-line window, live on line min(i,2);
   first four before any step, last four after; summary once over. Row b+6 `then <queued>`; no "also bringing". The header: shown_name().
 Installing, Verb::SelfUpdate: the same screen for the item `tlstore` — no catalog row and no picture (layout::header(…,7,None)), the name in the script

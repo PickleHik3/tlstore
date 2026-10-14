@@ -131,7 +131,7 @@ impl View for Installing {
                                 pal.accent_s(),
                                 pal.accent_s().underline(Underline::Dotted).ul_color(pal.accent),
                             ),
-                            RowState::Pending => (pal.rule_s(), pal.rule_s()),
+                            RowState::Pending => (pal.rule_s(), pal.dim_s()),
                             _ => (pal.dim_s(), pal.dim_s()),
                         };
                         let name = layout::fit_line(&row.name, sw);
@@ -291,10 +291,18 @@ fn window(rows: &[Row]) -> (usize, usize) {
 
 /// The words after a row's name: the live step's words; once done `ready`, or what the
 /// engine said when it is more than the plain word (`already installed`, `removed`);
-/// nothing while it waits.
+/// while it waits, nothing — or `fetched` when the fetch phase already got it.
 fn row_words(row: &Row) -> &str {
     match &row.state {
-        RowState::Pending => "",
+        // A row fetched ahead of its turn (the fetch phase runs before any row is applied)
+        // keeps saying so while it waits.
+        RowState::Pending => {
+            if row.pct > 0 {
+                &row.words
+            } else {
+                ""
+            }
+        }
         RowState::Live => &row.words,
         RowState::Done { message, .. } => {
             if matches!(message.as_str(), "" | "installed" | "updated") {
@@ -341,6 +349,7 @@ mod tests {
             row_words(&r(RowState::Done { ok: true, message: "already installed".into() }, "")),
             "already installed"
         );
-        assert_eq!(row_words(&r(P, "fetched")), "");
+        assert_eq!(row_words(&r(P, "fetched")), "", "untouched: nothing");
+        assert_eq!(row_words(&Row { pct: 55, ..r(P, "fetched") }), "fetched", "fetched ahead: says so");
     }
 }
