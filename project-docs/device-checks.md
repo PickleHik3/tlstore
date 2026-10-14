@@ -42,3 +42,34 @@ and a catalog that has the terminal-browser row from `docs/maintainer/catalog.md
 11. On an io.vaj.tl phone: x11-repo and electron42 (com.termux only) have no row, so
     terminal-browser, once its row is in, is not installable there; check whether that edition's
     own repository has electron42 before widening them.
+
+## dev 2026-10-14 — Installing: one bar per job; terminal-browser from the fork (0.13.4+6fe3538)
+
+The store UI from this branch's `ui/` (scripts/build-ui.sh) and the engine from `engine/tlstore`;
+terminal-browser from the recipe (`recipes/cross/build-terminal-browser.sh`, fork
+PickleHik3/terminal-browser@6fe3538) staged beside the installed copy as `tb-tl`:
+
+1. In the store, install an item that pulls in parts (`fish-shell`; on a phone without the musl
+   loader, `dawn` or `opencode`): one number and one bar that never step back, the parts as lines
+   beside the number (waiting quiet, the live one with its step words, finished ones `ready`),
+   100 and the summary at the end. Record it: the old screen restarted the bar once per part.
+2. An item with no parts shows one line (`sigye  signature checked`); an item already installed
+   shows `already installed` on its lines and still ends at 100.
+3. Esc during a running install goes back while the job runs on; the Front row shows the step
+   word; Installing shows the current state when reopened.
+4. ~~terminal-browser (`tb-tl open en.wikipedia.org`) draws the page in the launcher's terminal,
+   in the mobile layout at phone size (compact header, hamburger menu, no sidebar) — pong,
+   2026-10-14, screenshot: the page is served with a mobile Chrome agent, 412 CSS pixels across at
+   scale 2.4, touch emulation on.~~
+5. Taps follow links, a swipe scrolls, typing in the address bar navigates, Ctrl+Q closes the
+   window (fingers still act as a mouse until the launcher's touch mode ships).
+6. `tb-tl site desktop` from another shell reloads open tabs into the desktop layout; `site auto`
+   returns them to mobile; Ctrl+Shift+M toggles; no blank tab or frozen size after a switch.
+7. From a shell in a launcher pane narrower than 88 columns, `tb-tl open --split right <url>`
+   opens the browser in a new launcher window (a split on a pane 88 columns or wider); `tb-tl ls
+   --all` lists it; `tb-tl action --browser <key> -- snapshot` prints the page; quitting the
+   browser closes its window and leaves the shell's.
+8. The installed `terminal-browser` is untouched by the staged copy and still opens a page.
+9. With a launcher that has touch reports (branch feat/terminal-browser-launcher of the app, not
+   built yet): a long page flings, a pinch zooms, a long press on a link opens its menu, the tab
+   bar still takes taps, a Bluetooth mouse still clicks and scrolls.
