@@ -213,6 +213,7 @@ The musl loader and the musl libraries (`musl-libs=`) are copied into each npm-m
 directory when it is unpacked. From tlstore 0.17 an update or install that finds the item already
 there replaces a copy that differs from the installed part, so a rebuilt loader reaches Claude
 Code and opencode without a new npm version; the loader's version is `1.2.5+tl.<N>` for that.
+[npm-items.md](npm-items.md) walks through an npm item end to end, using opencode as the example.
 
 Then cut a store release (`release.yml`) so the new tag and digests reach phones in a signed
 catalog. If the workflow's final push failed (a race with another commit), the release and its
