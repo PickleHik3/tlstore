@@ -95,3 +95,25 @@ PickleHik3/terminal-browser@6fe3538) staged beside the installed copy as `tb-tl`
 9. With a launcher that has touch reports (branch feat/terminal-browser-launcher of the app, not
    built yet): a long page flings, a pinch zooms, a long press on a link opens its menu, the tab
    bar still takes taps, a Bluetooth mouse still clicks and scrolls.
+
+## worktree-agent-af2e8b0b8d7a7f0ae — Revision 18: the skill kind, the launcher skills as folders (tlstore 0.19)
+
+Owed once `build.yml -f tools=launcher-skills` has published the tarballs and a store release
+carries engine 0.19 with the two skill rows. On pong (com.termux, aarch64) and the x86_64 emulator:
+
+1. A phone that has claude-code (so the old `launcher-skill` bundle and its eight files under
+   `~/.claude/skills/termux-launcher/`): `tlstore update` installs `termux-launcher` and
+   `termux-launcher-speak`, says it replaced the files an earlier version put in
+   `~/.claude/skills/termux-launcher`, and retires the eight `launcher-skill-*` rows without
+   "kept your". `ls -l ~/.claude/skills` shows two symlinks into `~/.agents/skills/`, and
+   `~/.agents/skills/termux-launcher/docs/` holds the user guide.
+2. The same phone opened in the store UI first (the snapshot retires the old rows before any
+   update): the old folder goes, and the next `tlstore update` installs both skills with links.
+3. Claude Code, started in a launcher pane, lists `termux-launcher` and `termux-launcher-speak`
+   under `/skills` and can read `help.md` and a page under `docs/` through the link.
+4. With `~/.codex` present (codex installed first), an install makes `~/.codex/skills/<name>`
+   links too, and codex sees the skill.
+5. `tlstore remove claude-code opencode` (nothing else needing the bundle) removes both
+   directories and their links; a folder of your own put at `~/.claude/skills/termux-launcher`
+   beforehand is left, with the `left … alone` line, both on install and on remove.
+6. The x86_64 emulator installs the `-x86_64` assets (same bytes) the same way.

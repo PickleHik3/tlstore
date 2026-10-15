@@ -7,22 +7,29 @@
 #   category  upstream  setup  standfirst  does1  does2  does3  try  notes
 #   author  licence  size  picture  demo  featured  readme-skip  readme
 #
-# kind      pkg 	 binary 	 archive 	 file 	 file-once 	 fisher 	 npm-musl 	 npm-android 	 bundle
+# kind      pkg 	 binary 	 archive 	 file 	 file-once 	 fisher 	 npm-musl 	 npm-android 	 bundle 	 skill
 #           (archive: an app that is a whole directory, one .tar.gz whose top
 #           level is the app's root, unpacked into ~/.local/lib/<name> and
 #           replaced whole on update; needs exe=. docs/SPEC.md, Revision 14)
+#           (skill: an agent skill, one .tar.gz whose only top-level entry is
+#           a folder named like the item, unpacked into ~/.agents/skills/<name>,
+#           replaced whole on update, and linked from ~/.claude/skills/<name>
+#           and, while ~/.codex is there, ~/.codex/skills/<name>. No wrapper.
+#           docs/SPEC.md, Revision 18)
 # version   - for pkg, bundle and fisher; the upstream version for a binary or an
 #           archive (<upstream>+<commit>.<N> when build.yml builds it, so a
-#           rebuild moves it); the launcher tag or commit for a template; latest
-#           or a pin for npm-musl and npm-android
+#           rebuild moves it); the launcher tag or commit for a template or a
+#           skill; latest or a pin for npm-musl and npm-android
 # prefixes  * or a comma list of app packages; one row per (name, prefix set),
 #           so the per-edition builds are two rows sharing a name
-# source    pkg: package names. binary/archive/file: launcher:<path>@<tag or
+# source    pkg: package names. binary/archive/skill/file: launcher:<path>@<tag or
 #           commit>, binaries:<asset>@<tag>, or a URL. npm-musl/npm-android:
 #           npm:<package>#<exe>.
 #           fisher: the plugin list, space separated
 # target    where it lands, ~ allowed; - means the default (an archive: the
-#           directory ~/.local/lib/<name>)
+#           directory ~/.local/lib/<name>; a skill: the directory
+#           ~/.agents/skills/<name>, the links being named after the item
+#           wherever it lands)
 # requires  comma list installed first; a bundle's members live here
 # options   ;-separated key=value: env=K=V (comma repeats), tz=1, mode=755,
 #           build=<packages needed only while installing>, hidden=1,
@@ -153,15 +160,23 @@ zoxide	pkg	-	*	zoxide	-	-	hidden=1	Jump to the directories you use most by name.
 # repositories build for that prefix.
 x11-repo	pkg	-	com.termux	x11-repo	-	-	hidden=1;repo=1	Turns on Termux's x11 package source, where Electron comes from.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
 electron42	pkg	-	com.termux	electron42	-	x11-repo	hidden=1	Termux's Electron, which terminal-browser runs on.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
-launcher-skill-md	file	b3d9334e	*	launcher:resources/agent-skills/termux-launcher/SKILL.md@b3d9334e4e1994d5a2ab666e8d9179d9fc67494b	~/.claude/skills/termux-launcher/SKILL.md	-	hidden=1;mode=644	How the agent learns what Termux Launcher can do.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
-launcher-skill-launcherctl	file	b3d9334e	*	launcher:resources/agent-skills/termux-launcher/launcherctl.md@b3d9334e4e1994d5a2ab666e8d9179d9fc67494b	~/.claude/skills/termux-launcher/launcherctl.md	-	hidden=1;mode=644	The agent skill's guide to launcherctl.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
-launcher-skill-terminal	file	b3d9334e	*	launcher:resources/agent-skills/termux-launcher/terminal.md@b3d9334e4e1994d5a2ab666e8d9179d9fc67494b	~/.claude/skills/termux-launcher/terminal.md	-	hidden=1;mode=644	The agent skill's guide to the terminal's graphics and signals.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
-launcher-skill-display	file	b3d9334e	*	launcher:resources/agent-skills/termux-launcher/display.md@b3d9334e4e1994d5a2ab666e8d9179d9fc67494b	~/.claude/skills/termux-launcher/display.md	-	hidden=1;mode=644	The agent skill's guide to the Linux display.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
-launcher-skill-notify	file	b3d9334e	*	launcher:resources/agent-skills/termux-launcher/scripts/notify.sh@b3d9334e4e1994d5a2ab666e8d9179d9fc67494b	~/.claude/skills/termux-launcher/scripts/notify.sh	-	hidden=1;mode=755	Lets an agent send a notification.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
-launcher-skill-progress	file	b3d9334e	*	launcher:resources/agent-skills/termux-launcher/scripts/progress.sh@b3d9334e4e1994d5a2ab666e8d9179d9fc67494b	~/.claude/skills/termux-launcher/scripts/progress.sh	-	hidden=1;mode=755	Lets an agent show a progress ring.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
-launcher-skill-show	file	b3d9334e	*	launcher:resources/agent-skills/termux-launcher/scripts/show.sh@b3d9334e4e1994d5a2ab666e8d9179d9fc67494b	~/.claude/skills/termux-launcher/scripts/show.sh	-	hidden=1;mode=755	Lets an agent show a picture in its own pane.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
-launcher-skill-copy	file	b3d9334e	*	launcher:resources/agent-skills/termux-launcher/scripts/copy.sh@b3d9334e4e1994d5a2ab666e8d9179d9fc67494b	~/.claude/skills/termux-launcher/scripts/copy.sh	-	hidden=1;mode=755	Lets an agent put text on the clipboard.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
-launcher-skill	bundle	-	*	-	-	launcher-skill-md,launcher-skill-launcherctl,launcher-skill-terminal,launcher-skill-display,launcher-skill-notify,launcher-skill-progress,launcher-skill-show,launcher-skill-copy	hidden=1	What agents need to use Termux Launcher's panes, signals and display.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
+launcher-skill-md	file	b3d9334e	*	launcher:resources/agent-skills/termux-launcher/SKILL.md@b3d9334e4e1994d5a2ab666e8d9179d9fc67494b	~/.claude/skills/termux-launcher/SKILL.md	-	hidden=1;retired=1;mode=644	How the agent learns what Termux Launcher can do.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
+launcher-skill-launcherctl	file	b3d9334e	*	launcher:resources/agent-skills/termux-launcher/launcherctl.md@b3d9334e4e1994d5a2ab666e8d9179d9fc67494b	~/.claude/skills/termux-launcher/launcherctl.md	-	hidden=1;retired=1;mode=644	The agent skill's guide to launcherctl.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
+launcher-skill-terminal	file	b3d9334e	*	launcher:resources/agent-skills/termux-launcher/terminal.md@b3d9334e4e1994d5a2ab666e8d9179d9fc67494b	~/.claude/skills/termux-launcher/terminal.md	-	hidden=1;retired=1;mode=644	The agent skill's guide to the terminal's graphics and signals.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
+launcher-skill-display	file	b3d9334e	*	launcher:resources/agent-skills/termux-launcher/display.md@b3d9334e4e1994d5a2ab666e8d9179d9fc67494b	~/.claude/skills/termux-launcher/display.md	-	hidden=1;retired=1;mode=644	The agent skill's guide to the Linux display.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
+launcher-skill-notify	file	b3d9334e	*	launcher:resources/agent-skills/termux-launcher/scripts/notify.sh@b3d9334e4e1994d5a2ab666e8d9179d9fc67494b	~/.claude/skills/termux-launcher/scripts/notify.sh	-	hidden=1;retired=1;mode=755	Lets an agent send a notification.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
+launcher-skill-progress	file	b3d9334e	*	launcher:resources/agent-skills/termux-launcher/scripts/progress.sh@b3d9334e4e1994d5a2ab666e8d9179d9fc67494b	~/.claude/skills/termux-launcher/scripts/progress.sh	-	hidden=1;retired=1;mode=755	Lets an agent show a progress ring.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
+launcher-skill-show	file	b3d9334e	*	launcher:resources/agent-skills/termux-launcher/scripts/show.sh@b3d9334e4e1994d5a2ab666e8d9179d9fc67494b	~/.claude/skills/termux-launcher/scripts/show.sh	-	hidden=1;retired=1;mode=755	Lets an agent show a picture in its own pane.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
+launcher-skill-copy	file	b3d9334e	*	launcher:resources/agent-skills/termux-launcher/scripts/copy.sh@b3d9334e4e1994d5a2ab666e8d9179d9fc67494b	~/.claude/skills/termux-launcher/scripts/copy.sh	-	hidden=1;retired=1;mode=755	Lets an agent put text on the clipboard.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
+# The launcher's agent skills, packed by its scripts/pack-agent-skills.sh at the commit
+# recipes/cross/fetch-launcher-skills.sh pins (the version is that commit). bins-pending is not a
+# tag: build-catalog.sh stops on these two rows until `gh workflow run build.yml -f
+# tools=launcher-skills` publishes the tarballs, and its bins-record.sh moves both rows to the new
+# tag. The launcher-skill-* file rows above are the skill's loose files from before; a skill install
+# replaces them (docs/SPEC.md, Revision 18).
+termux-launcher	skill	09cd3773	*	binaries:skill-termux-launcher@bins-pending	-	-	hidden=1	The agent skill for Termux Launcher: its panes, signals, display and user guide.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
+termux-launcher-speak	skill	09cd3773	*	binaries:skill-termux-launcher-speak@bins-pending	-	-	hidden=1	The agent skill that speaks an agent's answers aloud on the phone.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
+launcher-skill	bundle	-	*	-	-	termux-launcher,termux-launcher-speak	hidden=1	What agents need to use Termux Launcher's panes, signals, display and guide, and to speak.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
 claude-panes-skill	file-once	aea80bf2	*	launcher:resources/agent-skills/termux-launcher-panes/SKILL.md@aea80bf215a6a44951154d9b600abddca56c8c49	~/.claude/skills/termux-launcher-panes/SKILL.md	-	hidden=1;retired=1	Teaches Claude Code the launcher's pane commands.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
 termux-api-shim-battery-status	file	98bac296	*	binaries:shims/termux-api/termux-battery-status@98bac2968cba00166609dee25d4e2665b21a38db	~/.local/bin/termux-battery-status	-	hidden=1;mode=755;host=launcher;conflicts=termux-api	The termux-battery-status command.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
 termux-api-shim-clipboard-get	file	98bac296	*	binaries:shims/termux-api/termux-clipboard-get@98bac2968cba00166609dee25d4e2665b21a38db	~/.local/bin/termux-clipboard-get	-	hidden=1;mode=755;host=launcher;conflicts=termux-api	The termux-clipboard-get command.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
