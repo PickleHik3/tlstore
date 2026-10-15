@@ -53,31 +53,39 @@ PickleHik3/terminal-browser@6fe3538) staged beside the installed copy as `tb-tl`
    loader, `dawn` or `opencode`): one number and one bar that never step back, the parts as lines
    beside the number (waiting quiet, the live one with its step words, finished ones `ready`),
    100 and the summary at the end. Record it: the old screen restarted the bar once per part.
-   (The engine's half is seen: on pong, 2026-10-14, `install opencode --progress` in a sandbox
-   HOME printed its 14 `row` lines before the first step, every row's percentages only grew, and
-   all 14 ended `done … ok`. The screen is still owed.)
-2. An item with no parts shows one line (`sigye  signature checked`); an item already installed
-   shows `already installed` on its lines and still ends at 100.
-3. Esc during a running install goes back while the job runs on; the Front row shows the step
-   word; Installing shows the current state when reopened.
+   ~~Seen on the emulator, 2026-10-15: `opencode` (14 rows) in about two minutes, one number
+   0 → 36 → 100 that never went down, the bar filled once, the four-line window followed the live
+   part, finished parts `ready`, 100 and the summary at the end (scratchpad/emu/02-opencode-a.mp4).
+   The engine's half on pong, 2026-10-14: `install opencode --progress` in a sandbox HOME printed
+   its 14 `row` lines before the first step, every row's percentages only grew, all 14 ended ok.~~
+2. ~~An item with no parts shows one line (`sigye  signature checked`) — emulator 2026-10-15.~~
+   An item already installed shows `already installed` on its lines and still ends at 100: not
+   reachable from the store (an installed item offers remove, not install); needs an update plan
+   with a part already current, or a bundle with an installed member.
+3. ~~Esc during a running install goes back while the job runs on; the Front row shows the step
+   word; Installing shows the current state when reopened — emulator 2026-10-15 (fish-shell).~~
 4. ~~terminal-browser (`tb-tl open en.wikipedia.org`) draws the page in the launcher's terminal,
    in the mobile layout at phone size (compact header, hamburger menu, no sidebar) — pong,
    2026-10-14, screenshot: the page is served with a mobile Chrome agent, 412 CSS pixels across at
    scale 2.4, touch emulation on.~~
-5. Taps follow links, a swipe scrolls, typing in the address bar navigates, Ctrl+Q closes the
-   window (fingers still act as a mouse until the launcher's touch mode ships).
-6. `tb-tl site desktop` from another shell reloads open tabs into the desktop layout; `site auto`
-   returns them to mobile; Ctrl+Shift+M toggles; no blank tab or frozen size after a switch.
-   (Seen from the page's side on pong, 2026-10-14: 412x432 CSS mobile → 979x1027 desktop with
-   client hints mobile=false → back to 412x432; the screen and Ctrl+Shift+M still owed.)
-7. From a shell in a launcher pane narrower than 88 columns, `tb-tl open --split right <url>`
-   opens the browser in a new launcher window (a split on a pane 88 columns or wider); `tb-tl ls
-   --all` lists it; `tb-tl action --browser <key> -- snapshot` prints the page; quitting the
-   browser closes its window and leaves the shell's.
-   (Seen on pong, 2026-10-14, from a 71-column pane: a new window (not a split), `ls --all`
-   lists it, `action --browser <key> -- snapshot` prints the page. Still owed: the window
-   closing on Ctrl+Q — `action -- close` only closes agent-browser's session, the window stays.)
-8. The installed `terminal-browser` is untouched by the staged copy and still opens a page.
+5. ~~Taps follow links, a swipe scrolls, typing in the address bar navigates, Ctrl+Q closes the
+   window (fingers still act as a mouse until the launcher's touch mode ships) — emulator,
+   2026-10-15 (fork c140fc1): taps on article links, the hamburger menu, search fields on
+   Wikipedia, Google and DuckDuckGo all land; fast swipes scroll a long page; Ctrl+Q closes the
+   browser and its launcher window with no electron process left.~~
+6. ~~`tb-tl site desktop` from another shell reopens the tabs in the desktop layout; `site auto`
+   returns them to mobile; Ctrl+Shift+M toggles; no blank tab or frozen size after a switch —
+   emulator, 2026-10-15: mobile 404–412 CSS px at 2.35–2.40, desktop 969 at 1.00 with Wikipedia's
+   sidebar, both directions repeatedly, tabs kept in order with the active one, a user zoom in
+   desktop mode kept per host and ignored in mobile mode.~~
+7. ~~From a shell in a launcher pane narrower than 88 columns, `tb-tl open --split right <url>`
+   opens the browser in a new launcher window; `tb-tl ls --all` lists it; `action --browser
+   <key> -- snapshot` prints the page; Ctrl+Q closes the browser's window and leaves the shell's
+   — pong 2026-10-14 (71-column pane: a window, not a split; ls and snapshot) and emulator
+   2026-10-15 (the window closes on Ctrl+Q, the shell window stays).~~ A split on a pane 88
+   columns or wider is still unseen (no such pane on either device).
+8. The installed `terminal-browser` is untouched by the staged copy and still opens a page (seen
+   on pong 2026-10-14 before the fork's build was staged beside it; not since).
 9. With a launcher that has touch reports (branch feat/terminal-browser-launcher of the app, not
    built yet): a long page flings, a pinch zooms, a long press on a link opens its menu, the tab
    bar still takes taps, a Bluetooth mouse still clicks and scrolls.
