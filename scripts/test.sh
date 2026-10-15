@@ -2376,6 +2376,220 @@ EOF
     rm -rf "$TESTHOME/.local"
     mv "$ROOT/saved-local" "$TESTHOME/.local"
 
+    # --- skill (Revision 18): an agent skill, one folder from one pinned .tar.gz ---
+    # The tarball's one top-level entry is the skill's folder, named like the item. It unpacks
+    # into ~/.agents/skills/<name>, replaced whole by an update, and is linked from
+    # ~/.claude/skills/<name> (and ~/.codex/skills/<name> while ~/.codex is there). A real folder
+    # at a link path is replaced only when it holds nothing but the retired file rows' unchanged
+    # files. Like the archive block, this one starts from nothing installed.
+    rm -rf "$ROOT/saved-local"
+    cp -a "$TESTHOME/.local" "$ROOT/saved-local"
+    sk_clean() {
+        rm -rf "$TESTHOME/.agents" "$TESTHOME/.claude" "$TESTHOME/.codex" \
+            "$TESTHOME/.local/share/tlstore/installed.tsv" "$TESTHOME/.local/lib" "$TESTHOME/.local/bin"
+    }
+    sk_clean
+    # mk_skill <root> <name> <words> — a skill folder <root>/<name>.
+    mk_skill() {
+        mkdir -p "$1/$2/scripts" "$1/$2/docs"
+        printf -- '---\nname: %s\n---\n%s\n' "$2" "$3" > "$1/$2/SKILL.md"
+        printf '#!/bin/sh\necho %s\n' "$3" > "$1/$2/scripts/run.sh"
+        chmod 755 "$1/$2/scripts/run.sh"
+        printf 'guide of %s\n' "$3" > "$1/$2/docs/guide.md"
+    }
+    mk_skill "$FX/sksrc-1" sk "skill 1"
+    printf 'only in the first build\n' > "$FX/sksrc-1/sk/gone-later.md"
+    mk_skill "$FX/sksrc-2" sk "skill 2"
+    mk_skill "$FX/sksrc-wrong" other "wrong"
+    mk_skill "$FX/sksrc-duo" skduo "duo"
+    mk_skill "$FX/sksrc-duo" extra "extra"
+    mkdir -p "$FX/rel/3.0" "$FX/rel/3.1"
+    tar czf "$FX/rel/3.0/sk-aarch64" -C "$FX/sksrc-1" sk
+    printf 'x86_64 build\n' > "$FX/sksrc-1/sk/x86.md"
+    tar czf "$FX/rel/3.0/sk-x86_64" -C "$FX/sksrc-1" sk
+    rm -f "$FX/sksrc-1/sk/x86.md"
+    tar czf "$FX/rel/3.1/sk-aarch64" -C "$FX/sksrc-2" sk
+    tar czf "$FX/rel/3.0/skwrong-aarch64" -C "$FX/sksrc-wrong" other
+    tar czf "$FX/rel/3.0/skduo-aarch64" -C "$FX/sksrc-duo" skduo extra
+    # The skill as it was before: loose files under ~/.claude/skills/sk, one file row each.
+    printf -- '---\nname: sk\n---\nthe old skill\n' > "$FX/oldsk-SKILL.md"
+    printf '#!/bin/sh\necho old\n' > "$FX/oldsk-run.sh"
+    # write_skill_catalog <sk version> <sk tag> <old rows retired 0|1> — retired, the bundle skb
+    # names sk instead of the old file rows, as launcher-skill does.
+    write_skill_catalog() {
+        local old_opts="hidden=1" skb_req="oldsk-md,oldsk-run"
+        if [ "$3" = 1 ]; then old_opts="hidden=1;retired=1"; skb_req="sk"; fi
+        {
+            printf '# tlstore catalog\tserial=2026090654\n'
+            printf 'sk\tskill\t%s\t*\tbinaries:sk@%s\t%s\t-\t-\tx86_64:digest=%s\tA skill for agents.\t%s\n' \
+                "$1" "$2" "$(sha "$FX/rel/$2/sk-aarch64")" "$(sha "$FX/rel/3.0/sk-x86_64")" "$R5_NONE"
+            printf 'skwrong\tskill\t1\t*\tbinaries:skwrong@3.0\t%s\t-\t-\t-\tIts folder has another name, on purpose.\t%s\n' \
+                "$(sha "$FX/rel/3.0/skwrong-aarch64")" "$R5_NONE"
+            printf 'skduo\tskill\t1\t*\tbinaries:skduo@3.0\t%s\t-\t-\t-\tTwo folders on top, on purpose.\t%s\n' \
+                "$(sha "$FX/rel/3.0/skduo-aarch64")" "$R5_NONE"
+            printf 'oldsk-md\tfile\t1\t*\tfile://%s/oldsk-SKILL.md\t%s\t~/.claude/skills/sk/SKILL.md\t-\t%s;mode=644\tThe old skill.\t%s\n' \
+                "$FX" "$(sha "$FX/oldsk-SKILL.md")" "$old_opts" "$R5_NONE"
+            printf 'oldsk-run\tfile\t1\t*\tfile://%s/oldsk-run.sh\t%s\t~/.claude/skills/sk/scripts/run.sh\t-\t%s;mode=755\tThe old skill script.\t%s\n' \
+                "$FX" "$(sha "$FX/oldsk-run.sh")" "$old_opts" "$R5_NONE"
+            printf 'skb\tbundle\t-\t*\t-\t-\t-\t%s\t-\tWhat agents need.\t%s\n' "$skb_req" "$R5_NONE"
+        } > "$user_catalog"
+    }
+    sk_state() { cat "$TESTHOME/.local/share/tlstore/installed.tsv" 2>/dev/null; }
+    sk_dir="$TESTHOME/.agents/skills/sk"
+    sk_claude="$TESTHOME/.claude/skills/sk"
+    sk_codex="$TESTHOME/.codex/skills/sk"
+    write_skill_catalog 1.0 3.0 0
+
+    tl list --tsv
+    expect_out "a skill is listed with its kind" $'^sk\tavailable\t1.0\t\tskill\t'
+    tl info sk
+    expect_out "info names the directory and the claude link" "Files *$sk_dir $sk_claude"
+    expect_no_out "and no codex link while ~/.codex is not there" "$sk_codex"
+
+    : > "$ROOT/curl.log"
+    tl install sk -y
+    expect_status "a skill installs" 0
+    expect_out "its payload is fetched and checked before anything is put in place" "fetching sk"
+    if grep -q "file://$FX/rel/3.0/sk-aarch64" "$ROOT/curl.log"; then pass; else fail "binaries:sk@3.0 resolved to <releases>/3.0/sk-aarch64" "$(cat "$ROOT/curl.log")"; fi
+    expect_content "it unpacked into ~/.agents/skills/<name>, the folder's contents at the top" "$sk_dir/docs/guide.md" "guide of skill 1"
+    if [ -x "$sk_dir/scripts/run.sh" ]; then pass; else fail "a script in it keeps its mode"; fi
+    if [ -L "$sk_claude" ] && [ "$(readlink "$sk_claude")" = "$sk_dir" ]; then pass; else fail "~/.claude/skills/<name> is a link to it" "$(ls -la "$TESTHOME/.claude/skills" 2>&1)"; fi
+    expect_content "and reads through" "$sk_claude/docs/guide.md" "guide of skill 1"
+    expect_no_file "no codex link without ~/.codex" "$TESTHOME/.codex"
+    expect_no_file "the download is not kept" "$TESTHOME/.cache/tlstore/sk.tgz"
+    expect_no_file "nor the unpack directory" "$sk_dir.new"
+    expect_no_file "and nothing is put on PATH" "$TESTHOME/.local/bin/sk"
+    if awk -F'\t' -v d="$sk_dir $sk_claude" -v g="$(sha "$FX/rel/3.0/sk-aarch64")" '$1=="sk" { exit ($2=="skill" && $3=="1.0" && $5==d && $7==g) ? 0 : 1 }' "$TESTHOME/.local/share/tlstore/installed.tsv"; then pass; else fail "the state records the kind, version, directory, link and digest" "$(sk_state)"; fi
+    tl doctor
+    expect_no_out "doctor finds the directory and the link" "Missing"
+
+    : > "$ROOT/curl.log"
+    tl update --offline -y sk
+    expect_out "the same build again is not an update" "Everything is up to date."
+    if grep -q "sk-aarch64" "$ROOT/curl.log"; then fail "and nothing is fetched for it"; else pass; fi
+
+    # A newer build, after the person changed a file inside the directory and added one, and with
+    # ~/.codex there now.
+    printf 'my edit\n' > "$sk_dir/docs/guide.md"
+    printf 'mine\n' > "$sk_dir/mine.txt"
+    mkdir -p "$TESTHOME/.codex"
+    write_skill_catalog 1.1 3.1 0
+    tl update --offline -y sk
+    expect_status "the newer build installs" 0
+    expect_content "the directory is replaced whole: an edit inside it goes" "$sk_dir/docs/guide.md" "guide of skill 2"
+    expect_no_file "a file of yours in it goes too" "$sk_dir/mine.txt"
+    expect_no_file "and so does one the new build no longer has" "$sk_dir/gone-later.md"
+    expect_no_file "nothing is left beside it" "$sk_dir.old"
+    if [ -L "$sk_claude" ] && [ "$(readlink "$sk_claude")" = "$sk_dir" ]; then pass; else fail "the claude link still points at it"; fi
+    if [ -L "$sk_codex" ] && [ "$(readlink "$sk_codex")" = "$sk_dir" ]; then pass; else fail "with ~/.codex there, ~/.codex/skills/<name> links to it too" "$(ls -la "$TESTHOME/.codex" 2>&1)"; fi
+    if awk -F'\t' -v d="$sk_dir $sk_claude $sk_codex" '$1=="sk" { exit ($3=="1.1" && $5==d && $8=="1.0") ? 0 : 1 }' "$TESTHOME/.local/share/tlstore/installed.tsv"; then pass; else fail "the state has the new version, the codex link, and the version before" "$(sk_state)"; fi
+
+    tl rollback sk -y
+    expect_status "a skill rolls back" 0
+    expect_content "to the build it had before" "$sk_dir/gone-later.md" "only in the first build"
+    tl unhold sk
+
+    tl remove sk -y
+    expect_status "a skill is removed" 0
+    expect_no_file "its directory goes" "$sk_dir"
+    if [ -L "$sk_claude" ] || [ -e "$sk_claude" ]; then fail "and its claude link"; else pass; fi
+    if [ -L "$sk_codex" ] || [ -e "$sk_codex" ]; then fail "and its codex link"; else pass; fi
+    if sk_state | grep -q '^sk	'; then fail "and its state row"; else pass; fi
+
+    # A symlink at a link path, whatever it points at, is replaced.
+    sk_clean
+    write_skill_catalog 1.0 3.0 0
+    mkdir -p "$TESTHOME/.claude/skills" "$ROOT/elsewhere"
+    ln -s "$ROOT/elsewhere" "$sk_claude"
+    tl install sk -y
+    expect_status "a skill installs over a symlink" 0
+    if [ "$(readlink "$sk_claude")" = "$sk_dir" ]; then pass; else fail "the symlink now points at the skill" "$(readlink "$sk_claude")"; fi
+    expect_file "and what it pointed at is untouched" "$ROOT/elsewhere"
+
+    # The person replaced the link with a folder of their own after install: remove leaves it.
+    rm -f "$sk_claude"
+    mkdir -p "$sk_claude"
+    printf 'my own skill\n' > "$sk_claude/SKILL.md"
+    tl remove sk -y
+    expect_status "remove still succeeds" 0
+    expect_no_file "the directory goes" "$sk_dir"
+    expect_content "a folder of yours where the link was stays" "$sk_claude/SKILL.md" "my own skill"
+
+    # A real folder of the person's at the link path: left, said on stderr, and the install succeeds.
+    mkdir -p "$TESTHOME/.codex"
+    tl install sk -y
+    expect_status "a skill installs beside a folder of yours" 0
+    expect_out "and says it left the folder alone" "left $sk_claude alone"
+    expect_content "your folder is untouched" "$sk_claude/SKILL.md" "my own skill"
+    if [ -L "$sk_claude" ]; then fail "no link replaces it"; else pass; fi
+    if [ -L "$sk_codex" ]; then pass; else fail "the other agent's link is still made"; fi
+    if awk -F'\t' -v d="$sk_dir $sk_codex" '$1=="sk" { exit ($5==d) ? 0 : 1 }' "$TESTHOME/.local/share/tlstore/installed.tsv"; then pass; else fail "the state records only the links it made" "$(sk_state)"; fi
+    tl remove sk -y
+    expect_content "remove leaves your folder too" "$sk_claude/SKILL.md" "my own skill"
+    if [ -L "$sk_codex" ]; then fail "and takes the link it made"; else pass; fi
+
+    # Moving over from the old loose files: an update installs the skill before it retires the
+    # file rows, finds tlstore's own unchanged files at the link path, and replaces them.
+    sk_clean
+    write_skill_catalog 1.0 3.0 0
+    tl install skb -y
+    expect_status "the old bundle installs its loose files" 0
+    expect_content "into ~/.claude/skills/<name>" "$sk_claude/SKILL.md" "$(cat "$FX/oldsk-SKILL.md")"
+    write_skill_catalog 1.0 3.0 1
+    tl update --offline -y
+    expect_status "the update that moves it over succeeds" 0
+    expect_out "it says it replaced the old files" "replaced the files an earlier version put in $sk_claude"
+    if [ -L "$sk_claude" ] && [ "$(readlink "$sk_claude")" = "$sk_dir" ]; then pass; else fail "~/.claude/skills/<name> is the link now" "$(ls -la "$TESTHOME/.claude/skills" 2>&1)"; fi
+    expect_content "and reads the new skill" "$sk_claude/docs/guide.md" "guide of skill 1"
+    if sk_state | grep -q '^oldsk-'; then fail "the old file rows are gone from the state" "$(sk_state)"; else pass; fi
+    expect_no_out "and their retirement has nothing of yours to keep" "kept your"
+    if sk_state | grep -q '^sk	'; then pass; else fail "the skill is recorded" "$(sk_state)"; fi
+
+    # The same move with one old file edited: the folder is the person's now, so it stays.
+    sk_clean
+    write_skill_catalog 1.0 3.0 0
+    tl install skb -y
+    printf 'my notes\n' >> "$sk_claude/SKILL.md"
+    write_skill_catalog 1.0 3.0 1
+    tl update --offline -y
+    expect_status "the update succeeds with an edited old file" 0
+    expect_out "it leaves the folder alone and says so" "left $sk_claude alone"
+    if [ -L "$sk_claude" ]; then fail "no link replaces the folder"; else pass; fi
+    if grep -q 'my notes' "$sk_claude/SKILL.md"; then pass; else fail "your edit is kept"; fi
+    expect_out "the edited file's retirement keeps it" "kept your SKILL.md"
+    expect_no_file "the unchanged old file is retired" "$sk_claude/scripts/run.sh"
+    expect_file "and the skill is in place all the same" "$sk_dir/SKILL.md"
+
+    # Tarballs that are not one folder named like the item are refused, with nothing put in place.
+    sk_clean
+    write_skill_catalog 1.0 3.0 0
+    tl install skwrong -y
+    if [ "$ST" != 0 ]; then pass; else fail "a skill whose folder has another name is refused"; fi
+    expect_out "and says why" "does not hold one skwrong folder"
+    expect_no_file "nothing is put in place" "$TESTHOME/.agents/skills/skwrong"
+    expect_no_file "no unpack directory is left" "$TESTHOME/.agents/skills/skwrong.new"
+    if [ -L "$TESTHOME/.claude/skills/skwrong" ]; then fail "and no link is made"; else pass; fi
+    tl install skduo -y
+    if [ "$ST" != 0 ]; then pass; else fail "a skill with two folders on top is refused"; fi
+    expect_no_file "and nothing is put in place" "$TESTHOME/.agents/skills/skduo"
+    if sk_state | grep -q '^sk[a-z]*	'; then fail "neither is recorded" "$(sk_state)"; else pass; fi
+
+    # x86_64: its own asset name, as a binary's.
+    : > "$ROOT/curl.log"
+    ARCH_KNOB=x86_64
+    tl install sk -y
+    expect_status "the x86_64 build of a skill installs" 0
+    if grep -q "file://$FX/rel/3.0/sk-x86_64" "$ROOT/curl.log"; then pass; else fail "binaries:sk@3.0 resolved to <releases>/3.0/sk-x86_64 on x86_64" "$(cat "$ROOT/curl.log")"; fi
+    expect_file "and the x86_64 tarball is the one unpacked" "$sk_dir/x86.md"
+    ARCH_KNOB=x86_64
+    tl list --tsv
+    expect_no_out "one without an x86_64 build is not offered there" $'^skwrong\t'
+    ARCH_KNOB=x86_64
+    tl remove sk -y
+    sk_clean
+    rm -rf "$TESTHOME/.local"
+    mv "$ROOT/saved-local" "$TESTHOME/.local"
+
     # --- keeping tlstore itself current, with the store program that pairs with it ---
     if [ "$HAVE_MINISIGN" = 1 ]; then
         store="$TPREFIX/libexec/termux-launcher/tlstore"
@@ -3812,6 +4026,22 @@ if git -C "$repo" show dev:dist/tlstore > "$OLD_TLSTORE" 2>/dev/null; then
     if [ "$ST" != 0 ]; then pass; else fail "it refuses to install an archive" "$OUT"; fi
     expect_no_file "and puts no directory down" "$TESTHOME/.local/lib/oldapp"
     expect_no_file "nor a wrapper" "$TESTHOME/.local/bin/oldapp"
+    # A skill row (Revision 18) the same: listed, refused, nothing written.
+    mkdir -p "$FX/oldsk/oldsk"
+    printf 'old skill\n' > "$FX/oldsk/oldsk/SKILL.md"
+    tar czf "$FX/oldsk.tgz" -C "$FX/oldsk" oldsk
+    {
+        printf '# tlstore catalog\tserial=2026090654\n'
+        printf 'oldsk\tskill\t1\t*\tfile://%s/oldsk.tgz\t%s\t-\t-\t-\tA skill for agents.\t%s\n' \
+            "$FX" "$(sha "$FX/oldsk.tgz")" "$R5_NONE"
+    } > "$TESTHOME/.local/share/tlstore/catalog.tsv"
+    OUT="$(old_env list)"; ST=$?
+    expect_status "its list still works with a skill row in it" 0
+    expect_out "and shows the item" "oldsk"
+    OUT="$(old_env install oldsk -y)"; ST=$?
+    if [ "$ST" != 0 ]; then pass; else fail "it refuses to install a skill" "$OUT"; fi
+    expect_no_file "and puts no directory down" "$TESTHOME/.agents/skills/oldsk"
+    expect_no_file "nor a link" "$TESTHOME/.claude/skills/oldsk"
     rm -rf "$ROOT"
 else
     skip "dev-branch compatibility check" "no dev branch reachable from this worktree"
@@ -3962,6 +4192,21 @@ for bc_exe in "-" "exe=" "exe=/bin/app" "exe=../app" "exe=bin/../../app"; do
     if [ "$ST" != 0 ]; then pass; else fail "an archive with options '$bc_exe' is refused"; fi
 done
 
+# skill (Revision 18): digested like a binary, x86_64:digest included; a placeholder tag with no
+# SHA256SUMS line stops the build.
+bc_write_items "$bc_items" 1 Tools
+printf '8888888888888888888888888888888888888888888888888888888888888888  skill-sk-aarch64\n' >> "$BC_SUMS"
+printf '8888888888888888888888888888888888888888888888888888888888888888  skill-sk-x86_64\n' >> "$BC_SUMS"
+printf 'sk\tskill\t09cd3773\t*\tbinaries:skill-sk@1.0\t-\t-\thidden=1\tA skill.\t-\t-\t0\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t0\t-\t-\n' >> "$bc_items"
+OUT="$(cd "$BC_ROOT" && bash scripts/build-catalog.sh "$BC_SUMS" 2>&1)"; ST=$?
+if [ "$ST" = 0 ]; then pass; else fail "build-catalog.sh takes a skill row" "$OUT"; fi
+if awk -F'\t' '$1=="sk" { exit ($2=="skill" && $6=="8888888888888888888888888888888888888888888888888888888888888888" && $9=="hidden=1;x86_64:digest=8888888888888888888888888888888888888888888888888888888888888888") ? 0 : 1 }' "$bc_cat"; then pass; else fail "a skill gets its digest and x86_64:digest from SHA256SUMS as a binary does" "$(grep '^sk' "$bc_cat" | cut -f2,6,9)"; fi
+bc_write_items "$bc_items" 1 Tools
+printf 'sk\tskill\t09cd3773\t*\tbinaries:skill-new@bins-pending\t-\t-\thidden=1\tA skill.\t-\t-\t0\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t0\t-\t-\n' >> "$bc_items"
+OUT="$(cd "$BC_ROOT" && bash scripts/build-catalog.sh "$BC_SUMS" 2>&1)"; ST=$?
+if [ "$ST" != 0 ]; then pass; else fail "a skill row still waiting on its build stops the catalog"; fi
+expect_out "naming the asset" "skill-new-aarch64 is not in"
+
 rm -rf "$BC_ROOT"
 
 echo
@@ -4001,8 +4246,10 @@ expect_out "a per-edition tool's x86_64 build for com.termux" '{"tool":"dawn","e
 expect_no_out "and none for io.vaj.tl, which is aarch64 only" '"edition":"io.vaj.tl","arch":"x86_64"'
 expect_out "the musl runtime is one job for two assets" '"asset":"musl-libgcc-aarch64,musl-libstdcxx-aarch64"'
 expect_out "on each processor" '"asset":"musl-libgcc-x86_64,musl-libstdcxx-x86_64"'
+expect_out "the launcher skills are one job for every processor, each tarball under both names" \
+    '{"tool":"launcher-skills","edition":"-","arch":"any","asset":"skill-termux-launcher-aarch64,skill-termux-launcher-x86_64,skill-termux-launcher-speak-aarch64,skill-termux-launcher-speak-x86_64"}'
 if command -v python3 >/dev/null 2>&1; then
-    if printf '%s' "$OUT" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if len(d["include"]) == 23 else 1)'; then pass; else fail "the matrix is JSON with twenty-three entries" "$OUT"; fi
+    if printf '%s' "$OUT" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if len(d["include"]) == 24 else 1)'; then pass; else fail "the matrix is JSON with twenty-four entries" "$OUT"; fi
 fi
 OUT="$(bash "$BN_ROOT/scripts/bins-plan.sh" dawn,btop 2>&1)"; ST=$?
 expect_status "bins-plan.sh with a comma list" 0

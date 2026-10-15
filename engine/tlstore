@@ -56,7 +56,7 @@
 
 set -u
 
-TLSTORE_VERSION=0.18
+TLSTORE_VERSION=0.19
 
 # The store program that pairs with this script, one digest per processor.
 # Empty in the source tree: scripts/release.sh --prepare fills them in from
@@ -86,6 +86,9 @@ LIB_DIR="$HOME/.local/lib"
 # Where a priv=shizuku binary itself lives: off PATH, since what the user runs
 # is the wrapper in BIN_DIR that hands it to the launcher's privileged lane.
 PRIV_DIR="$LIB_DIR/tlstore/priv"
+# Where a skill item unpacks (Revision 18): the directory agents share, which
+# each agent's own skills directory links into.
+SKILLS_DIR="$HOME/.agents/skills"
 DATA_DIR="$HOME/.local/share/tlstore"
 CACHE_DIR="$HOME/.cache/tlstore"
 STORE_DIR="$PREFIX/libexec/termux-launcher/tlstore"
@@ -488,7 +491,7 @@ need_catalog() {
 # a new enough launcher; first row per name wins. Off aarch64 a row comes out
 # with its <arch>:source, <arch>:digest and <arch>:target options already in
 # place of columns 5, 6 and 7, so nothing downstream needs to know the
-# processor. A binary or an archive is here only with its own <arch>:digest
+# processor. A binary, an archive or a skill is here only with its own <arch>:digest
 # (build-catalog.sh writes it once that build is published); an npm-musl or
 # npm-android item only with its own <arch>:source (the npm package built for
 # it), and an npm-musl item only while its musl loader and libraries are here
@@ -503,10 +506,10 @@ rows() {
             return 0
         }
         function arch_ok(kind, opts) {
-            if (kind != "binary" && kind != "archive" && kind != "npm-musl" && kind != "npm-android") return 1
+            if (kind != "binary" && kind != "archive" && kind != "skill" && kind != "npm-musl" && kind != "npm-android") return 1
             if (archok != "1") return 0
             if (arch == "aarch64") return 1
-            if (kind == "binary" || kind == "archive") return optval(opts, arch ":digest") != ""
+            if (kind == "binary" || kind == "archive" || kind == "skill") return optval(opts, arch ":digest") != ""
             return optval(opts, arch ":source") != ""
         }
         function for_arch(   v) {
@@ -718,7 +721,9 @@ source_url() {
 # under PRIV_DIR, off PATH, then the wrapper on PATH that runs it through
 # tl-priv. An archive lands twice too: the directory it unpacks into
 # (~/.local/lib/<name>, like the npm kinds), then the wrapper, named after the
-# item unless command=<name> says otherwise.
+# item unless command=<name> says otherwise. A skill lands as its directory
+# (~/.agents/skills/<name>), then the links agents read it through:
+# ~/.claude/skills/<name>, and ~/.codex/skills/<name> while ~/.codex is there.
 item_targets() {
     case "$2" in
         binary|file|file-once)
@@ -758,6 +763,15 @@ item_targets() {
             else
                 printf '%s %s' "$(expand_path "$3")" "$BIN_DIR/$it_cmd"
             fi
+            ;;
+        skill)
+            if [ "$3" = "-" ] || [ -z "$3" ]; then
+                printf '%s' "$SKILLS_DIR/$1"
+            else
+                expand_path "$3"
+            fi
+            printf ' %s' "$HOME/.claude/skills/$1"
+            [ ! -d "$HOME/.codex" ] || printf ' %s' "$HOME/.codex/skills/$1"
             ;;
     esac
 }
@@ -1629,6 +1643,7 @@ install_item() {
         npm-musl) do_npm_musl ;;
         npm-android) do_npm_musl ;;
         archive) do_archive ;;
+        skill) do_skill ;;
         bundle) do_bundle ;;
         *) err "$ii_name cannot be installed here"; return 1 ;;
     esac
@@ -2120,33 +2135,161 @@ do_archive() {
     da_tgz="$CACHE_DIR/$ii_name.tgz"
     mkdir -p "$CACHE_DIR" "$(dirname "$da_dir")"
     payload_to "$(source_url "$ii_source")" "$da_tgz" "$ii_digest" || return 1
-    rm -rf "$da_dir.new"
-    mkdir -p "$da_dir.new"
-    CANCEL_EXTRA="$da_tgz $da_dir.new"
-    if ! tar xzf "$da_tgz" -C "$da_dir.new"; then
-        rm -f "$da_tgz"
-        rm -rf "$da_dir.new"
-        CANCEL_EXTRA=""
-        err "the $ii_name download is not what was expected"
-        return 1
-    fi
-    rm -f "$da_tgz"
+    unpack_new "$da_tgz" "$da_dir" || return 1
     if [ ! -f "$da_dir.new/$da_exe" ] || [ ! -x "$da_dir.new/$da_exe" ]; then
         rm -rf "$da_dir.new"
         CANCEL_EXTRA=""
         err "the $ii_name download has no $da_exe to run — nothing was installed"
         return 1
     fi
-    CANCEL_EXTRA=""
-    rm -rf "$da_dir.old"
-    [ ! -e "$da_dir" ] || mv "$da_dir" "$da_dir.old"
-    mv "$da_dir.new" "$da_dir"
-    rm -rf "$da_dir.old"
+    replace_dir "$da_dir.new" "$da_dir"
 
     wrapper_write "$da_wrapper" "$da_dir/$da_exe"
     state_record "$ii_name" archive "$ii_version" "$da_dir" "$da_wrapper"
     say "  $da_wrapper"
     return 0
+}
+
+# unpack_new <tgz> <dir> — the archive and skill kinds' unpack: <tgz> goes into
+# <dir>.new, made empty first, and the download is dropped. A cancel drops both
+# while it runs. On success CANCEL_EXTRA still names <dir>.new for the caller's
+# own checks, which either remove it or hand it to replace_dir. On failure
+# nothing is left.
+unpack_new() {
+    un_new="$2.new"
+    rm -rf "$un_new"
+    mkdir -p "$un_new"
+    CANCEL_EXTRA="$1 $un_new"
+    if ! tar xzf "$1" -C "$un_new"; then
+        rm -f "$1"
+        rm -rf "$un_new"
+        CANCEL_EXTRA=""
+        err "the $ii_name download is not what was expected"
+        return 1
+    fi
+    rm -f "$1"
+    return 0
+}
+
+# replace_dir <new> <dir> — <dir> replaced whole by <new>: the old one moves
+# aside to <dir>.old, the new one into place, and the old one goes.
+replace_dir() {
+    CANCEL_EXTRA=""
+    rm -rf "$2.old"
+    if [ -e "$2" ] || [ -L "$2" ]; then mv "$2" "$2.old"; fi
+    mv "$1" "$2"
+    rm -rf "$2.old"
+}
+
+# do_skill — an agent skill (Revision 18): one pinned .tar.gz whose only top
+# level entry is the skill's directory, named like the item. It unpacks with
+# the archive kind's code into ~/.agents/skills/<name>, replaced whole on every
+# update, and each agent's skills directory gets a link to it (skill_link). No
+# wrapper. The links recorded are the ones really made; one left alone for
+# being the person's own is said on stderr and the install still succeeds.
+do_skill() {
+    dk_targets=$(item_targets "$ii_name" skill "$ii_target" "$ii_source" "$ii_options")
+    dk_dir="${dk_targets%% *}"
+    dk_links="${dk_targets#"$dk_dir"}"
+    case "$ii_digest" in
+        ''|-) err "$ii_name came without a checksum — nothing was installed"; return 1 ;;
+    esac
+    have tar || { err "tar is missing — install it and try again"; return 1; }
+
+    say "installing $ii_name"
+    dk_tgz="$CACHE_DIR/$ii_name.tgz"
+    mkdir -p "$CACHE_DIR" "$(dirname "$dk_dir")"
+    payload_to "$(source_url "$ii_source")" "$dk_tgz" "$ii_digest" || return 1
+    unpack_new "$dk_tgz" "$dk_dir" || return 1
+    if [ "$(ls -A "$dk_dir.new")" != "$ii_name" ] || [ -L "$dk_dir.new/$ii_name" ] ||
+        [ ! -d "$dk_dir.new/$ii_name" ]; then
+        rm -rf "$dk_dir.new"
+        CANCEL_EXTRA=""
+        err "the $ii_name download does not hold one $ii_name folder — nothing was installed"
+        return 1
+    fi
+    replace_dir "$dk_dir.new/$ii_name" "$dk_dir"
+    rm -rf "$dk_dir.new"
+
+    dk_made="$dk_dir"
+    for dk_l in $dk_links; do
+        skill_link "$dk_dir" "$dk_l" && dk_made="$dk_made $dk_l"
+    done
+    state_record "$ii_name" skill "$ii_version" "$dk_made"
+    say "  $dk_dir"
+    return 0
+}
+
+# skill_link <dir> <link> — puts <link> down as a symlink to <dir>. A symlink
+# already there is replaced, whatever it points at, as terminal-browser's own
+# skill links are. A real directory is replaced only when skill_dir_ours finds
+# nothing of the person's in it; the retired rows whose files it held are
+# forgotten with it, so their retirement has nothing left to do. Anything else
+# at <link> is the person's: it stays, stderr says so, and 1 means no link.
+skill_link() {
+    if [ -L "$2" ]; then
+        rm -f "$2"
+    elif [ -d "$2" ] && skill_dir_ours "$2"; then
+        rm -rf "$2"
+        for sl_n in $so_names; do
+            state_forget "$sl_n"
+        done
+        say "  replaced the files an earlier version put in $2"
+    elif [ -e "$2" ]; then
+        status_clear
+        printf 'tlstore: left %s alone: it holds files of your own. %s is in %s\n' "$2" "$ii_name" "$1" >&2
+        PROGRESS_NOTE="left your $2 alone"
+        return 1
+    fi
+    mkdir -p "$(dirname "$2")"
+    ln -s "$1" "$2"
+}
+
+# skill_dir_ours <dir> — 0 when every file under <dir> is one a retired file or
+# file-once row of installed.tsv put there and still holds what that row shipped
+# (its digest in the list, or the one recorded at install): the agent skill's
+# loose files from before Revision 18. A directory with nothing but empty
+# folders in it counts too. so_names is those rows' names.
+skill_dir_ours() {
+    so_names=""
+    while IFS= read -r so_f; do
+        [ -n "$so_f" ] || continue
+        so_st=""
+        [ ! -f "$STATE" ] || so_st=$(awk -F "$TAB" -v f="$so_f" '
+            /^#/ { next }
+            $2 == "file" || $2 == "file-once" {
+                n = split($5, a, " ")
+                for (i = 1; i <= n; i++) if (a[i] == f) { print $1 "\t" $7; exit }
+            }' "$STATE")
+        [ -n "$so_st" ] || return 1
+        so_n="${so_st%%"$TAB"*}"
+        so_sd="${so_st#*"$TAB"}"
+        retired_item "$so_n" || return 1
+        so_cd=$(field "$(row "$so_n")" 6)
+        so_fd=$(file_digest "$so_f")
+        [ -n "$so_fd" ] || return 1
+        [ "$so_fd" = "$so_cd" ] || [ "$so_fd" = "$so_sd" ] || return 1
+        in_list "$so_names" "$so_n" || so_names="$so_names $so_n"
+    done <<EOF
+$(find "$1" ! -type d 2>/dev/null)
+EOF
+    return 0
+}
+
+# skill_unplace <files> — a skill's files as installed.tsv has them: its
+# directory first, then the links made to it. A link goes only while it is
+# still a symlink into that directory; whatever the person put in its place
+# stays. Then the directory goes.
+skill_unplace() {
+    sx_dir="${1%% *}"
+    for sx_f in $1; do
+        [ "$sx_f" != "$sx_dir" ] || continue
+        [ -L "$sx_f" ] || continue
+        case "$(readlink "$sx_f" 2>/dev/null)" in
+            "$sx_dir"|"$sx_dir"/*) rm -f "$sx_f" ;;
+        esac
+    done
+    rm -rf "$sx_dir"
 }
 
 # ---------------------------------------------------------------------------
@@ -2170,6 +2313,11 @@ remove_item() {
                 err "fisher could not remove $(field "$ri_item" 5); their files stay in ~/.config/fish"
             fi
         fi
+    fi
+    # A skill's links go only while they still point into its directory.
+    if [ "$ri_kind" = skill ]; then
+        skill_unplace "$ri_files"
+        ri_files=""
     fi
     for ri_f in $ri_files; do
         # A config file that is no longer what tlstore wrote holds the person's
@@ -2223,6 +2371,7 @@ remove_item() {
 # just stops being tracked; the package itself stays installed). That includes
 # an archive: its directory is the store's, replaced whole on every update, so
 # there is no edit of yours in it to keep, and it goes the way remove takes it.
+# A skill goes the same way.
 retire_item() {
     rt_name="$1"
     rt_row=$(row "$rt_name")
@@ -2731,7 +2880,7 @@ Puts an item back at the version it had before its last update, then holds it
 there so the next update does not undo that. It goes one step only; to move
 forward again, run 'tlstore unhold <name>' and 'tlstore update <name>'.
 
-Works for items from npm, binaries, app archives and config files. A package,
+Works for items from npm, binaries, app archives, agent skills and config files. A package,
 a bundle or a fish plugin cannot go back: Termux keeps only the newest package,
 and the others have no version of their own to return to. An item installed
 before tlstore recorded versions has nothing to go back to until it updates once.
@@ -3538,8 +3687,11 @@ snapshot_channels() {
 # `cached` lines, a `check` (path known) or `probe` (path keyed by the URL's
 # digest) line per picture, demo and readme.
 snapshot_rows() {
+    sn_codex=0
+    [ ! -d "$HOME/.codex" ] || sn_codex=1
     rows | awk -F "$TAB" -v OFS="$TAB" -v state="$STATE" -v heldfile="$HELD" -v home="$HOME" \
         -v bindir="$BIN_DIR" -v libdir="$LIB_DIR" -v privdir="$PRIV_DIR" \
+        -v skillsdir="$SKILLS_DIR" -v codex="$sn_codex" \
         -v cachedir="$CACHE_DIR" -v launcher_raw="$LAUNCHER_RAW" -v binaries_raw="$BINARIES_RAW" \
         -v binaries_rel="$BINARIES_RELEASES" -v arch="$ARCH" -v ask="$WEIGH_ASK_MB" '
         function optval(list, key,   n, i, parts) {
@@ -3578,6 +3730,12 @@ snapshot_rows() {
                 if (exe == "") exe = name
                 if (target == "-" || target == "") return libdir "/" name " " bindir "/" exe
                 return expand(target) " " bindir "/" exe
+            }
+            if (kind == "skill") {
+                exe = (target == "-" || target == "") ? skillsdir "/" name : expand(target)
+                exe = exe " " home "/.claude/skills/" name
+                if (codex == 1) exe = exe " " home "/.codex/skills/" name
+                return exe
             }
             return ""
         }
@@ -4961,7 +5119,7 @@ plan_fetch() {
             continue
         fi
         case "$pf_kind" in
-            binary|archive|file|file-once) ;;
+            binary|archive|skill|file|file-once) ;;
             *) continue ;;
         esac
         load_item "$pf_n" || continue
@@ -5441,7 +5599,7 @@ cmd_rollback() {
     rb_src=$(field "$rb_row" 9)
     rb_dig=$(field "$rb_row" 10)
     case "$rb_kind" in
-        binary|archive|file|file-once)
+        binary|archive|skill|file|file-once)
             # Without the old file's address and digest there is nothing to fetch.
             if [ -z "$rb_src" ] || [ -z "$rb_dig" ]; then rb_ver=""; fi
             ;;
@@ -5457,7 +5615,7 @@ cmd_rollback() {
     if [ "$DRY_RUN" = 1 ]; then
         say "Would put $rb_name back from $rb_have to $rb_ver, and hold it there."
         case "$rb_kind" in
-            binary|archive|file|file-once) say "  from $rb_src" ;;
+            binary|archive|skill|file|file-once) say "  from $rb_src" ;;
         esac
         say "Nothing was changed."
         return 0
@@ -5466,7 +5624,7 @@ cmd_rollback() {
     ask_yn "Go ahead?" || { say "Nothing was changed."; return 0; }
     RB_VERSION="$rb_ver"
     case "$rb_kind" in
-        binary|archive|file|file-once) RB_SOURCE="$rb_src"; RB_DIGEST="$rb_dig" ;;
+        binary|archive|skill|file|file-once) RB_SOURCE="$rb_src"; RB_DIGEST="$rb_dig" ;;
         *) RB_SOURCE=""; RB_DIGEST="" ;;
     esac
     SR_CLEAR_PREV=1
