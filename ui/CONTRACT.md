@@ -52,7 +52,7 @@ trait View { name()->"front"|"item"|"installing"; draw(&mut self,p:&mut Paint,st
 Job{verb,names,current /*owner of the live row*/,pct /*whole job, never lower*/,rows: Vec<Row>,step,done,exit,cancelled}; Row{name,action,kind,by,why,
   pct,words,state: RowState::{Pending,Live,Done{ok,message}}} — data::Progress::Row from `row\tname\taction\tkind\tversion\tby\twhy` (Revision 17).
   Job::new seeds an implied row per name (dropped by the first `row` line); a `step` for an unknown name appends one (by requested|auto, kind -);
-  step: row.pct=max, Live, current=owner(row) (requested → itself; `needed by X`/`part of X` → X, up the plan; else names[0]); done: row 100.
+  step: row.pct=max, Live, current=owner(row) (requested → itself; `needed by X`/`part of X` → X, up the plan; else names[0]); done ok: row 100, failed: row stays.
   pct = max(pct, Σw·row.pct/Σw), w by kind for install (pkg 3; binary/archive/npm-* 4; fisher 2; file/file-once 1; bundle 0; other 2),
   remove/forget/absent/retire 1, skip/unavailable 0, all 0 → 1; 100 at exit when every done is ok. owner(row), live(), word_for(name).
 Store: cat (Catalog: items, updates, info(name)->&Info, loading, error), job: Option<Job>, gh, stars,

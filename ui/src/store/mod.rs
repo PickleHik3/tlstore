@@ -388,7 +388,11 @@ impl Job {
             Some(Progress::Done { name, ok, message }) => {
                 let i = self.row_index(&name);
                 let r = &mut self.rows[i];
-                r.pct = 100;
+                // A row that failed (or was cancelled) stays where it got to: the bar stops
+                // there instead of reading 100 beside "failed".
+                if ok {
+                    r.pct = 100;
+                }
                 r.state = RowState::Done { ok, message: message.clone() };
                 if ok && self.current.as_deref() == Some(&name) {
                     self.step = STEPS.len();

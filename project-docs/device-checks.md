@@ -58,7 +58,10 @@ PickleHik3/terminal-browser@6fe3538) staged beside the installed copy as `tb-tl`
    part, finished parts `ready`, 100 and the summary at the end (scratchpad/emu/02-opencode-a.mp4).
    The engine's half on pong, 2026-10-14: `install opencode --progress` in a sandbox HOME printed
    its 14 `row` lines before the first step, every row's percentages only grew, all 14 ended ok.~~
-2. ~~An item with no parts shows one line (`sigye  signature checked`) — emulator 2026-10-15.~~
+2. ~~An item with no parts shows one line (`sigye  signature checked`) — emulator 2026-10-15
+   (sigye; and kitten from the final build, one line, 100 and "kitten is ready").~~
+   A cancelled install (x) shows the bar where it stopped, not 100, beside "failed" — fixed
+   after the emulator showed 100 there; the screen is owed once more.
    An item already installed shows `already installed` on its lines and still ends at 100: not
    reachable from the store (an installed item offers remove, not install); needs an update plan
    with a part already current, or a bundle with an installed member.
@@ -86,6 +89,9 @@ PickleHik3/terminal-browser@6fe3538) staged beside the installed copy as `tb-tl`
    columns or wider is still unseen (no such pane on either device).
 8. The installed `terminal-browser` is untouched by the staged copy and still opens a page (seen
    on pong 2026-10-14 before the fork's build was staged beside it; not since).
+   ~~The release-candidate archive (0.13.4+c140fc1, x86_64) staged whole on a wiped profile:
+   mobile page, taps, swipe, desktop and back, a split from a narrow pane as a window with ls,
+   snapshot and Ctrl+Q — emulator 2026-10-15.~~
 9. With a launcher that has touch reports (branch feat/terminal-browser-launcher of the app, not
    built yet): a long page flings, a pinch zooms, a long press on a link opens its menu, the tab
    bar still takes taps, a Bluetooth mouse still clicks and scrolls.
