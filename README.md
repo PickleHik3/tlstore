@@ -1,5 +1,13 @@
 # tlstore
 
+![tlstore, the package store for Termux Launcher](docs/media/tlstore-banner.png)
+
+<p align="center">
+  <img src="docs/media/store-item.png" width="30%" alt="An item page in the store: herdr, with its picture and readme">
+  <img src="docs/media/store-installing-10.png" width="30%" alt="Installing herdr: fetched, at 10%">
+  <img src="docs/media/store-installing-60.png" width="30%" alt="Installing herdr: signature checked, at 60%">
+</p>
+
 This repository (`PickleHik3/tlstore`, renamed from termux-launcher-binaries 2026-09-24; local
 checkout at `~/Projects/termux-launcher/tlstore`) is
 the self-contained home of `tlstore`, the little package store
