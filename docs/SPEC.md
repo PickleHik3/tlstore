@@ -1165,3 +1165,65 @@ go by.
 
 Tests (`scripts/test.sh`): the `row` line precedes the first `step` of a `--progress` install, and
 a pulled-in row is announced `auto` with its reason, the named one `requested`.
+
+## Revision 18 — an agent skill is a folder of its own (tlstore 0.19)
+
+The launcher's agent skill was eight `file` rows, one per file, under `~/.claude/skills/termux-launcher/`.
+The skill now carries the user guide as `docs/`, which its `help.md` points into, and a second skill,
+`termux-launcher-speak`, sits beside it. The launcher packs each skill as one reproducible `.tar.gz`
+(`scripts/pack-agent-skills.sh`), whose only top-level entry is the skill's folder. The new kind
+`skill` installs one.
+
+| field | for a skill |
+|---|---|
+| `kind` | `skill` |
+| `version` | the launcher commit it was packed at, first eight characters |
+| `source` | `binaries:skill-<name>@<tag>`, resolved per processor as a binary's is. The tarball is the same on every processor; `build.yml` packs it in one job and publishes it as both `skill-<name>-aarch64` and `skill-<name>-x86_64` |
+| `digest` | the sha256 of the `.tar.gz`, from `SHA256SUMS`, with `x86_64:digest=` appended as for a binary; `rows()` gates a skill on it the same way |
+| `target` | `-` = `~/.agents/skills/<name>`, the directory it unpacks into |
+
+Install:
+
+1. The payload is fetched and checked in plan_apply's fetch phase, with the binary, archive and
+   file rows. A row without a digest is refused.
+2. It is unpacked into `<dir>.new` by the archive kind's own code (`unpack_new`). `<dir>.new` must
+   hold exactly one entry, a folder named like the item, or the install fails with `the <name>
+   download does not hold one <name> folder — nothing was installed`.
+3. That folder replaces `<dir>` whole (`replace_dir`, the archive kind's swap).
+4. Links: `~/.claude/skills/<name>`, and `~/.codex/skills/<name>` when `~/.codex` is there (the rule
+   terminal-browser's own skill links follow), each a symlink to `<dir>`. A symlink already at a
+   link path is replaced. A real folder there is replaced only when every file in it came from a
+   retired `file` or `file-once` row in `installed.tsv` and still matches the digest that row
+   shipped (the list's, or the one recorded at install); those rows are then forgotten, so their
+   retirement finds nothing left to do. A folder with nothing but empty folders in it counts as
+   nothing of the person's. Anything else at a link path stays: stderr says `left <path> alone`,
+   and the install succeeds without that link.
+5. `installed.tsv` records `skill`, the version, and as its files the directory and the links it
+   really made. There is no wrapper.
+
+`remove` takes each recorded link only while it is still a symlink into the directory, then the
+directory. A retired skill goes the same way. `rollback` goes back one version, as for an archive.
+
+### Moving the launcher skill over
+
+The eight `launcher-skill-*` rows are retired. The `launcher-skill` bundle, which claude-code and
+opencode require, now names the two skill rows, so a phone that has the bundle gets them on its next
+update as new parts. That update installs them before it retires the old rows, so the first skill
+install finds `~/.claude/skills/termux-launcher` as a real folder of tlstore's own files, replaces
+it with the link, and forgets those rows. When the store UI's snapshot retires the old rows first
+(`docs/maintainer/catalog.md`, "Retiring an item"), their files go where they are unchanged, and
+the folder with them; an edited file stays, and then so does the folder, with the warning above.
+The links to `~/.codex/skills` appear only when `~/.codex` is there at install or update time.
+
+### Older engines
+
+An engine older than 0.19 does not know the kind: it lists the rows (hidden parts) and refuses to
+install them with `<name> cannot be installed here`, writing nothing. As in Revisions 10, 12 and 14,
+`TLSTORE_VERSION` moves to 0.19, and the skill rows ship in the same store release as the engine,
+which update takes first (Revision 16).
+
+Tests (`scripts/test.sh`): install, the link and the codex link, the state row, a tarball with the
+wrong folder or two entries, an update that replaces the directory whole, a symlink at the link
+path, a real folder of the person's (left, warned, install succeeds), the move from the retired
+file rows (and an edited one, left), remove (and a link the person replaced), x86_64, the
+`build-catalog.sh` row, the `bins-plan.sh` job, and the dev-branch engine refusing the kind.

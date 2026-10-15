@@ -32,7 +32,7 @@ in `setup`/`featured`.
 
 ## Adding or changing an item
 
-1. **Pin the payload.** A `binary`/`archive`/`file` source is `launcher:<path>@<tag or commit>` (a
+1. **Pin the payload.** A `binary`/`archive`/`skill`/`file` source is `launcher:<path>@<tag or commit>` (a
    launcher-owned template, fetched from `PickleHik3/termux-launcher`), `binaries:<asset>@<tag>`
    (a release asset of this repository, `<asset>-aarch64` or `<asset>-x86_64` on the `bins-…`
    prerelease `<tag>`, whichever the phone's processor is),
@@ -271,6 +271,36 @@ store's: an update replaces it whole, and a change made inside it is lost. Setti
 outside it. An engine older than 0.15 lists an archive item but refuses to install it, so the first
 archive row ships in the same release as engine 0.15.
 
+## An agent skill (skill)
+
+An agent skill is a folder an agent reads: a `SKILL.md` and the files beside it. A `skill` item
+installs one (`docs/SPEC.md`, Revision 18). The launcher's two skills, `termux-launcher` and
+`termux-launcher-speak`, are the `launcher-skill` bundle that claude-code and opencode require.
+
+1. **Pack it with the skill's folder on top**, named like the item, and nothing else beside it.
+   The launcher's own `scripts/pack-agent-skills.sh` does this, reproducibly, and
+   `recipes/cross/fetch-launcher-skills.sh` runs it at a pinned launcher commit.
+2. **Publish it** with `gh workflow run build.yml -f tools=launcher-skills`. A skill is the same on
+   every processor, so that is one job, and each tarball is published twice under the one tag,
+   `skill-<name>-aarch64` and `skill-<name>-x86_64`, byte for byte the same.
+3. **Write the row**: kind `skill`; version the launcher commit's first eight characters; source
+   `binaries:skill-<name>@<tag>`; target `-`, which is `~/.agents/skills/<name>`; no options but
+   `hidden=1` for a part. `build-catalog.sh` fills the digest and `x86_64:digest` as for a binary.
+   A new row can carry the tag `bins-pending` until the build runs: `bins-record.sh` moves it to
+   the real tag, and `build-catalog.sh` stops on it until then.
+
+To move the launcher skills on: put the new commit in `fetch-launcher-skills.sh`, set both rows'
+version to its first eight characters, run the build, and cut a store release.
+
+tlstore unpacks the tarball beside the directory, checks that its one top-level entry is the
+item's folder, swaps the directory in whole, then links `~/.claude/skills/<name>` to it, and
+`~/.codex/skills/<name>` too while `~/.codex` is there. A symlink already at a link path is
+replaced. A real folder there is replaced only when every file in it came from a retired `file`
+row of the store and is unchanged; anything else is the person's, so it stays, stderr says so,
+and the install still succeeds without that link. `remove` deletes the directory and the links
+that still point into it. An engine older than 0.19 lists a skill item but refuses to install it,
+so the first skill row ships in the same release as engine 0.19.
+
 ## Items that pull in large Termux packages
 
 An item whose Termux packages are large says so before it is installed (`docs/SPEC.md`,
@@ -403,7 +433,8 @@ file/file-once/binary item only when the file on disk still matches the digest t
 an edited copy is left in place and the item is simply forgotten, never overwritten or deleted.
 Anything else (a `pkg`, `bundle` or `fisher` item) just stops being tracked, the way `remove`
 already leaves the underlying package installed. An `archive` is removed as `remove` removes it,
-directory and wrapper: the directory is the store's, with no edit of yours in it to keep. Once every phone has had a chance to update, the
+directory and wrapper: the directory is the store's, with no edit of yours in it to keep. A
+`skill` goes the same way: its directory, and the links that still point into it. Once every phone has had a chance to update, the
 row can be deleted for good (see "Removing an item" above).
 
 ## Release cut
