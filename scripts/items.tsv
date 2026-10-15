@@ -174,8 +174,8 @@ launcher-skill-copy	file	b3d9334e	*	launcher:resources/agent-skills/termux-launc
 # tools=launcher-skills` publishes the tarballs, and its bins-record.sh moves both rows to the new
 # tag. The launcher-skill-* file rows above are the skill's loose files from before; a skill install
 # replaces them (docs/SPEC.md, Revision 18).
-termux-launcher	skill	09cd3773	*	binaries:skill-termux-launcher@bins-pending	-	-	hidden=1	The agent skill for Termux Launcher: its panes, signals, display and user guide.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
-termux-launcher-speak	skill	09cd3773	*	binaries:skill-termux-launcher-speak@bins-pending	-	-	hidden=1	The agent skill that speaks an agent's answers aloud on the phone.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
+termux-launcher	skill	09cd3773	*	binaries:skill-termux-launcher@bins-2026.10.15	-	-	hidden=1	The agent skill for Termux Launcher: its panes, signals, display and user guide.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
+termux-launcher-speak	skill	09cd3773	*	binaries:skill-termux-launcher-speak@bins-2026.10.15	-	-	hidden=1	The agent skill that speaks an agent's answers aloud on the phone.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
 launcher-skill	bundle	-	*	-	-	termux-launcher,termux-launcher-speak	hidden=1	What agents need to use Termux Launcher's panes, signals, display and guide, and to speak.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
 claude-panes-skill	file-once	aea80bf2	*	launcher:resources/agent-skills/termux-launcher-panes/SKILL.md@aea80bf215a6a44951154d9b600abddca56c8c49	~/.claude/skills/termux-launcher-panes/SKILL.md	-	hidden=1;retired=1	Teaches Claude Code the launcher's pane commands.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
 termux-api-shim-battery-status	file	98bac296	*	binaries:shims/termux-api/termux-battery-status@98bac2968cba00166609dee25d4e2665b21a38db	~/.local/bin/termux-battery-status	-	hidden=1;mode=755;host=launcher;conflicts=termux-api	The termux-battery-status command.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
