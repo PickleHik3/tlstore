@@ -2,7 +2,7 @@ Kind	bundle
 Version	-
 From	-
 Checksum	-
-Needs	fish,config-fish,personal-fish,oh-my-posh,eza,zoxide,fisher,fish-plugins
+Needs	fish,config-fish,personal-fish,fish-prompt,eza,zoxide,fisher,fish-plugins
 Files	-
 Installed	-
 Summary	The fish shell with the launcher's setup: the wallpaper prompt, a nicer ls and quicker directory jumping.
