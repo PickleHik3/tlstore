@@ -10,6 +10,7 @@
 # than read from upstream so it is pinned by digest beside the others and reaches x86_64 too.
 set -euo pipefail
 
+# scripts/upstream-watch.sh moves the pins below to upstream's latest release; keep their shape.
 HERDR_VERSION=${HERDR_VERSION:-v0.9.3}
 TL_ARCH=${TL_ARCH:-aarch64}
 # Each processor's asset, pinned by digest. A new version is downloaded once from
