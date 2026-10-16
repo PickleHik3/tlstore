@@ -140,6 +140,9 @@ check() {
         if ! tag="$(latest_tag "$upstream" 2>/dev/null)" || [ -z "$tag" ]; then
             tag="-"; status=error
         elif ! is_version "$tag"; then
+            # Printed for a human only, and never followed: kept to characters that are safe in
+            # the workflow's outputs and in the issue's table.
+            tag="$(printf '%s' "$tag" | tr -cd 'A-Za-z0-9._+-' | cut -c1-40)"
             status=error
         else
             theirs="${tag#v}"

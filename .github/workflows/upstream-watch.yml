@@ -1,0 +1,444 @@
+# Keeps the catalog's upstream-pinned items on their upstream's latest stable release, with no
+# human step: once a day it checks every item scripts/upstream-watch.sh lists (herdr, btop,
+# fastfetch, kitten, sigye, fisher), moves each one that is behind, builds it with build.yml and,
+# when at least one bump landed, cuts a store release with release.yml, so phones get it on their
+# next `tlstore update`. All upstream tracking lives here; adding an item is a line in the script.
+#
+#   check    scripts/upstream-watch.sh --check against every upstream (releases/latest: never a
+#            prerelease or a draft). Each item that is behind is bumped (--bump <item> <tag>: the
+#            recipe's pin and the items.tsv version, verified first) as its own commit on the
+#            branch upstream-watch/trial, cut from main. A bump that cannot verify what it pins
+#            fails here, alone. An item whose bump failed at the same upstream tag within the
+#            last week (the issue below remembers it) is not tried again until upstream moves on,
+#            the week is out, or a manual run asks for retry
+#   trial    build.yml, called with that branch's commit and trial: true — every bumped tool built
+#            on every processor and uploaded as trial-… artifacts, nothing published. fail-fast
+#            is off there, so one tool's broken patch does not stop the others
+#   verdict  a bump passed when every asset bins-plan.sh names for its tool came out of the trial
+#            (fisher, a url item, has nothing to build: its bump checked that the URL answers).
+#            The passing bumps are made again, at the same tags, on a fresh main as the branch
+#            upstream-watch/land; a failed one is simply left out
+#   build    build.yml, called with that branch's commit: it builds the passing tools again from
+#            exactly what will land, publishes the bins-… release, and its publish job rebases the
+#            land commits onto main and pushes them together with scripts/bins-record.sh's record,
+#            in the `release` concurrency lane. A bump never reaches main without its binary, and
+#            a build that fails here lands nothing (it is tried again on the next run)
+#   land     when only url items passed (nothing to build), pushes the land branch to main itself,
+#            in the same lane
+#   release  release.yml, called once something landed in this run, or when main already carries
+#            a watched item's built and recorded version that the last store release does not
+#            (a run whose release failed): it checks out the fresh main, tests, signs (the
+#            repository's secrets, passed on), commits dist/, tags and publishes the release
+#            phones read
+#   report   rewrites one issue, "Upstream watch": per item ours, theirs, status and the run, and
+#            in hidden lines the bumps that failed (what check reads back). The issue is created
+#            the first time there is something to say, closed while every item is current and
+#            reopened when one is not. The two branches are deleted
+#
+# Nothing new upstream means a few API calls and an edit of the issue: no build, no release.
+# A manual run (Actions tab, or `gh workflow run upstream-watch.yml`) can ask for retry (try the
+# remembered failures again) or dry_run (check and trial-build, land and release nothing).
+#
+# Needs: the TLSTORE_SIGNING_KEY secrets release.yml already uses. The token's permissions are
+# declared per job below, so no repository setting has to widen them. GitHub turns a schedule off
+# in a repository that has seen no activity for 60 days; the Actions tab turns it back on.
+name: upstream-watch
+
+on:
+  schedule:
+    - cron: "41 4 * * *"
+  workflow_dispatch:
+    inputs:
+      retry:
+        description: "Try again the bumps that failed at the same upstream version this week"
+        type: boolean
+        default: false
+      dry_run:
+        description: "Check and trial-build only: land nothing, release nothing"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-watch
+  cancel-in-progress: false
+
+env:
+  ISSUE_TITLE: Upstream watch
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      issues: read
+    outputs:
+      table: ${{ steps.check.outputs.table }}
+      owed: ${{ steps.check.outputs.owed }}
+      bumped: ${{ steps.bump.outputs.bumped }}
+      failed: ${{ steps.bump.outputs.failed }}
+      tools: ${{ steps.bump.outputs.tools }}
+      ref: ${{ steps.bump.outputs.ref }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+
+      # One tab-separated line per item: item ours theirs tag status released owed tool.
+      - name: Check
+        id: check
+        run: |
+          scripts/upstream-watch.sh --check --tsv > "$RUNNER_TEMP/check.tsv"
+          column -t -s "$(printf '\t')" "$RUNNER_TEMP/check.tsv"
+          {
+            echo "table<<EOF_TABLE"
+            grep -v '^#' "$RUNNER_TEMP/check.tsv"
+            echo "EOF_TABLE"
+            echo "owed=$(awk -F '\t' '!/^#/ && $7 == "yes" { print $1 }' "$RUNNER_TEMP/check.tsv" | paste -sd, -)"
+          } >> "$GITHUB_OUTPUT"
+
+      # Bumps that failed before, as the issue's hidden lines remember them: item tag date run-url.
+      - name: Known failures
+        run: |
+          num="$(gh issue list --repo "$GITHUB_REPOSITORY" --state all --search "in:title \"$ISSUE_TITLE\"" \
+            --json number,title --jq "[.[] | select(.title == \"$ISSUE_TITLE\")][0].number // empty")" || num=""
+          : > "$RUNNER_TEMP/known"
+          if [ -n "$num" ]; then
+            gh issue view "$num" --repo "$GITHUB_REPOSITORY" --json body --jq .body |
+              sed -n 's/^<!-- failed \(.*\) -->\r\{0,1\}$/\1/p' > "$RUNNER_TEMP/known" || true
+          fi
+          cat "$RUNNER_TEMP/known"
+
+      - name: Bump on a trial branch
+        id: bump
+        env:
+          RETRY: ${{ inputs.retry }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          : > "$RUNNER_TEMP/bumped"
+          : > "$RUNNER_TEMP/failed"
+          tools=""
+          while IFS="$(printf '\t')" read -r item ours theirs tag status released owed tool; do
+            case "$item" in '#'* | '') continue ;; esac
+            [ "$status" = behind ] || continue
+            # A failure is retried a week later (a flaky build should not stall an item until
+            # upstream moves on), or at once by a manual run with retry.
+            if [ "$RETRY" != true ] && awk -v i="$item" -v t="$tag" -v since="$(date -u -d '7 days ago' +%F)" \
+              '$1 == i && $2 == t && $3 > since { f = 1 } END { exit !f }' "$RUNNER_TEMP/known"; then
+              echo "$item $tag: failed this week at this tag, not tried again"
+              continue
+            fi
+            if scripts/upstream-watch.sh --bump "$item" "$tag" 2> "$RUNNER_TEMP/err"; then
+              git commit -q -am "chore(items): $item $ours -> $theirs, upstream's latest release" \
+                -m "By .github/workflows/upstream-watch.yml, $RUN_URL"
+              echo "$item $tag" >> "$RUNNER_TEMP/bumped"
+              [ "$tool" = - ] || tools="$tools,$tool"
+            else
+              cat "$RUNNER_TEMP/err" >&2
+              git checkout -q -- .
+              echo "$item $tag bump failed: $(tail -1 "$RUNNER_TEMP/err" | sed 's/^upstream-watch: [^:]*: //' | tr -d '|`')" >> "$RUNNER_TEMP/failed"
+            fi
+          done < "$RUNNER_TEMP/check.tsv"
+          tools="${tools#,}"
+          ref=""
+          if [ -n "$tools" ]; then
+            git push -q -f origin HEAD:refs/heads/upstream-watch/trial
+            ref="$(git rev-parse HEAD)"
+          fi
+          {
+            echo "tools=$tools"
+            echo "ref=$ref"
+            echo "bumped<<EOF_BUMPED"
+            cat "$RUNNER_TEMP/bumped"
+            echo "EOF_BUMPED"
+            echo "failed<<EOF_FAILED"
+            cat "$RUNNER_TEMP/failed"
+            echo "EOF_FAILED"
+          } >> "$GITHUB_OUTPUT"
+          git log --oneline origin/main..HEAD
+
+  trial:
+    needs: check
+    if: needs.check.outputs.tools != ''
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build.yml
+    with:
+      tools: ${{ needs.check.outputs.tools }}
+      ref: ${{ needs.check.outputs.ref }}
+      trial: true
+
+  verdict:
+    needs: [check, trial]
+    if: ${{ !cancelled() && needs.check.result == 'success' && needs.check.outputs.bumped != '' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
+    outputs:
+      passed: ${{ steps.verdict.outputs.passed }}
+      failed: ${{ steps.verdict.outputs.failed }}
+      landed: ${{ steps.land.outputs.landed }}
+      tools: ${{ steps.land.outputs.tools }}
+      ref: ${{ steps.land.outputs.ref }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TABLE: ${{ needs.check.outputs.table }}
+      BUMPED: ${{ needs.check.outputs.bumped }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+
+      # A built item passed when every one of its trial-<tool>-<edition>-<arch> artifacts exists:
+      # build.yml uploads one only after that job's build succeeded.
+      - name: Which bumps built
+        id: verdict
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" --paginate \
+            --jq '.artifacts[].name' > "$RUNNER_TEMP/artifacts"
+          : > "$RUNNER_TEMP/passed"
+          : > "$RUNNER_TEMP/failed"
+          while read -r item tag; do
+            [ -n "$item" ] || continue
+            tool="$(printf '%s\n' "$TABLE" | awk -F '\t' -v i="$item" '$1 == i { print $8 }')"
+            missing=""
+            if [ "$tool" != - ]; then
+              for name in $(scripts/bins-plan.sh "$tool" | jq -r '.include[] | "trial-\(.tool)-\(.edition)-\(.arch)"'); do
+                grep -qxF "$name" "$RUNNER_TEMP/artifacts" || missing="$missing ${name#trial-}"
+              done
+            fi
+            if [ -z "$missing" ]; then
+              echo "$item $tag" >> "$RUNNER_TEMP/passed"
+            else
+              echo "$item $tag trial build failed:$missing" >> "$RUNNER_TEMP/failed"
+            fi
+          done <<< "$BUMPED"
+          cat "$RUNNER_TEMP/passed" "$RUNNER_TEMP/failed"
+          {
+            echo "passed<<EOF_PASSED"
+            cat "$RUNNER_TEMP/passed"
+            echo "EOF_PASSED"
+            echo "failed<<EOF_FAILED"
+            cat "$RUNNER_TEMP/failed"
+            echo "EOF_FAILED"
+          } >> "$GITHUB_OUTPUT"
+
+      # The passing bumps again, at the same tags, on the main of now; build or land takes it to
+      # main. A bump that main already carries adds no commit.
+      - name: Land branch
+        id: land
+        if: ${{ !inputs.dry_run }}
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          : > "$RUNNER_TEMP/landed"
+          tools=""
+          while read -r item tag; do
+            [ -n "$item" ] || continue
+            ours="$(printf '%s\n' "$TABLE" | awk -F '\t' -v i="$item" '$1 == i { print $2 }')"
+            tool="$(printf '%s\n' "$TABLE" | awk -F '\t' -v i="$item" '$1 == i { print $8 }')"
+            if ! scripts/upstream-watch.sh --bump "$item" "$tag"; then
+              git checkout -q -- .
+              continue
+            fi
+            git diff --quiet && continue
+            git commit -q -am "chore(items): $item $ours -> ${tag#v}, upstream's latest release" \
+              -m "By .github/workflows/upstream-watch.yml after its trial build passed, $RUN_URL"
+            echo "$item $tag" >> "$RUNNER_TEMP/landed"
+            [ "$tool" = - ] || tools="$tools,$tool"
+          done < "$RUNNER_TEMP/passed"
+          tools="${tools#,}"
+          ref=""
+          if [ -s "$RUNNER_TEMP/landed" ]; then
+            git push -q -f origin HEAD:refs/heads/upstream-watch/land
+            ref="$(git rev-parse HEAD)"
+          fi
+          git log --oneline origin/main..HEAD
+          {
+            echo "tools=$tools"
+            echo "ref=$ref"
+            echo "landed<<EOF_LANDED"
+            cat "$RUNNER_TEMP/landed"
+            echo "EOF_LANDED"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: verdict
+    if: ${{ !cancelled() && needs.verdict.result == 'success' && needs.verdict.outputs.tools != '' }}
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build.yml
+    with:
+      tools: ${{ needs.verdict.outputs.tools }}
+      ref: ${{ needs.verdict.outputs.ref }}
+
+  land:
+    needs: verdict
+    if: ${{ !cancelled() && needs.verdict.result == 'success' && needs.verdict.outputs.ref != '' && needs.verdict.outputs.tools == '' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    # The lane build.yml's publish and release.yml share, so nothing races on main.
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.verdict.outputs.ref }}
+      - name: Push to main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          ok=0
+          for attempt in 1 2 3; do
+            if git fetch -q origin main && git rebase FETCH_HEAD && git push origin HEAD:main; then ok=1; break; fi
+            git rebase --abort 2>/dev/null || true
+            sleep 10
+          done
+          [ "$ok" = 1 ] || { echo "::error::could not push the bumps to main"; exit 1; }
+
+  release:
+    needs: [check, verdict, build, land]
+    if: >-
+      ${{ !cancelled() && needs.check.result == 'success' && !inputs.dry_run &&
+      (needs.build.result == 'success' || needs.land.result == 'success' || needs.check.outputs.owed != '') }}
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+    secrets: inherit
+    with:
+      publish: true
+
+  report:
+    needs: [check, trial, verdict, build, land, release]
+    if: always()
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      WATCH_URL: ${{ github.server_url }}/${{ github.repository }}/blob/main/.github/workflows/upstream-watch.yml
+      CHECK_RESULT: ${{ needs.check.result }}
+      TABLE: ${{ needs.check.outputs.table }}
+      BUMP_FAILED: ${{ needs.check.outputs.failed }}
+      BUMPED: ${{ needs.check.outputs.bumped }}
+      PASSED: ${{ needs.verdict.outputs.passed }}
+      TRIAL_FAILED: ${{ needs.verdict.outputs.failed }}
+      LANDED: ${{ needs.verdict.outputs.landed }}
+      BUILD_RESULT: ${{ needs.build.result }}
+      BUILD_TAG: ${{ needs.build.outputs.tag }}
+      LAND_RESULT: ${{ needs.land.result }}
+      RELEASE_RESULT: ${{ needs.release.result }}
+      RELEASE_TAG: ${{ needs.release.outputs.tag }}
+      DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - name: Rewrite the issue
+        run: |
+          num="$(gh issue list --repo "$GITHUB_REPOSITORY" --state all --search "in:title \"$ISSUE_TITLE\"" \
+            --json number,title --jq "[.[] | select(.title == \"$ISSUE_TITLE\")][0].number // empty")" || num=""
+          known=""
+          [ -z "$num" ] || known="$(gh issue view "$num" --repo "$GITHUB_REPOSITORY" --json body --jq .body |
+            sed -n 's/^<!-- failed \(.*\) -->\r\{0,1\}$/\1/p')"
+          # The rest of a "item tag rest" line for this item and tag, or nothing (exit 1).
+          lookup() {
+            printf '%s\n' "$1" | awk -v i="$2" -v t="$3" '
+              $1 == i && $2 == t { $1 = ""; $2 = ""; sub(/^ +/, ""); print; f = 1; exit }
+              END { exit !f }'
+          }
+          run="[run]($RUN_URL)"
+          today="$(date -u +%F)"
+          open=0
+          : > hidden
+          {
+            echo "The catalog's upstream-pinned items against their upstream's latest stable release, kept by"
+            echo "[upstream-watch.yml]($WATCH_URL). Rewritten on every run; closed while every item is current."
+            echo
+            echo "Last run: $(date -u '+%Y-%m-%d %H:%M') UTC, $run."
+            echo
+          } > body.md
+          if [ "$CHECK_RESULT" != success ]; then
+            open=1
+            echo "**The check itself failed**: see the run. Earlier failures stay remembered." >> body.md
+            printf '%s\n' "$known" | sed '/^$/d; s/^/<!-- failed /; s/$/ -->/' > hidden
+          else
+            echo "| item | ours | theirs | status | run |" >> body.md
+            echo "|---|---|---|---|---|" >> body.md
+            while IFS="$(printf '\t')" read -r item ours theirs tag status released owed tool; do
+              [ -n "$item" ] || continue
+              link="$run"
+              st=""
+              bad=0
+              case "$status" in
+                current) st="current" ;;
+                ahead) st="ours is later than upstream's latest release" ;;
+                mismatch) st="**mismatch**: the recipe and items.tsv disagree; settle it by hand"; bad=1 ;;
+                error) st="**error**: upstream's latest release is unreadable or not a version ($tag)"; bad=1 ;;
+                behind)
+                  bad=1
+                  if why="$(lookup "$BUMP_FAILED" "$item" "$tag")"; then
+                    st="**$why**"; echo "<!-- failed $item $tag $today $RUN_URL -->" >> hidden
+                  elif ! lookup "$BUMPED" "$item" "$tag" >/dev/null && was="$(lookup "$known" "$item" "$tag")"; then
+                    st="**failed on ${was%% *}**; tried again a week after, or now by a manual run with retry"
+                    link="[run](${was#* })"; echo "<!-- failed $item $tag $was -->" >> hidden
+                  elif why="$(lookup "$TRIAL_FAILED" "$item" "$tag")"; then
+                    st="**$why**"; echo "<!-- failed $item $tag $today $RUN_URL -->" >> hidden
+                  elif lookup "$LANDED" "$item" "$tag" >/dev/null; then
+                    if [ "$tool" = - ]; then res="$LAND_RESULT"; what="landed on main"
+                    else res="$BUILD_RESULT"; what="built in $BUILD_TAG"; fi
+                    if [ "$res" != success ]; then
+                      st="**trial passed, but the build that lands it did not** ($res); tried again next run"
+                    elif [ "$RELEASE_RESULT" = success ]; then
+                      st="$what, released in $RELEASE_TAG"; bad=0
+                    else
+                      st="$what; **the release did not finish** ($RELEASE_RESULT), so the next run releases it"
+                    fi
+                  elif lookup "$PASSED" "$item" "$tag" >/dev/null; then
+                    if [ "$DRY_RUN" = true ]; then st="trial build passed (dry run: not landed)"
+                    else st="**trial passed, but it did not land** (see the run)"; fi
+                  else
+                    st="**behind, not finished** (see the run)"
+                  fi
+                  ;;
+              esac
+              case "$owed" in
+                yes)
+                  if [ "$RELEASE_RESULT" = success ]; then st="$st; $ours released in $RELEASE_TAG"
+                  else st="$st; **$ours is built but not released yet**"; bad=1; fi
+                  ;;
+                unbuilt) st="$st; **$ours on main has no build yet** (run build.yml for it)"; bad=1 ;;
+              esac
+              [ "$bad" = 0 ] || open=1
+              echo "| $item | $ours | $theirs | $st | $link |" >> body.md
+            done <<< "$TABLE"
+          fi
+          cat hidden >> body.md
+          cat body.md >> "$GITHUB_STEP_SUMMARY"
+          cat body.md
+          if [ -z "$num" ]; then
+            [ "$open" = 0 ] || gh issue create --repo "$GITHUB_REPOSITORY" --title "$ISSUE_TITLE" --body-file body.md
+          else
+            gh issue edit "$num" --repo "$GITHUB_REPOSITORY" --body-file body.md
+            state="$(gh issue view "$num" --repo "$GITHUB_REPOSITORY" --json state --jq .state)"
+            if [ "$open" = 1 ] && [ "$state" = CLOSED ]; then gh issue reopen "$num" --repo "$GITHUB_REPOSITORY"; fi
+            if [ "$open" = 0 ] && [ "$state" = OPEN ]; then gh issue close "$num" --repo "$GITHUB_REPOSITORY"; fi
+          fi
+
+      - name: Delete the trial and land branches
+        if: always()
+        run: |
+          for branch in upstream-watch/trial upstream-watch/land; do
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$branch" >/dev/null 2>&1 || true
+          done
