@@ -8,7 +8,9 @@
 set -euo pipefail
 
 FASTFETCH_URL="https://github.com/fastfetch-cli/fastfetch.git"
+# scripts/upstream-watch.sh moves the pins below to upstream's latest release; keep their shape.
 FASTFETCH_COMMIT="9c7cfb864ff9154ffe951fae191c14d60bb91544"   # v2.67.0
+FASTFETCH_VERSION="2.67.0"
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PATCH="$SCRIPT_DIR/../termux/fastfetch/0001-kitty-animation.patch"
 PWD_POLYFILL="$SCRIPT_DIR/termux-pwd-polyfill.h"
@@ -33,7 +35,7 @@ mkdir -p "$TL_OUT" "$TL_BUILD_DIR"
 source_dir="$TL_BUILD_DIR/source"
 
 if [ ! -d "$source_dir/.git" ]; then
-    echo "Fetching Fastfetch v2.67.0 ($FASTFETCH_COMMIT)..."
+    echo "Fetching Fastfetch v$FASTFETCH_VERSION ($FASTFETCH_COMMIT)..."
     git init -q "$source_dir"
     git -C "$source_dir" remote add origin "$FASTFETCH_URL"
     git -C "$source_dir" fetch -q --depth 1 origin "$FASTFETCH_COMMIT"

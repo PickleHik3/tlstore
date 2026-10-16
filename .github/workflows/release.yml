@@ -21,6 +21,12 @@
 #   TLSTORE_SIGNING_KEY_PASSWORD  its password
 # Anyone who can run this workflow can publish a catalog phones will trust, so
 # keep write access to this repository to yourself.
+#
+# It is also a reusable workflow (workflow_call) with the same two inputs, which
+# is how upstream-watch.yml cuts a release after it built something new; the
+# caller passes the signing secrets on (`secrets: inherit`), and the output
+# `tag` is the release it made. It still checks out main, so it releases what
+# the caller's build just pushed there.
 name: release
 
 on:
@@ -34,6 +40,27 @@ on:
         description: "Commit, tag and push (off: a dry run that stops after signing)"
         type: boolean
         default: true
+  workflow_call:
+    inputs:
+      tag:
+        description: "Release tag (empty: today's date, with -2, -3… if taken)"
+        type: string
+        required: false
+        default: ""
+      publish:
+        description: "Commit, tag and push (off: a dry run that stops after signing)"
+        type: boolean
+        required: false
+        default: true
+    secrets:
+      TLSTORE_SIGNING_KEY:
+        required: true
+      TLSTORE_SIGNING_KEY_PASSWORD:
+        required: false
+    outputs:
+      tag:
+        description: "The release tag"
+        value: ${{ jobs.release.outputs.tag }}
 
 permissions:
   contents: write
@@ -45,6 +72,8 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
     env:
       NDK_VERSION: "29.0.14206865"
     steps:

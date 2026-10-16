@@ -9,7 +9,9 @@
 set -euo pipefail
 
 SIGYE_URL="https://github.com/am2rican5/sigye.git"
+# scripts/upstream-watch.sh moves the pins below to upstream's latest release; keep their shape.
 SIGYE_COMMIT="0f0b8caaccb4ca01ab5d1fad1237c4a01a49766f"   # v0.6.0
+SIGYE_VERSION="0.6.0"
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PATCH="$SCRIPT_DIR/../termux/sigye/0001-termux-clipboard.patch"
 
@@ -36,7 +38,7 @@ mkdir -p "$TL_OUT" "$TL_BUILD_DIR"
 source_dir="$TL_BUILD_DIR/source"
 
 if [ ! -d "$source_dir/.git" ]; then
-    echo "Fetching Sigye v0.6.0 ($SIGYE_COMMIT)..."
+    echo "Fetching Sigye v$SIGYE_VERSION ($SIGYE_COMMIT)..."
     git init -q "$source_dir"
     git -C "$source_dir" remote add origin "$SIGYE_URL"
     git -C "$source_dir" fetch -q --depth 1 origin "$SIGYE_COMMIT"

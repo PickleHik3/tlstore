@@ -23,6 +23,16 @@
 # summary, any other item whose bytes changed but whose version did not — bump those by hand
 # (docs/maintainer/catalog.md, "Rebuilding a binary"). A store release (release.yml) is what
 # puts the new tag and digests into a signed catalog.
+#
+# It is also a reusable workflow (workflow_call), which is how upstream-watch.yml runs it. Called,
+# it takes two inputs more than the dispatch form:
+#   ref      the commit to build instead of the caller's; publish then checks it out rather than
+#            main, so its own commits (the watch's version bumps) are rebased onto main and land in
+#            the same push as the record: a bump reaches main only together with its binary
+#   trial    build and upload, publish nothing: the artifacts are named trial-… instead of bins-…,
+#            so a trial and a real build can share one run, and the caller tells which tools built
+#            by the artifacts present
+# and it returns the bins-… tag it published as the output `tag`.
 name: build
 
 on:
@@ -32,6 +42,27 @@ on:
         description: "Tools to build: all, or a comma list of btop, tl-priv, kitten, sigye, herdr, terminal-browser, fastfetch, dawn, musl-loader, musl-runtime, launcher-skills"
         required: false
         default: "all"
+  workflow_call:
+    inputs:
+      tools:
+        description: "Tools to build: all, or a comma list (as for workflow_dispatch)"
+        type: string
+        required: false
+        default: "all"
+      ref:
+        description: "Commit to build, landed on main with the record (empty: the caller's commit, recorded on main)"
+        type: string
+        required: false
+        default: ""
+      trial:
+        description: "Build only: artifacts named trial-…, no release, nothing recorded"
+        type: boolean
+        required: false
+        default: false
+    outputs:
+      tag:
+        description: "The bins-… tag published (empty for a trial)"
+        value: ${{ jobs.publish.outputs.tag }}
 
 permissions:
   contents: write
@@ -41,12 +72,18 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
+      sha: ${{ steps.plan.outputs.sha }}
     steps:
+      # An empty ref (the dispatch form) is the commit the run was started on.
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.ref }}
+      # Every build job checks out this one commit, so a ref that moves mid-run cannot mix sources.
       - id: plan
         run: |
           matrix="$(scripts/bins-plan.sh "${{ inputs.tools }}")"
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "$matrix"
 
   build:
@@ -59,6 +96,8 @@ jobs:
       NDK_VERSION: "29.0.14206865"
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
 
       - name: Tools
         run: |
@@ -142,26 +181,31 @@ jobs:
             recipes/cross/build-asset.sh "${{ matrix.tool }}" "${{ matrix.edition }}"
 
       # Everything the job put in assets/: its own build, or, for a tool built once for every
-      # processor (arch "any", launcher-skills), the same file under each processor's name.
+      # processor (arch "any", launcher-skills), the same file under each processor's name. A
+      # trial's artifacts are named trial-…, outside publish's bins-* pattern.
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: bins-${{ matrix.tool }}-${{ matrix.edition }}-${{ matrix.arch }}
+          name: ${{ inputs.trial && 'trial' || 'bins' }}-${{ matrix.tool }}-${{ matrix.edition }}-${{ matrix.arch }}
           path: assets/*
           if-no-files-found: error
           retention-days: 7
 
   publish:
-    needs: build
+    needs: [plan, build]
+    if: ${{ !inputs.trial }}
     runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
     # Shares the store release's lane, so the two never race on SHA256SUMS or on pushing main.
     concurrency:
       group: release
       cancel-in-progress: false
     steps:
+      # main, or the called form's ref, whose commits then reach main with the record commit.
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
-          ref: main
+          ref: ${{ inputs.ref || 'main' }}
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -184,11 +228,12 @@ jobs:
       - name: Release
         env:
           GH_TOKEN: ${{ github.token }}
+          BUILT: ${{ needs.plan.outputs.sha }}
         run: |
           tag="${{ steps.tag.outputs.tag }}"
           (cd assets && sha256sum -- *-aarch64 *-x86_64 > SHA256SUMS)
           {
-            echo "Binaries for the tlstore catalog, built by \`.github/workflows/build.yml\` from \`recipes/cross\` at ${GITHUB_SHA} (tools: ${{ inputs.tools }})."
+            echo "Binaries for the tlstore catalog, built by \`.github/workflows/build.yml\` from \`recipes/cross\` at ${BUILT} (tools: ${{ inputs.tools }})."
             echo
             echo "Not a store release — \`tlstore\` installs these by the digest its signed catalog pins; the signed script, catalog and store UI are on the latest non-prerelease. To reproduce a file, run \`TL_ARCH=<arch> recipes/cross/build-asset.sh <tool> [edition]\` at that commit."
             echo
@@ -196,7 +241,7 @@ jobs:
             cat assets/SHA256SUMS
             echo '```'
           } > notes.md
-          gh release create "$tag" --prerelease --target "$GITHUB_SHA" \
+          gh release create "$tag" --prerelease --target "$BUILT" \
             --title "Binaries $tag" --notes-file notes.md \
             assets/*-aarch64 assets/*-x86_64 assets/SHA256SUMS
 
@@ -212,8 +257,10 @@ jobs:
           git commit -m "Build $tag: ${{ inputs.tools }} as release assets" \
             -m "$(cat record.out)"
           ok=0
+          # fetch and rebase rather than pull: the called form's ref is checked out detached.
           for attempt in 1 2 3; do
-            if git pull --rebase origin main && git push origin HEAD:main; then ok=1; break; fi
+            if git fetch -q origin main && git rebase FETCH_HEAD && git push origin HEAD:main; then ok=1; break; fi
+            git rebase --abort 2>/dev/null || true
             sleep 10
           done
           if [ "$ok" != 1 ]; then
