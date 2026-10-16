@@ -157,6 +157,8 @@ whichever launcher APK installed the store — and the launcher's `app/tlstore.l
 what a fresh install starts from. The `bins-…` releases are prereleases, so `releases/latest`
 never points at one.
 
+For the items "Upstream watch" below covers, a daily workflow runs both on its own.
+
 A first release from a bare repository is `build.yml` with `tools=all` (every `items.tsv` row
 then names a `bins-…` tag), then `release.yml`. Both need the secrets below; `build.yml` needs only
 the workflow's own token. `ci.yml` runs `scripts/test.sh` and the UI crate's `cargo test` on
@@ -225,6 +227,49 @@ To add a tool: write its `recipes/cross/build-<tool>.sh`, add it to the table in
 scripts' behaviour on fixtures; the recipe itself is exercised only by the workflow. The recipe
 reads the processor from what `build-asset.sh` derives (`TL_ARCH`, `TL_TRIPLE`, `TL_ANDROID_ABI`,
 `TL_GOARCH`, `TL_TERMUX_ARCH`, `TL_ALPINE_ARCH`), never from a literal, so it builds for both.
+
+## Upstream watch
+
+herdr, btop, fastfetch, kitten, sigye and fisher follow their upstream's latest stable release
+with no hand on them: `.github/workflows/upstream-watch.yml` runs once a day and, for each item
+that is behind, moves its pin, builds it, and cuts a store release when at least one bump made it
+through. Which items, which upstream and which lines a bump rewrites live in one table at the top of
+`scripts/upstream-watch.sh`; it runs the same on a laptop:
+
+```sh
+scripts/upstream-watch.sh --check            # ours against theirs, writes nothing
+scripts/upstream-watch.sh --bump herdr       # pin herdr to upstream's latest, recipe and items.tsv
+```
+
+"Latest stable" is GitHub's `releases/latest`: never a prerelease (herdr's "Preview build"s) or a
+draft. A bump moves the recipe's pin (the tag's commit, a tag, or for herdr the version and both
+assets' digests, which must match the sha256 GitHub publishes for them) and the version column of
+every `items.tsv` row of the item; the bins tag and `SHA256SUMS` stay `build.yml`'s to move. So
+the plain upstream versions in "Rebuilding a binary" above are moved for these items by the bump
+itself, and `bins-record.sh`'s "bump it by hand" note on the run that lands one can be ignored.
+
+One run, in the order the jobs go:
+
+1. **check** — every behind item is bumped as its own commit on the branch `upstream-watch/trial`.
+   A bump that cannot verify what it pins fails there, alone.
+2. **trial** — `build.yml`, called with `trial: true`, builds every bumped tool and publishes
+   nothing. An item passes when every asset `bins-plan.sh` names for it built.
+3. **verdict / build** — the passing bumps are made again on the main of now
+   (`upstream-watch/land`) and `build.yml` builds them from there; its publish job rebases those
+   commits onto main and pushes them with the record, in the `release` lane. A bump never reaches
+   main without its binary; one that failed is just left out, and the others go on.
+4. **release** — `release.yml`, called when something landed, or when main carries a watched
+   item's built version that the last release (`dist/catalog.tsv`) does not.
+5. **report** — the issue **Upstream watch** is rewritten: per item ours, theirs, status and run.
+   It is opened when an item needs a hand and closed while all are current. A failed bump is
+   remembered there and tried again only when upstream moves on, a week later, or on a manual run
+   with `retry`. `-f dry_run=true` checks and trial-builds, and lands nothing.
+
+Not watched: dawn and terminal-browser (our forks: an upstream release needs a hand merge), npm
+items (`latest`), pkg items, launcher-pinned files and skills, the musl loader and runtime. The
+on-device recipes under `recipes/termux` and `recipes/nix` are not moved either. To watch another
+item, add its line to the table (one of the pin shapes the script's header lists) and give its
+recipe that shape.
 
 ## x86_64
 
