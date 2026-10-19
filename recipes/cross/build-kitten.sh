@@ -27,7 +27,7 @@ set -euo pipefail
 
 KITTY_URL="https://github.com/kovidgoyal/kitty.git"
 # scripts/upstream-watch.sh moves the pin below to upstream's latest release; keep its shape.
-KITTY_TAG=${KITTY_TAG:-v0.48.2}
+KITTY_TAG=${KITTY_TAG:-v0.49.2}
 
 TL_OUT=${TL_OUT:-"$PWD/out"}
 TL_BUILD_DIR=${TL_BUILD_DIR:-"$PWD/build-kitten"}
