@@ -11,14 +11,14 @@
 set -euo pipefail
 
 # scripts/upstream-watch.sh moves the pins below to upstream's latest release; keep their shape.
-HERDR_VERSION=${HERDR_VERSION:-v0.9.3}
+HERDR_VERSION=${HERDR_VERSION:-v0.9.5}
 TL_ARCH=${TL_ARCH:-aarch64}
 # Each processor's asset, pinned by digest. A new version is downloaded once from
 # https://github.com/herdrdev/herdr/releases/download/<version>/herdr-linux-<arch> and its sha256
 # written here.
 case "$TL_ARCH" in
-    aarch64) HERDR_SHA256=4de7aa3e25678812e92960de64f7c2aaa1bca1f0f80a3c5e559837e231e1f5c0 ;;
-    x86_64)  HERDR_SHA256=18a8dc65f1c2fa485884344356dea1cfd911c6f06cf46fa78e193f4087f4dba7 ;;
+    aarch64) HERDR_SHA256=17d7536f2da50859523680ef279dffcac8e4a235f4e46fe8da6c2ec44141897c ;;
+    x86_64)  HERDR_SHA256=14d9e8bc8b4a9e0118d77c32266f76d461f09b40342eb23752960bd89f59929d ;;
     *) echo "error: no pinned herdr build for $TL_ARCH" >&2; exit 2 ;;
 esac
 
