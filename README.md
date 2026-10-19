@@ -84,8 +84,8 @@ only); the musl runtime's x86_64 pair comes from Alpine's x86_64 packages.
 | Asset | Version | Source |
 |---|---|---|
 | `kitten-aarch64` | kitty `v0.48.2` (`2cb1d95c`), unmodified | [kovidgoyal/kitty `v0.48.2`](https://github.com/kovidgoyal/kitty/tree/v0.48.2) |
-| `fastfetch-aarch64` | Fastfetch `v2.67.0` + `recipes/termux/fastfetch/0001-kitty-animation.patch`, for the `com.termux` prefix | [fastfetch-cli/fastfetch `9c7cfb86`](https://github.com/fastfetch-cli/fastfetch/tree/9c7cfb864ff9154ffe951fae191c14d60bb91544) |
-| `fastfetch-io.vaj.tl-aarch64` | the same build, for the `io.vaj.tl` prefix | [fastfetch-cli/fastfetch `9c7cfb86`](https://github.com/fastfetch-cli/fastfetch/tree/9c7cfb864ff9154ffe951fae191c14d60bb91544) |
+| `fastfetch-aarch64` | Fastfetch `2.70.0` + `recipes/termux/fastfetch/0001-animate-by-default.patch`, for the `com.termux` prefix | [fastfetch-cli/fastfetch `17bb3fd2`](https://github.com/fastfetch-cli/fastfetch/tree/17bb3fd2384bd814b421d73b8c8b8d08e06cfa26) |
+| `fastfetch-io.vaj.tl-aarch64` | the same build, for the `io.vaj.tl` prefix | [fastfetch-cli/fastfetch `17bb3fd2`](https://github.com/fastfetch-cli/fastfetch/tree/17bb3fd2384bd814b421d73b8c8b8d08e06cfa26) |
 | `dawn-aarch64` | dawn `0.1.3+0e958747` with the launcher's changes (clipboard, AI chat and editing, touch, data safety), for the `com.termux` prefix | [PickleHik3/dawn `d17ee4ae`](https://github.com/PickleHik3/dawn/tree/d17ee4ae9f29cb7da99edf7566d4d7ebf02a95c5), a fork of andrewmd5/dawn `0e958747` |
 | `dawn-io.vaj.tl-aarch64` | the same build, for the `io.vaj.tl` prefix | [PickleHik3/dawn `d17ee4ae`](https://github.com/PickleHik3/dawn/tree/d17ee4ae9f29cb7da99edf7566d4d7ebf02a95c5) |
 | `sigye-aarch64` | Sigye `v0.6.0` + `recipes/termux/sigye/0001-termux-clipboard.patch` | [am2rican5/sigye `0f0b8caa`](https://github.com/am2rican5/sigye/tree/0f0b8caaccb4ca01ab5d1fad1237c4a01a49766f) |
@@ -281,7 +281,7 @@ under `ui/assets/fonts/jetbrainsmono/` (SIL OFL 1.1) is only compiled into the d
 feature, never into a released binary.
 
 - kitty / `kitten` — GPL-3.0-only, `licenses/kitty-GPL-3.0-only.txt`
-- Fastfetch — MIT, `licenses/fastfetch-MIT.txt`, modified by `recipes/termux/fastfetch/0001-kitty-animation.patch`
+- Fastfetch — MIT, `licenses/fastfetch-MIT.txt`, modified by `recipes/termux/fastfetch/0001-animate-by-default.patch`
 - Sigye — MIT, `licenses/sigye-MIT.txt`, modified by `recipes/termux/sigye/0001-termux-clipboard.patch`
 - musl (the loader) — MIT, `licenses/musl-MIT.txt`
 - dawn — MIT, `licenses/dawn-MIT.txt`, modified in the fork [PickleHik3/dawn](https://github.com/PickleHik3/dawn) (branch `tl`)

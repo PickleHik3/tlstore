@@ -2,7 +2,7 @@
 set -eu
 
 FASTFETCH_URL="https://github.com/fastfetch-cli/fastfetch.git"
-FASTFETCH_COMMIT="9c7cfb864ff9154ffe951fae191c14d60bb91544"
+FASTFETCH_COMMIT="17bb3fd2384bd814b421d73b8c8b8d08e06cfa26"   # 2.70.0
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 TL_INSTALL_PREFIX=${TL_INSTALL_PREFIX:-"$HOME/.local"}
 TL_BUILD_JOBS=${TL_BUILD_JOBS:-$(nproc)}
@@ -44,15 +44,15 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 
-echo "Fetching Fastfetch v2.67.0 ($FASTFETCH_COMMIT)..."
+echo "Fetching Fastfetch 2.70.0 ($FASTFETCH_COMMIT)..."
 git init -q "$TL_BUILD_DIR/source"
 git -C "$TL_BUILD_DIR/source" remote add origin "$FASTFETCH_URL"
 git -C "$TL_BUILD_DIR/source" fetch -q --depth 1 origin "$FASTFETCH_COMMIT"
 git -C "$TL_BUILD_DIR/source" checkout -q --detach FETCH_HEAD
 
-echo "Applying the animated Kitty graphics patch..."
-git -C "$TL_BUILD_DIR/source" apply --check "$SCRIPT_DIR/0001-kitty-animation.patch"
-git -C "$TL_BUILD_DIR/source" apply "$SCRIPT_DIR/0001-kitty-animation.patch"
+echo "Applying the animate-by-default patch..."
+git -C "$TL_BUILD_DIR/source" apply --check "$SCRIPT_DIR/0001-animate-by-default.patch"
+git -C "$TL_BUILD_DIR/source" apply "$SCRIPT_DIR/0001-animate-by-default.patch"
 
 echo "Configuring Fastfetch with ImageMagick, zlib, and Chafa..."
 cmake \
@@ -132,7 +132,7 @@ def render(image):
         # 80x24 cells over 640x576 pixels: Fastfetch reads the cell size from here to size the logo.
         fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 640, 576))
         os.execv(binary, [binary, "--logo-type", "kitty", "--logo", image,
-                          "--logo-recache", "true", "-s", "Title"])
+                          "--logo-cache", "regen", "-s", "Title"])
     out = b""
     while select.select([fd], [], [], 30)[0]:
         try:

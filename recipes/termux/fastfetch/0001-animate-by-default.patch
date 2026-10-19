@@ -1,0 +1,54 @@
+Animate image logos by default, on top of fastfetch's own animation support (2.70.0).
+
+fastfetch plays an animated logo only with logo.animationFrame 0 and shows the first frame
+otherwise; this makes 0 the default, so the store's GIF logo moves without a config change on
+phones that already have the config. Two small fixes go with it: a protocol other than kitty
+falls back to the first frame instead of failing (only kitty can play an animation), and an
+animation frame is exported at 8 bits per channel as the still path already is, so a 1-bit or
+16-bit PNG logo is not dropped.
+
+diff --git i/src/logo/image/im7.c w/src/logo/image/im7.c
+index 0768b4a..0e81148 100644
+--- i/src/logo/image/im7.c
++++ w/src/logo/image/im7.c
+@@ -430,6 +430,10 @@ static bool im7GetFrame(FFImageAnimation* animation, uint32_t index, FFImageFram
+         return false;
+     }
+ 
++    // tlstore: the still path pins the depth before exporting RGBA (above); a frame needs the same,
++    // or a 1-bit or 16-bit source exports the wrong number of bytes and the logo is dropped.
++    resized->depth = 8;
++
+     size_t length = 0;
+     void* blob = session->ffImageToBlob(session->blobInfo, resized, &length, session->exceptionInfo);
+     session->ffDestroyImageList(resized);
+diff --git i/src/logo/image/image.c w/src/logo/image/image.c
+index c96e8db..d9bde7f 100644
+--- i/src/logo/image/image.c
++++ w/src/logo/image/image.c
+@@ -1681,6 +1681,12 @@ static bool getCharacterPixelDimensions(FFLogoRequestData* requestData) {
+ static bool printImageIfExistsSlowPath(FFLogoType type, bool printError) {
+     FFLogoRequestData requestData;
+     requestData.type = type;
++
++    // tlstore: logos animate by default (src/options/logo.c), but only the kitty graphics protocol
++    // can play one; every other protocol shows the first frame, as it would without the patch.
++    if (type != FF_LOGO_TYPE_IMAGE_KITTY && instance.config.logo.animationFrame == FF_LOGO_ANIMATION_FRAME_ANIMATE) {
++        instance.config.logo.animationFrame = FF_LOGO_ANIMATION_FRAME_FIRST;
++    }
+     requestData.characterPixelWidth = 1;
+     requestData.characterPixelHeight = 1;
+ 
+diff --git i/src/options/logo.c w/src/options/logo.c
+index bc667c7..1875984 100644
+--- i/src/options/logo.c
++++ w/src/options/logo.c
+@@ -69,7 +69,7 @@ void ffOptionsInitLogo(FFOptionsLogo* options) {
+     options->preserveAspectRatio = false;
+     options->cache = FF_LOGO_CACHE_ON;
+     options->position = FF_LOGO_POSITION_LEFT;
+-    options->animationFrame = FF_LOGO_ANIMATION_FRAME_FIRST;
++    options->animationFrame = FF_LOGO_ANIMATION_FRAME_ANIMATE;
+ 
+ #if FF_HAVE_CHAFA
+     options->chafaFgOnly = false;

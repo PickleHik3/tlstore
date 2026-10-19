@@ -9,10 +9,10 @@ set -euo pipefail
 
 FASTFETCH_URL="https://github.com/fastfetch-cli/fastfetch.git"
 # scripts/upstream-watch.sh moves the pins below to upstream's latest release; keep their shape.
-FASTFETCH_COMMIT="9c7cfb864ff9154ffe951fae191c14d60bb91544"   # v2.67.0
-FASTFETCH_VERSION="2.67.0"
+FASTFETCH_COMMIT="17bb3fd2384bd814b421d73b8c8b8d08e06cfa26"   # v2.70.0
+FASTFETCH_VERSION="2.70.0"
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-PATCH="$SCRIPT_DIR/../termux/fastfetch/0001-kitty-animation.patch"
+PATCH="$SCRIPT_DIR/../termux/fastfetch/0001-animate-by-default.patch"
 PWD_POLYFILL="$SCRIPT_DIR/termux-pwd-polyfill.h"
 
 TL_NDK=${TL_NDK:-"$HOME/android-sdk/ndk/27.2.12479018"}
@@ -40,7 +40,7 @@ if [ ! -d "$source_dir/.git" ]; then
     git -C "$source_dir" remote add origin "$FASTFETCH_URL"
     git -C "$source_dir" fetch -q --depth 1 origin "$FASTFETCH_COMMIT"
     git -C "$source_dir" checkout -q --detach FETCH_HEAD
-    echo "Applying the animated Kitty graphics patch..."
+    echo "Applying the animate-by-default patch..."
     git -C "$source_dir" apply "$PATCH"
 fi
 
@@ -96,15 +96,8 @@ if ! grep -qa "$TERMUX_PREFIX/bin/login" "$TL_OUT/fastfetch"; then
 fi
 
 # A cross-built binary cannot be run here, so the Kitty logo check in the on-device recipe has no
-# host equivalent. What can be checked is that the patch's depth normalisation survived a rebase:
-# ImageMagick is dlopened and every symbol resolved by name, so the string is in the binary exactly
-# when the call is. Without it a logo that is not already 8-bit transmits the wrong number of bytes
-# and the terminal drops it in silence.
-if ! grep -qa "SetImageDepth" "$TL_OUT/fastfetch"; then
-    echo "error: SetImageDepth is missing from the build — Kitty logos that are not 8-bit per" >&2
-    echo "       channel would be dropped by the terminal without an error" >&2
-    exit 1
-fi
+# host equivalent. The patch's frame-depth fix is a field assignment, not a call, so unlike the old
+# patch's SetImageDepth it leaves no string in the binary to look for.
 
 echo
 echo "Built: $TL_OUT/fastfetch"
