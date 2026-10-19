@@ -13,7 +13,6 @@ FASTFETCH_COMMIT="17bb3fd2384bd814b421d73b8c8b8d08e06cfa26"   # v2.70.0
 FASTFETCH_VERSION="2.70.0"
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PATCH="$SCRIPT_DIR/../termux/fastfetch/0001-animate-by-default.patch"
-PWD_POLYFILL="$SCRIPT_DIR/termux-pwd-polyfill.h"
 
 TL_NDK=${TL_NDK:-"$HOME/android-sdk/ndk/27.2.12479018"}
 TL_SYSROOT=${TL_SYSROOT:-"$PWD/sysroot"}
@@ -29,7 +28,6 @@ PREFIX_IN_SYSROOT="$TL_SYSROOT$TERMUX_PREFIX"
     exit 1
 }
 [ -d "$TL_NDK" ] || { echo "error: NDK not found at $TL_NDK (set TL_NDK)" >&2; exit 1; }
-[ -f "$PWD_POLYFILL" ] || { echo "error: passwd polyfill not found at $PWD_POLYFILL" >&2; exit 1; }
 
 mkdir -p "$TL_OUT" "$TL_BUILD_DIR"
 source_dir="$TL_BUILD_DIR/source"
@@ -53,12 +51,8 @@ fi
 # extra -I/-l/-L below exist. RUNPATH points at the device prefix so the dlopened image libraries
 # resolve at runtime.
 #
-# termux-pwd-polyfill.h is force-included for the same class of reason: the stock NDK's getpwuid()
-# reports pw_dir="/data" for an app uid, and Fastfetch trusts passwd over $HOME, so without it the
-# binary never finds ~/.config/fastfetch and quietly falls back to the built-in ASCII logo. Its
-# prefix and home have to be handed to it explicitly, or a build for another edition would resolve
-# the home directory to the default one, which is not this edition's.
-POLYFILL_FLAGS="-DTERMUX_POLYFILL_PREFIX=\\\"$TERMUX_PREFIX\\\" -DTERMUX_POLYFILL_HOME=\\\"$TERMUX_HOME\\\""
+# No passwd polyfill since 2.70.0: on Android, Fastfetch takes its home directory and shell from
+# $HOME and $SHELL rather than getpwuid(), whose pw_dir is "/data" for an app uid.
 
 echo "Configuring for $TERMUX_PREFIX..."
 PKG_CONFIG_SYSROOT_DIR="$TL_SYSROOT" \
@@ -72,8 +66,8 @@ cmake -S "$source_dir" -B "$TL_BUILD_DIR/build" -G Ninja \
     -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
     -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
     -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY \
-    -DCMAKE_C_FLAGS="-I$PREFIX_IN_SYSROOT/include -include $PWD_POLYFILL $POLYFILL_FLAGS" \
-    -DCMAKE_CXX_FLAGS="-I$PREFIX_IN_SYSROOT/include -include $PWD_POLYFILL $POLYFILL_FLAGS" \
+    -DCMAKE_C_FLAGS="-I$PREFIX_IN_SYSROOT/include" \
+    -DCMAKE_CXX_FLAGS="-I$PREFIX_IN_SYSROOT/include" \
     -DCMAKE_EXE_LINKER_FLAGS="-L$PREFIX_IN_SYSROOT/lib -landroid-glob -Wl,-rpath,$TERMUX_PREFIX/lib" \
     -DTARGET_DIR_HOME="$TERMUX_HOME" \
     -DTARGET_DIR_ROOT="$TERMUX_PREFIX" \
@@ -87,13 +81,6 @@ ninja -C "$TL_BUILD_DIR/build" -j"${TL_BUILD_JOBS:-$(nproc)}"
 
 "$TL_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" \
     -o "$TL_OUT/fastfetch" "$TL_BUILD_DIR/build/fastfetch"
-
-# The polyfill's login-shell path only lands in the binary when the force-include took effect, so
-# its absence means the build would resolve the home directory to "/data" on device.
-if ! grep -qa "$TERMUX_PREFIX/bin/login" "$TL_OUT/fastfetch"; then
-    echo "error: the passwd polyfill is missing from the build — fastfetch would ignore ~/.config" >&2
-    exit 1
-fi
 
 # A cross-built binary cannot be run here, so the Kitty logo check in the on-device recipe has no
 # host equivalent. The patch's frame-depth fix is a field assignment, not a call, so unlike the old

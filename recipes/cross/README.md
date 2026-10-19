@@ -82,7 +82,7 @@ same commits as the on-device recipes and carry the same patches.
 The editions install under different package names, so their prefixes differ:
 `/data/data/com.termux/files/usr` and `/data/data/io.vaj.tl/files/usr`. That matters for two of
 these. `fastfetch` links `libandroid-glob`, `dlopen`s the image libraries through its own `RUNPATH`,
-and gets its home directory and login shell from `termux-pwd-polyfill.h`. All three are fixed at
+and bakes the prefix into its default paths. All three are fixed at
 link time, so a build for one prefix does not start under another — the linker cannot find
 `libandroid-glob.so` and the process dies before `main`. `dawn` is the same story with one library:
 it needs `libcurl`, Termux removes `LD_LIBRARY_PATH` on Android 7+, and so the `RUNPATH` is the only
@@ -164,7 +164,7 @@ Built 2026-08-16 on a Linux host with NDK r27c (27.2.12479018), Go 1.26.5, Rust 
 
 The VAJ-edition `fastfetch` (`fastfetch-io.vaj.tl-aarch64`) was built 2026-09-01 with NDK
 29.0.14206865 against a sysroot from `repo.pathayam.xyz`, 1.7 MB stripped, same dependencies. It is
-verified statically only — `RUNPATH`, every baked `/data/data/...` string, and the polyfill check all
+verified statically only — `RUNPATH` and every baked `/data/data/...` string
 name `io.vaj.tl` — and has not been run on a device yet.
 
 Device-verified 2026-08-16 on Pong (A065, Android 16), running inside the launcher's terminal:

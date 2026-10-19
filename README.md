@@ -164,9 +164,7 @@ Make sure `~/.local/bin` comes before `$PREFIX/bin` in `PATH`, or the APT `fastf
   (`/data/data/com.termux/files/usr`), `fastfetch-io.vaj.tl-aarch64` for `io.vaj.tl`. Each has a
   `RUNPATH` into its own prefix and needs `libandroid-glob` there (`pkg install libandroid-glob`),
   so the wrong one does not start at all — the linker cannot find `libandroid-glob.so` and the
-  process dies before `main`. Its home directory comes from `recipes/termux-pwd-polyfill.h` and is
-  fixed at the same time, because Bionic reports `pw_dir="/data"` for an app uid and Fastfetch reads
-  passwd in preference to `$HOME`. Image logos are loaded through `dlopen`, so
+  process dies before `main`. Its home directory comes from `$HOME`. Image logos are loaded through `dlopen`, so
   `pkg install imagemagick chafa` is what makes the GIF logo work; without them Fastfetch falls
   back to text.
 
