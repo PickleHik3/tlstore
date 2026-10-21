@@ -260,7 +260,7 @@ ROOT="$(CDPATH= cd -- "$(dirname -- "$SELF")/.." && pwd -P)"
 
 # Upstream's upgrade would install its glibc build over this one.
 if [ "${1:-}" = upgrade ]; then
-  echo "terminal-browser: this copy comes from tlstore; update it with: tlstore update" >&2
+  echo "terminal-browser: this copy comes from tlstore; update it with: tlstore upgrade" >&2
   exit 1
 fi
 

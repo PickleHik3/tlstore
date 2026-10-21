@@ -66,8 +66,8 @@ prompt, so yours wins.
 
 ## Good to know
 
-- `config.fish` and the prompt belong to the store, and `tlstore update` brings them forward. If
+- `config.fish` and the prompt belong to the store, and `tlstore upgrade` brings them forward. If
   you edited one, tlstore asks before replacing it. Keep your own settings in `personal.fish`.
-- `tlstore update` leaves the plugins to fisher: run `fisher update` in fish to update them.
+- `tlstore upgrade` leaves the plugins to fisher: run `fisher update` in fish to update them.
 - `tlstore remove fish-shell` stops new sessions starting in fish, as long as you have not chosen
   another shell since.
