@@ -272,6 +272,18 @@ fi
 
 PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
 
+# Chromium plays sound through PulseAudio, which electron42 depends on but nothing starts. Chromium
+# holds its connection for as long as it runs, so the daemon outlives every page and exits a minute
+# after the last browser quits. libpulse finds the socket under $XDG_RUNTIME_DIR, which changes
+# below, so the address is resolved here, before that.
+if [ -z "${PULSE_SERVER:-}" ] && command -v pulseaudio >/dev/null 2>&1; then
+  pulseaudio --check 2>/dev/null || pulseaudio --start --exit-idle-time=60 >/dev/null 2>&1
+  PULSE_SOCKET="$(pactl info 2>/dev/null | sed -n 's/^Server String: //p')"
+  case "$PULSE_SOCKET" in
+    /*) export PULSE_SERVER="unix:$PULSE_SOCKET" ;;
+  esac
+fi
+
 # The CLI puts agent-browser's socket under $XDG_RUNTIME_DIR (else ~/.local/state), and
 # agent-browser refuses a socket path longer than 103 bytes: under ~/.local/state, or a
 # $TMPDIR-based XDG_RUNTIME_DIR as termux-x11 setups use, `terminal-browser action` cannot
