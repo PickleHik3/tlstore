@@ -56,21 +56,23 @@ by name.
 | `tlstore list -a` | only what you do not have yet |
 | `tlstore search fish` | find an item by name or description |
 | `tlstore info fish-shell` | what an item is, its version, and where it goes |
-| `tlstore install kitten sigye` | install one or more items by name |
+| `tlstore install kitten sigye` | install one or more items by name, from the newest item list |
 | `tlstore install` | open the picker instead of naming anything |
 | `tlstore install --dry-run kitten` | show what would be installed, parts and build tools included, and change nothing |
 | `tlstore remove kitten` | remove an item tlstore installed |
 | `tlstore remove --dry-run kitten` | show what would be removed, and which files, and change nothing |
-| `tlstore update` | bring everything you have up to date |
-| `tlstore update --check` | see what is out of date without installing anything (`--dry-run` means the same) |
-| `tlstore update --offline` | update from the item list you already have, without fetching a newer one |
+| `tlstore update` | fetch the newest item list and see what is out of date, a newer tlstore included; installs nothing |
+| `tlstore upgrade` | bring everything you have up to date, tlstore itself first |
+| `tlstore upgrade codex` | bring only the items you name up to date |
+| `tlstore upgrade --check` | see what an upgrade would change without installing anything (`--dry-run` means the same) |
+| `tlstore upgrade --offline` | upgrade from the item list you already have, without fetching a newer one |
 | `tlstore rollback codex` | go back one version, and hold the item there (`--dry-run` says what it would do) |
-| `tlstore hold codex` | keep an item at its version when you update |
+| `tlstore hold codex` | keep an item at its version when you upgrade |
 | `tlstore unhold codex` | let a held item update again |
 | `tlstore refresh` | update the list of items without touching what is installed |
 | `tlstore display` | set up graphics for Linux apps |
 | `tlstore doctor` | check that everything is in place |
-| `tlstore self-update` | bring tlstore itself up to date, and turn the offer on `update` back on after you said never (`--check` only says) |
+| `tlstore self-update` | bring tlstore itself up to date, and turn the offer on `upgrade` back on after you said never (`--check` only says) |
 | `tlstore help` | the list of commands; `tlstore help install` or `tlstore install --help` is one command's own page |
 | `tlstore version` | show the tlstore and item-list versions |
 | `tlstore readme kitten` | print where a copy of the item's own README has been saved, fetching it when it is missing or a day old |
@@ -78,8 +80,14 @@ by name.
 | `--tsv` | on `list`, `search`, `info` and `update --check`: the same answer as tab-separated columns, for a program to read |
 
 `-y` says yes to everything except a config file of yours, and goes before or after the command
-(`tlstore -y install kitten`). `--configs` on `install` and `update` answers that one too, for
-scripts. `add`, `uninstall` and `upgrade` are other names for `install`, `remove` and `update`.
+(`tlstore -y install kitten`). `--configs` on `install` and `upgrade` answers that one too, for
+scripts. `add` and `uninstall` are other names for `install` and `remove`.
+
+`update` and `upgrade` mean what they mean in Termux's `pkg`: `update` only looks, `upgrade`
+installs. Until tlstore 0.21 `update` did both; `update` with item names, or with
+`--configs`, still does exactly what `upgrade` does with them, so an old habit or script keeps
+working. `install` fetches the newest item list first too; when it cannot (no network, say), it
+says so in one line and installs from the list you already have.
 
 An exit status of 0 means done, 1 means something failed and 2 means a mistake in what you typed.
 `tlstore shell` is gone; it is now `tlstore install fish-shell`.
@@ -103,7 +111,7 @@ tlstore remembers what it wrote. A config file you never touched simply moves on
 an update brings a new one. One you changed is asked about first, on one line:
 
 ```
-$ tlstore update
+$ tlstore upgrade
 ! You changed ~/.config/fish/config.fish. Replace it with the new one? [y/N/d]
 ```
 
@@ -112,7 +120,7 @@ it — a config file is your work, not part of "yes to everything". Answering ye
 backup of your file right beside it.
 
 Either answer is remembered at the shipped version, so declining once is not asked about again
-until that file itself changes. `tlstore update --check` lists those as *has a new version; update
+until that file itself changes. `tlstore update` lists those as *has a new version; upgrade
 asks first if you changed it*. In a script, or anywhere there is nobody to ask, your file is kept
 and one line says so — add `--configs` if you want the new one.
 
@@ -157,7 +165,7 @@ Termux. The store tells you before anything is installed, whenever the packages 
   When it cannot ask (the packages come from a repository that is not turned on yet) it shows the
   store's own figures for a fresh Termux instead, which are smaller when you already have some of
   them;
-- `tlstore update` asks the same way when an update needs that much, and otherwise asks nothing.
+- `tlstore upgrade` asks the same way when an upgrade needs that much, and otherwise asks nothing.
 
 Electron comes from Termux's x11 repository, which a fresh Termux does not have turned on. The
 store turns it on for you by installing Termux's `x11-repo` package first, then reads the package
@@ -175,7 +183,7 @@ and [fisher](https://github.com/jorgebucaran/fisher) with two plugins:
   themselves.
 
 Fisher fetches those plugins from GitHub itself, so installing them needs a network connection.
-Keeping them current is fisher's job rather than tlstore's — `tlstore update` leaves them alone,
+Keeping them current is fisher's job rather than tlstore's — `tlstore upgrade` leaves them alone,
 and `fisher update` in a fish shell brings them forward.
 
 The prompt (`conf.d/launcher-prompt.fish`) is two lines in the style of
@@ -219,16 +227,29 @@ it.
 
 ## Keeping things up to date
 
-`tlstore update` first checks for a newer tlstore and offers it (`-y` takes it without asking); a
-newer tlstore then does the rest of the update itself. After that it checks for a newer list of
-items, then upgrades anything you have that has moved on. `tlstore refresh` only fetches that list,
-without installing or changing anything.
+`tlstore update` fetches the newest list of items and says what has moved on, without installing
+anything — and when a newer tlstore is out, it says that too:
+
+```
+$ tlstore update
+Updated the list of items.
+claude-code 2.1.300 is available; you have 2.1.290
+fish-prompt 3 is available; you have 2
+Run 'tlstore upgrade' to install them.
+tlstore 0.22 is out: tlstore upgrade installs it
+```
+
+It exits 0 whether or not anything is out of date. `tlstore upgrade` installs it all: it first
+checks for a newer tlstore and offers it (`-y` takes it without asking); a newer tlstore then does
+the rest of the upgrade itself. After that it checks for a newer list of items, then upgrades
+anything you have that has moved on. Name items (`tlstore upgrade claude-code`) to upgrade only
+those. `tlstore refresh` only fetches the list, and says nothing about what it found.
 
 In a terminal, one line at the bottom says what is happening now, each item leaves one line when it
 is done, and the run ends with a count:
 
 ```
-$ tlstore update
+$ tlstore upgrade
 ✓ claude-code 2.1.300
 ✓ fish-prompt 3
 ✗ opencode: could not download opencode
@@ -247,7 +268,7 @@ mirror or a bad network cannot swap in something else under your feet.
 ## Going back a version
 
 An update that broke something is not final. `tlstore rollback <name>` puts the item back at the
-version it had before its last update, then holds it there, so the next `tlstore update` does not
+version it had before its last update, then holds it there, so the next `tlstore upgrade` does not
 undo it:
 
 ```
@@ -256,22 +277,24 @@ tlstore hold codex         keep an item where it is, without rolling back
 tlstore unhold codex       let it update again
 ```
 
-A held item is skipped by `tlstore update` (it says so), and the store app does not offer an update
-for it; `tlstore list -i` and `tlstore info` mark it as held. Naming it, `tlstore update codex`,
-updates it anyway and lets go of the hold. Removing an item drops its hold too.
+A held item is skipped by `tlstore upgrade` (it says so, and so does `tlstore update`), and the
+store app does not offer an update for it; `tlstore list -i` and `tlstore info` mark it as held.
+Naming it, `tlstore upgrade codex`, upgrades it anyway and lets go of the hold. Removing an item
+drops its hold too.
 
 Rollback goes one step only, and only back to a version tlstore recorded: an item you installed
-before this existed has to update once first. To go forward again, `unhold` and `update`.
+before this existed has to update once first. To go forward again, `unhold` and `upgrade`.
 
 What cannot go back: package items (Termux's repositories keep only the newest package), bundles
 (they have no version of their own) and fish plugins (fisher keeps those). A config file goes back
 like anything else, but you are still shown the change and asked before yours is replaced.
 
 `tlstore self-update` exits 1 when a newer tlstore was offered but could not be taken (a bad
-signature, a download that does not match); `tlstore update` does too. It also exits 1 when it
-could not check at all, and says why. Checking needs minisign (`pkg install minisign`):
-without it, neither tlstore nor the item list can be updated, and `tlstore update`, `self-update`,
-`doctor` and the store app all say so instead of reporting "up to date".
+signature, a download that does not match); `tlstore upgrade` does too, and so does `tlstore update`
+when the tlstore it found was refused. It also exits 1 when it could not check at all, and says
+why. Checking needs minisign (`pkg install minisign`): without it, neither tlstore nor the item
+list can be updated, and `tlstore update`, `upgrade`, `self-update`, `doctor` and the store app
+all say so instead of reporting "up to date".
 
 ## Doctor
 
@@ -284,7 +307,7 @@ an install was cut short. It then tells you what, if anything, needs attention.
 
 `tlstore install claude-code` installs Claude Code. It is about 200 MB, downloaded from npm and run
 through a small compatibility loader so it works on Android. Its own built-in updater is switched
-off — `tlstore update` is how it gets new versions. Once it is installed, sign in by running:
+off — `tlstore upgrade` is how it gets new versions. Once it is installed, sign in by running:
 
 ```sh
 claude
@@ -296,7 +319,7 @@ claude
 build cannot reach the network on Android, so this is the Android build from
 [codex-termux](https://github.com/DioNanos/codex-termux), Davide A. Guglielmi's port; the credit for
 making it run on a phone is theirs. It is about 275 MB, downloaded from npm. Its own update check is
-switched off — `tlstore update` is how it gets new versions. Once it is installed, sign in with:
+switched off — `tlstore upgrade` is how it gets new versions. Once it is installed, sign in with:
 
 ```sh
 codex
@@ -306,7 +329,7 @@ codex
 
 `tlstore install opencode` installs [opencode](https://opencode.ai), another coding agent for the
 terminal. It is about 200 MB, downloaded from npm and run through the same compatibility loader as
-Claude Code. Its own updater is switched off — `tlstore update` is how it gets new versions. Once it
+Claude Code. Its own updater is switched off — `tlstore upgrade` is how it gets new versions. Once it
 is installed, pick a provider and sign in with:
 
 ```sh
@@ -349,7 +372,7 @@ curl -fsSL https://raw.githubusercontent.com/PickleHik3/tlstore/main/scripts/ins
 
 It checks what it downloads before installing anything, and puts tlstore exactly where the
 launcher app would: the `tlstore` command in your Termux `bin`, with the shorter `tl` and `tls`
-where those names are still free, and its item list alongside it. `tlstore update` offers a newer
+where those names are still free, and its item list alongside it. `tlstore upgrade` offers a newer
 tlstore when there is one — answer yes, no, or never, and `tlstore self-update` brings the offer back
 — so you never need to run the command above again. If you install Termux Launcher later, the app quietly takes over
 keeping tlstore up to date. If you already have the launcher, running this command does nothing —

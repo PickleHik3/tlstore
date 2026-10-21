@@ -218,7 +218,7 @@ Bionic ones that run as they are. Two files are kept from the package: `codex.bi
 `codex-code-mode-host`, which has to sit in the same directory because Codex's code mode, on by
 default, needs it for shell commands. The `~/.local/bin/codex` wrapper starts `codex.bin` with
 `-c check_for_update_on_startup=false`, since Codex's own update check cannot be turned off any
-other way and `tlstore update` is how it is updated. About 275 MB on disk.
+other way and `tlstore upgrade` is how it is updated. About 275 MB on disk.
 
 Credit for making Codex run on Android goes to DioNanos (Davide A. Guglielmi) and
 [codex-termux](https://github.com/DioNanos/codex-termux), Apache-2.0, a port of

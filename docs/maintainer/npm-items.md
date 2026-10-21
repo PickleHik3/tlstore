@@ -35,7 +35,7 @@ The options:
 
 | Option | Effect |
 |---|---|
-| `env=OPENCODE_DISABLE_AUTOUPDATE=1` | Exported by the wrapper. opencode's own updater stays off; `tlstore update` is the only way it changes |
+| `env=OPENCODE_DISABLE_AUTOUPDATE=1` | Exported by the wrapper. opencode's own updater stays off; `tlstore upgrade` is the only way it changes |
 | `tz=1` | The wrapper sets `TZ` from Android's `persist.sys.timezone` when it is unset. musl has no idea of Android's time-zone setting, so without this the clock reads UTC |
 | `build=patchelf` | Termux's `patchelf` must be present |
 | `musl-libs=musl-libstdcxx,musl-libgcc` | Extra musl libraries to copy in beside the loader. opencode links `libstdc++` and `libgcc_s`; Claude Code needs neither and has no `musl-libs` |
@@ -128,7 +128,7 @@ uses one to switch off its update check.
 
 ## 4. Updates
 
-- **New opencode version.** For a `latest` row, `tlstore update` (and the update check behind the
+- **New opencode version.** For a `latest` row, `tlstore upgrade` (and the update check behind the
   store UI's badge) asks the registry what `latest` points at now and plans an install only when
   that differs from the installed `version`. Offline or with npm unreachable, the item is left
   alone. Nothing in this repository changes when opencode publishes a release.
@@ -136,7 +136,7 @@ uses one to switch off its update check.
   From tlstore 0.17, an install or update that finds opencode already current still compares
   each copy with the installed part, and replaces any that differ. The replacement is renamed
   into place, never written over, so a running opencode keeps its mapping. A loader fix
-  therefore reaches opencode with the next `tlstore update` that installs the new `musl-loader`,
+  therefore reaches opencode with the next `tlstore upgrade` that installs the new `musl-loader`,
   not with opencode's next release. A rebuilt loader gets a new `1.2.5+tl.<N>` version.
 - **What does need a change here**: a musl or GCC bump, a new launcher edition (a new prefix
   means a new loader asset), or a new app that needs more of the musl world (a new `musl-libs`
@@ -160,7 +160,7 @@ uses one to switch off its update check.
 | Symptom | Cause |
 |---|---|
 | `unexpected e_type: 2` over `ssh termux` | sshd runs in the `runas_app` context, where termux-exec runs everything through `/system/bin/linker64`, which refuses these non-PIE binaries. Run `export TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE=disable` in that session. From the launcher's own terminal it doesn't happen |
-| Killed by SIGSYS at start on Android 12 or older | A loader without the close_range patch. `tlstore update` installs the current `musl-loader` and refreshes opencode's copy |
+| Killed by SIGSYS at start on Android 12 or older | A loader without the close_range patch. `tlstore upgrade` installs the current `musl-loader` and refreshes opencode's copy |
 | DNS lookups time out | A loader built for another prefix: each edition needs its own loader asset |
 | Segfault at start | A copy patched in the wrong order (no `rpath-first`). Reinstall: `tlstore install opencode` |
 | `opencode has no musl-libstdcxx for this device` | The catalog has no library row for this processor |
