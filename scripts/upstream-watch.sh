@@ -20,18 +20,18 @@
 # (the tag without its leading v): a row that disagrees is reported as a mismatch for a hand to
 # settle, and the watch leaves the item alone. A row version <upstream>+<suffix> reads as
 # <upstream> here: herdr's 0.9.5+tl.0 is upstream's 0.9.5 plus the store's own build number
-# (bins-record.sh bumps it when the asset changes, as for any +….N version). --tsv adds what the last store release carries
-# (dist/catalog.tsv, committed by release.yml) and whether a release is owed: the item's version
-# on main is ahead of the release and, for a built item, its items.tsv source has moved to a new
-# bins-… tag too (built and recorded, not yet released). A version that moved without a build is
-# "unbuilt", never released on its own.
+# (bins-record.sh bumps it when the asset changes, as for any +….N version). --tsv adds what the
+# last store release carries (dist/catalog.tsv, committed by release.yml) and whether a release
+# is owed: the item's version on main is ahead of the release and, for a built item, its
+# items.tsv source has moved to a new bins-… tag too (built and recorded, not yet released). A
+# version that moved without a build is "unbuilt", never released on its own.
 #
 # A bump writes only the item's recipe lines and the version column (and, for a url item, the
 # source) of its items.tsv rows; a row with a +tl.N suffix gets the new version with +tl.0, so the
 # store's build number starts again, and a row with any other suffix is left for a hand. The
-# binary itself, its bins-… tag and its SHA256SUMS lines are
-# build.yml's to move (scripts/bins-record.sh), so a bump is what makes phones see the rebuild as
-# an update (docs/maintainer/catalog.md, "Rebuilding a binary"). A bump that cannot verify what it
+# binary itself, its bins-… tag and its SHA256SUMS lines are build.yml's to move
+# (scripts/bins-record.sh), so a bump is what makes phones see the rebuild as an update
+# (docs/maintainer/catalog.md, "Rebuilding a binary"). A bump that cannot verify what it
 # pins — a tag that does not resolve, an asset whose digest GitHub does not publish or does not
 # match the download, a url that does not answer — writes nothing and exits non-zero.
 #
