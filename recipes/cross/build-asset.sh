@@ -201,7 +201,8 @@ case "$tool" in
         cp "$TL_OUT/sigye" "$TL_ASSETS/$asset"
         ;;
     herdr)
-        # Not built: upstream's static Linux binary, checked against its pinned digest.
+        # Not built: upstream's static Linux binary, checked against its pinned digest, packed
+        # with a launcher script as a .tar.gz app tree (an archive item).
         "$SCRIPT_DIR/fetch-herdr.sh"
         cp "$TL_OUT/herdr" "$TL_ASSETS/$asset"
         ;;
