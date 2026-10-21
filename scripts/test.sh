@@ -2373,6 +2373,70 @@ EOF
     ARCH_KNOB=riscv64
     tl list --tsv
     expect_no_out "no archive is offered on a processor with no prebuilt tools" $'^app\t'
+
+    # --- a binary that becomes an archive: the same name, a new kind, taken by update ---
+    # herdr went from one mirrored binary to an archive (the upstream binary plus a launcher
+    # script) at 0.9.5+tl.0. The phone has the binary at ~/.local/bin/<name>; the update must
+    # put the wrapper there and the tree in ~/.local/lib/<name>, keep no .bak of the old binary
+    # (it was the item's own file), and remove must take both away. The old binary is a real
+    # ELF, still running while the update writes the wrapper over its path, as a herdr server
+    # started from it would be.
+    rm -rf "$TESTHOME/.local/share/tlstore/installed.tsv" "$TESTHOME/.local/lib" "$TESTHOME/.local/bin"
+    mkdir -p "$FX/rel/4.0" "$FX/rel/4.1" "$FX/kindsrc/bin" "$FX/kindsrc/libexec"
+    cp -L "$(command -v sleep)" "$FX/rel/4.0/kindswap-aarch64"
+    chmod 755 "$FX/rel/4.0/kindswap-aarch64"
+    printf '#!/bin/sh\necho "kindswap archive $*"\n' > "$FX/kindsrc/bin/kindswap"
+    chmod 755 "$FX/kindsrc/bin/kindswap"
+    cp "$FX/rel/4.0/kindswap-aarch64" "$FX/kindsrc/libexec/kindswap"
+    tar czf "$FX/rel/4.1/kindswap-aarch64" -C "$FX/kindsrc" .
+    {
+        printf '# tlstore catalog\tserial=2026090655\n'
+        printf 'kindswap\tbinary\t1.0\t*\tbinaries:kindswap@4.0\t%s\t-\t-\t-\tOne file for now.\t%s\n' \
+            "$(sha "$FX/rel/4.0/kindswap-aarch64")" "$R5_NONE"
+    } > "$user_catalog"
+    ks_bin="$TESTHOME/.local/bin/kindswap"
+    ks_dir="$TESTHOME/.local/lib/kindswap"
+    tl install kindswap -y
+    expect_status "the binary installs first" 0
+    if cmp -s "$ks_bin" "$FX/rel/4.0/kindswap-aarch64"; then pass; else fail "as one file at ~/.local/bin/<name>"; fi
+    ks_pid=""
+    if "$ks_bin" 0 2>/dev/null; then
+        "$ks_bin" 300 &
+        ks_pid=$!
+    fi
+    {
+        printf '# tlstore catalog\tserial=2026090656\n'
+        printf 'kindswap\tarchive\t1.0+tl.0\t*\tbinaries:kindswap@4.1\t%s\t-\t-\texe=bin/kindswap\tA folder now.\t%s\n' \
+            "$(sha "$FX/rel/4.1/kindswap-aarch64")" "$R5_NONE"
+    } > "$user_catalog"
+    tl update --check --offline
+    expect_out "update --check offers the archive in its place" "kindswap 1.0+tl.0 is available; you have 1.0"
+    tl update --offline -y kindswap
+    ks_out="$OUT"
+    expect_status "update takes the binary to the archive" 0
+    expect_content "the wrapper is where the binary was" "$ks_bin" \
+        "$(printf '#!%s/bin/sh\n# written by termux-launcher\nexec "%s/bin/kindswap" "$@"' "$TPREFIX" "$ks_dir")"
+    if [ "$("$ks_bin" hi 2>&1)" = "kindswap archive hi" ]; then pass; else fail "and runs the program inside the directory" "$("$ks_bin" hi 2>&1)"; fi
+    if cmp -s "$ks_dir/libexec/kindswap" "$FX/rel/4.0/kindswap-aarch64"; then pass; else fail "the tree is unpacked into ~/.local/lib/<name>"; fi
+    ks_baks="$(find "$TESTHOME/.local/bin" -name 'kindswap.bak-*' 2>/dev/null)"
+    if [ -z "$ks_baks" ]; then pass; else fail "no .bak of the old binary is kept: it was the item's own" "$ks_baks"; fi
+    OUT="$ks_out"
+    expect_no_out "and none is announced" "kept a copy"
+    if awk -F'\t' -v d="$ks_dir $ks_bin" '$1=="kindswap" { exit ($2=="archive" && $3=="1.0+tl.0" && $5==d && $8=="1.0") ? 0 : 1 }' "$TESTHOME/.local/share/tlstore/installed.tsv"; then pass; else fail "the state records the new kind, both paths, and the binary's version before it" "$(cat "$TESTHOME/.local/share/tlstore/installed.tsv")"; fi
+    if [ -n "$ks_pid" ]; then
+        if kill -0 "$ks_pid" 2>/dev/null; then pass; else fail "the old binary kept running through the update"; fi
+        kill "$ks_pid" 2>/dev/null
+        wait "$ks_pid" 2>/dev/null
+    else
+        skip "the update over a running binary" "sleep here does not run under another name"
+    fi
+    tl remove kindswap -y
+    expect_status "the archive that replaced a binary is removed" 0
+    expect_no_file "its wrapper goes" "$ks_bin"
+    expect_no_file "and its directory" "$ks_dir"
+    ks_baks="$(find "$TESTHOME/.local/bin" -name 'kindswap*' 2>/dev/null)"
+    if [ -z "$ks_baks" ]; then pass; else fail "nothing of either kind is left in ~/.local/bin" "$ks_baks"; fi
+    if grep -q '^kindswap	' "$TESTHOME/.local/share/tlstore/installed.tsv" 2>/dev/null; then fail "and its state row goes"; else pass; fi
     rm -rf "$TESTHOME/.local"
     mv "$ROOT/saved-local" "$TESTHOME/.local"
 
@@ -4329,6 +4393,113 @@ OUT="$(cd "$BN_ROOT" && bash scripts/bins-record.sh bins-2026.09.30 assets 2>"$B
 if [ "$ST" != 0 ]; then pass; else fail "an x86_64 build without its aarch64 one is refused"; fi
 if [ "$bn_before" = "$(sha "$BN_ROOT/SHA256SUMS") $(sha "$BN_ROOT/scripts/items.tsv")" ]; then pass; else fail "and nothing is changed"; fi
 rm -rf "$BN_ROOT"
+
+# --- upstream-watch.sh: ours against theirs, and the bump, with a +tl.N row ---
+# The script runs from a copy of the tree (it writes the items.tsv and the recipes beside it),
+# with the real recipes, so their pin lines keep the shape a bump rewrites. gh and curl are stubs
+# that answer from files: releases/latest per upstream, and the assets a bump downloads and
+# checks. herdr's row carries the store's build number (0.9.5+tl.N), which reads as upstream's
+# 0.9.5; kitten's is a plain version, as every row was before.
+echo
+echo "== upstream-watch.sh"
+SHELL_LABEL=upstream-watch
+UW="$(mktemp -d)"
+mkdir -p "$UW/scripts" "$UW/recipes/cross" "$UW/dist" "$UW/bin" "$UW/fx/assets"
+cp "$repo/scripts/upstream-watch.sh" "$UW/scripts/"
+for uw_r in fetch-herdr build-btop build-fastfetch build-kitten build-sigye; do
+    cp "$repo/recipes/cross/$uw_r.sh" "$UW/recipes/cross/"
+done
+uw_herdr="$(sed -n 's/^HERDR_VERSION=\${HERDR_VERSION:-v\([^}]*\)}$/\1/p' "$UW/recipes/cross/fetch-herdr.sh")"
+uw_kitten="$(sed -n 's/^KITTY_TAG=\${KITTY_TAG:-v\([^}]*\)}$/\1/p' "$UW/recipes/cross/build-kitten.sh")"
+cat > "$UW/bin/gh" <<'EOF'
+#!/bin/sh
+# gh api repos/<owner>/<repo>/releases/latest --jq .tag_name
+# gh api repos/<owner>/<repo>/releases/tags/<tag> --jq '<the digest of one named asset>'
+case "$2" in
+    */releases/latest)
+        r="${2#repos/}"; r="${r%/releases/latest}"
+        awk -v r="$r" '$1 == r { print $2; f = 1 } END { exit !f }' "$UW_FX/latest" ;;
+    */releases/tags/*)
+        a="$(printf '%s' "$4" | sed 's/.*select(.name == "\([^"]*\)").*/\1/')"
+        [ -f "$UW_FX/assets/$a" ] || exit 1
+        printf 'sha256:%s\n' "$(sha256sum "$UW_FX/assets/$a" | cut -d' ' -f1)" ;;
+    *) exit 1 ;;
+esac
+EOF
+cat > "$UW/bin/curl" <<'EOF'
+#!/bin/sh
+# curl ... -o <file> <url>: the url's last segment, from the fixture's assets.
+out=""; url=""
+while [ $# -gt 0 ]; do
+    case "$1" in -o) out="$2"; shift ;; -*) ;; *) url="$1" ;; esac
+    shift
+done
+[ -f "$UW_FX/assets/${url##*/}" ] || exit 22
+cp "$UW_FX/assets/${url##*/}" "$out"
+EOF
+chmod 755 "$UW/bin/gh" "$UW/bin/curl"
+printf 'herdr for aarch64\n' > "$UW/fx/assets/herdr-linux-aarch64"
+printf 'herdr for x86_64\n' > "$UW/fx/assets/herdr-linux-x86_64"
+uw_tail=$'-\t-\t-\tTools\t-'
+# uw_items <herdr's version> — the copy's items.tsv: herdr at that version, kitten at its pin.
+uw_items() {
+    {
+        printf '# a comment line\n'
+        printf 'herdr\tarchive\t%s\t*\tbinaries:herdr@bins-1\t%s\n' "$1" "$uw_tail"
+        printf 'kitten\tbinary\t%s\t*\tbinaries:kitten@bins-1\t%s\n' "$uw_kitten" "$uw_tail"
+    } > "$UW/scripts/items.tsv"
+}
+# The last store release still has herdr at upstream's plain version, under an older tag.
+printf 'herdr\tbinary\t%s\t*\tbinaries:herdr@bins-0\n' "$uw_herdr" > "$UW/dist/catalog.tsv"
+uw() { OUT="$(UW_FX="$UW/fx" PATH="$UW/bin:$PATH" bash "$UW/scripts/upstream-watch.sh" "$@" 2>&1)"; ST=$?; }
+# uw_col <item> <column> — a column of the item's --check --tsv line in OUT.
+uw_col() { printf '%s\n' "$OUT" | awk -F '\t' -v i="$1" -v c="$2" '$1 == i { print $c }'; }
+uw_ver() { awk -F '\t' -v i="$1" '$1 == i { print $3 }' "$UW/scripts/items.tsv"; }
+
+printf 'herdrdev/herdr v%s\nkovidgoyal/kitty v%s\n' "$uw_herdr" "$uw_kitten" > "$UW/fx/latest"
+uw_items "$uw_herdr+tl.3"
+uw --check --tsv
+expect_status "--check runs against the copy" 0
+if [ "$(uw_col herdr 5)" = current ]; then pass; else fail "a +tl.N row at the recipe's pin is current, not a mismatch" "$(uw_col herdr 0)"; fi
+if [ "$(uw_col herdr 2)" = "$uw_herdr" ]; then pass; else fail "and ours is the recipe's version, without the suffix" "$(uw_col herdr 0)"; fi
+if [ "$(uw_col herdr 7)" = no ]; then pass; else fail "nothing is owed while upstream has not moved" "$(uw_col herdr 0)"; fi
+if [ "$(uw_col kitten 5)" = current ]; then pass; else fail "a plain row at its pin is current, as before" "$(uw_col kitten 0)"; fi
+uw_items "0.0.1+tl.3"
+uw --check --tsv
+if [ "$(uw_col herdr 5)" = mismatch ]; then pass; else fail "a +tl.N row at another version is still a mismatch" "$(uw_col herdr 0)"; fi
+uw --check
+expect_out "and the line names the row's whole version" "items.tsv says 0.0.1+tl.3"
+
+printf 'herdrdev/herdr v99.0.0\nkovidgoyal/kitty v99.1.0\n' > "$UW/fx/latest"
+uw_items "$uw_herdr+abc.2"
+uw_before="$(sha "$UW/scripts/items.tsv") $(sha "$UW/recipes/cross/fetch-herdr.sh")"
+uw --bump herdr
+if [ "$ST" != 0 ]; then pass; else fail "a bump refuses a suffix other than +tl.N"; fi
+expect_out "and says to settle it by hand" "settle this one by hand"
+if [ "$uw_before" = "$(sha "$UW/scripts/items.tsv") $(sha "$UW/recipes/cross/fetch-herdr.sh")" ]; then pass; else fail "writing nothing"; fi
+
+uw_items "$uw_herdr+tl.3"
+uw --check --tsv
+if [ "$(uw_col herdr 5)" = behind ]; then pass; else fail "a +tl.N row is behind a newer upstream" "$(uw_col herdr 0)"; fi
+uw --bump herdr
+expect_status "--bump herdr" 0
+if [ "$(uw_ver herdr)" = "99.0.0+tl.0" ]; then pass; else fail "a +tl.N row moves to the new version with +tl.0" "$(uw_ver herdr)"; fi
+if grep -qx 'HERDR_VERSION=${HERDR_VERSION:-v99.0.0}' "$UW/recipes/cross/fetch-herdr.sh"; then pass; else fail "the recipe's version pin moves"; fi
+if grep -q "^ *aarch64) *HERDR_SHA256=$(sha "$UW/fx/assets/herdr-linux-aarch64") ;;" "$UW/recipes/cross/fetch-herdr.sh" &&
+    grep -q "^ *x86_64) *HERDR_SHA256=$(sha "$UW/fx/assets/herdr-linux-x86_64") ;;" "$UW/recipes/cross/fetch-herdr.sh"; then pass; else fail "and both digests, from the downloads"; fi
+if [ "$(uw_ver kitten)" = "$uw_kitten" ]; then pass; else fail "another item's row is untouched" "$(uw_ver kitten)"; fi
+if [ "$(head -1 "$UW/scripts/items.tsv")" = "# a comment line" ]; then pass; else fail "comment lines survive the bump"; fi
+uw --bump kitten
+expect_status "--bump kitten" 0
+if [ "$(uw_ver kitten)" = "99.1.0" ]; then pass; else fail "a plain row moves to the plain new version, as before" "$(uw_ver kitten)"; fi
+if grep -qx 'KITTY_TAG=${KITTY_TAG:-v99.1.0}' "$UW/recipes/cross/build-kitten.sh"; then pass; else fail "with its recipe's tag"; fi
+uw --check --tsv
+if [ "$(uw_col herdr 5)" = current ] && [ "$(uw_col herdr 2)" = 99.0.0 ]; then pass; else fail "after the bump herdr is current at 99.0.0" "$(uw_col herdr 0)"; fi
+if [ "$(uw_col herdr 7)" = yes ]; then pass; else fail "and a release is owed: newer than the released version, on a new bins tag" "$(uw_col herdr 0)"; fi
+uw --bump herdr 99.0.0
+expect_out "a second bump to the same tag has nothing to do" "already at 99.0.0"
+if [ "$(uw_ver herdr)" = "99.0.0+tl.0" ]; then pass; else fail "and leaves the row alone" "$(uw_ver herdr)"; fi
+rm -rf "$UW"
 
 echo
 # ---------------------------------------------------------------------------
