@@ -50,13 +50,18 @@
 #                       text, whatever stdout is (default: on for a terminal)
 #   TLSTORE_ICONS       nerd|plain — which icons styled output draws (default:
 #                       nerd in the launcher's terminal, plain elsewhere)
-#   TLSTORE_UPDATED_FROM  set by an update that just took a newer tlstore and
-#                       hands the rest of the run to it; that run never offers
-#                       a newer tlstore again
+#   TLSTORE_UPDATED_FROM  set by an upgrade (an update, before 0.21) that just
+#                       took a newer tlstore and hands the rest of the run to
+#                       it; that run never offers a newer tlstore again
 
 set -u
 
-TLSTORE_VERSION=0.20
+TLSTORE_VERSION=0.21
+
+# The first tlstore whose `update` only refreshes and lists (Revision 19);
+# `upgrade` installs. An engine before it hands an update it has just
+# self-updated to this one as `update`, meaning the whole thing.
+UPGRADE_SPLIT=0.21
 
 # The store program that pairs with this script, one digest per processor.
 # Empty in the source tree: scripts/release.sh --prepare fills them in from
@@ -164,9 +169,9 @@ ASSUME_YES="${TLSTORE_ASSUME_YES:-0}"
 ASSUME_TTY="${TLSTORE_ASSUME_TTY:-0}"
 [ "$ASSUME_TTY" = 1 ] || ASSUME_TTY=0
 
-# The version an update just moved on from, when this run is the newer tlstore
-# it handed itself to (cmd_update). Read once and dropped from the environment,
-# so nothing this run starts inherits it.
+# The version an upgrade just moved on from, when this run is the newer tlstore
+# it handed itself to (cmd_upgrade; cmd_update before 0.21). Read once and
+# dropped from the environment, so nothing this run starts inherits it.
 SU_FROM="${TLSTORE_UPDATED_FROM:-}"
 unset TLSTORE_UPDATED_FROM
 
@@ -2584,14 +2589,15 @@ channel_fetch() {
 # 2 refused what was offered; CH_OUTCOME and CH_REASON say which and why.
 # With minisign missing it first asks to install it: always when not quiet
 # (as `refresh` always has), and when quiet only with [ask] 1 (a plain
-# `update` with someone there to answer, or -y). Quiet, it only says that the
-# list moved; the caller says the rest.
+# `update` with someone there to answer, or -y). Quiet (1), it only says that
+# the list moved; silent (2, install's refresh) it says nothing at all. Either
+# way the caller says the rest.
 refresh_catalog() {
     rc_quiet="${1:-0}"
     rc_ask="${2:-}"
     if [ -z "$rc_ask" ]; then
         rc_ask=1
-        [ "$rc_quiet" = 1 ] && rc_ask=0
+        [ "$rc_quiet" != 0 ] && rc_ask=0
     fi
     if [ "$rc_ask" = 1 ] && ! have minisign; then
         if ask_yn "Updating the list of items needs minisign. Install it?"; then
@@ -2607,20 +2613,34 @@ refresh_catalog() {
             fi
             rm -f "$cn_sig"
             pick_catalog
-            say "Updated the list of items."
+            [ "$rc_quiet" = 2 ] || say "Updated the list of items."
             return 0
             ;;
         current)
-            [ "$rc_quiet" = 1 ] || say "The item list is already up to date."
+            [ "$rc_quiet" != 0 ] || say "The item list is already up to date."
             return 1
             ;;
         refused)
-            [ "$rc_quiet" = 1 ] || err "$CH_REASON — ignoring it"
+            [ "$rc_quiet" != 0 ] || err "$CH_REASON — ignoring it"
             return 2
             ;;
     esac
-    [ "$rc_quiet" = 1 ] || say "Could not check for a newer item list: $CH_REASON. Using the one you have."
+    [ "$rc_quiet" != 0 ] || say "Could not check for a newer item list: $CH_REASON. Using the one you have."
     return 1
+}
+
+# install_refresh — install starts from the newest item list, silently. When
+# it could not be had (offline, cannot verify, refused) the install goes on
+# from the list already here, after one line that says so; a refresh never
+# fails an install. Never asks for minisign: that is refresh's and update's.
+install_refresh() {
+    status "Checking the item list"
+    refresh_catalog 2 0 && { status_clear; return 0; }
+    case "$CH_OUTCOME" in
+        newer|current) status_clear; return 0 ;;
+    esac
+    say "Could not check for a newer item list: $CH_REASON. Using the one you have."
+    return 0
 }
 
 # update_refresh — the refresh `update` starts with (update_items reads its
@@ -2711,7 +2731,7 @@ pick_items() {
 
 usage() {
     cat <<'EOF'
-tlstore installs, updates and removes the tools and configs the launcher
+tlstore installs, upgrades and removes the tools and configs the launcher
 shows off but does not ship.
 
 Usage: tlstore [-y] <command> [options] [name...]
@@ -2724,9 +2744,10 @@ Commands:
   info <name>           what an item is and where it goes
   install [name...]     install items (alias: add); with no names, pick from a list
   remove <name...>      remove items tlstore installed (alias: uninstall)
-  update [name...]      bring what you have up to date (alias: upgrade)
+  update                fetch the newest item list and say what can be upgraded
+  upgrade [name...]     bring what you have up to date, tlstore too
   rollback <name>       go back one version, and hold the item there
-  hold <name...>        keep items at their version when you update
+  hold <name...>        keep items at their version when you upgrade
   unhold <name...>      let held items update again
   refresh               update the list of items
   self-update           bring tlstore itself up to date
@@ -2741,7 +2762,7 @@ Options:
   -v, --version   show the version
 
   Run 'tlstore help <command>' for the options a command takes of its own,
-  such as --dry-run on install, update and remove.
+  such as --dry-run on install, upgrade and remove.
 
 Exit status:
   0  done
@@ -2820,9 +2841,11 @@ EOF
 Usage: tlstore [-y] install [options] [name...]
        tlstore add ...
 
-Installs items, and the parts they need, in the order they need them.
-With no names it shows a list to pick from. When the packages they need
-from Termux come to more than 50 MB, it says how much before it asks.
+Fetches the newest item list first, then installs items, and the parts they
+need, in the order they need them. When the list cannot be fetched it says so
+in one line and installs from the one you have. With no names it shows a list
+to pick from. When the packages they need from Termux come to more than 50 MB,
+it says how much before it asks.
 
 Options:
   -n, --dry-run  say what would be installed, and change nothing
@@ -2853,16 +2876,39 @@ For the store app:
   --progress     a line per step on stdout, for a program to read (implies -y)
 EOF
             ;;
-        update|upgrade)
+        update)
             cat <<'EOF'
-Usage: tlstore [-y] update [options] [name...]
-       tlstore upgrade ...
+Usage: tlstore [-y] update [options]
 
-Fetches the newest item list and brings what you have up to date, then offers
-a newer tlstore when there is one: answer yes, no, or never. With no names it
-does everything you have installed, except items you have held; naming a held
-item updates it and lets go of the hold. When the packages it needs from
-Termux come to more than 50 MB, it says how much and asks first.
+Fetches the newest item list and says what is out of date: each item you have
+that has a newer version, and a newer tlstore when there is one. It installs
+nothing and changes nothing you have; 'tlstore upgrade' does that.
+
+With item names, --configs or --progress it is 'tlstore upgrade' with the same
+words, as update was before tlstore 0.21.
+
+Options:
+  --check        the same list, without looking for a newer tlstore
+  -n, --dry-run  the same as --check
+  --offline      do not fetch the item list or ask the registry; use what you have
+  -y, --yes      say yes when the item list needs minisign installed
+  -h, --help     show this page
+
+For the store app:
+  --tsv          the out-of-date items as tab-separated columns (with --check
+                 or without)
+EOF
+            ;;
+        upgrade)
+            cat <<'EOF'
+Usage: tlstore [-y] upgrade [options] [name...]
+
+Fetches the newest item list and takes a newer tlstore when there is one,
+asking first (answer yes, no, or never), then brings what you have up to date.
+With no names it does everything you have installed, except items you have
+held; naming a held item upgrades it and lets go of the hold. When the
+packages it needs from Termux come to more than 50 MB, it says how much and
+asks first. 'tlstore update' says what this would do.
 
 Options:
   --check        say what would change, and change nothing
@@ -2883,7 +2929,7 @@ Usage: tlstore [-y] rollback [options] <name>
 
 Puts an item back at the version it had before its last update, then holds it
 there so the next update does not undo that. It goes one step only; to move
-forward again, run 'tlstore unhold <name>' and 'tlstore update <name>'.
+forward again, run 'tlstore unhold <name>' and 'tlstore upgrade <name>'.
 
 Works for items from npm, binaries, app archives, agent skills and config files. A package,
 a bundle or a fish plugin cannot go back: Termux keeps only the newest package,
@@ -2900,9 +2946,9 @@ EOF
             cat <<'EOF'
 Usage: tlstore hold <name...>
 
-Keeps installed items at the version they have. A plain 'tlstore update'
-skips them and the store app does not offer them; 'tlstore update <name>'
-updates one anyway and lets go of its hold. Removing an item drops its hold.
+Keeps installed items at the version they have. A plain 'tlstore upgrade'
+skips them and the store app does not offer them; 'tlstore upgrade <name>'
+upgrades one anyway and lets go of its hold. Removing an item drops its hold.
 
 Options:
   -h, --help  show this page
@@ -2935,7 +2981,7 @@ EOF
 Usage: tlstore self-update [--check]
 
 Brings tlstore itself, and the store app that goes with it, up to date. This
-also turns the offer on update back on after you said never.
+also turns the offer on upgrade back on after you said never.
 Exits 1 when a newer tlstore was offered and could not be taken.
 
 Options:
@@ -4713,6 +4759,7 @@ plan_show_remove() {
 # What update --check says, read off the plan.
 plan_show_update() {
     sp_any=0
+    sp_pend=0
     sp_up=""
     sp_pkgs=0
     sp_wait=""
@@ -4726,6 +4773,7 @@ plan_show_update() {
             install:*)
                 if [ "$ps_why" = "$PLAN_LATEST" ]; then
                     sp_any=1
+                    sp_pend=1
                     say "$ps_name $ps_version is available; you have $(installed_version "$ps_name")"
                 elif is_installed "$ps_name"; then
                     sp_up="$sp_up $ps_name"
@@ -4740,7 +4788,8 @@ plan_show_update() {
         plan_split "$sp_line"
         [ "$ps_action" = retire ] || continue
         sp_any=1
-        say "$ps_name was retired; update will remove it"
+        sp_pend=1
+        say "$ps_name was retired; upgrade will remove it"
     done
     IFS="$NL"
     for sp_line in $PLAN; do
@@ -4756,29 +4805,30 @@ plan_show_update() {
         esac
         sp_any=1
         case "$ps_action:$ps_why" in
-            install:*) say "$ps_name is $ps_why; update will install it" ;;
-            *:needs\ *) say "$ps_name $ps_why; update leaves it out" ;;
-            *) say "$ps_name is $ps_why; update leaves it out" ;;
+            install:*) sp_pend=1; say "$ps_name is $ps_why; upgrade will install it" ;;
+            *:needs\ *) say "$ps_name $ps_why; upgrade leaves it out" ;;
+            *) say "$ps_name is $ps_why; upgrade leaves it out" ;;
         esac
     done
     IFS="$sp_ifs"
     if [ "$sp_any" = 0 ] && [ -z "$sp_up" ]; then
         say "Everything is up to date."
     else
+        [ -z "$sp_up" ] || sp_pend=1
         for sp_n in $sp_up; do
             sp_row=$(row "$sp_n")
             if [ "$(field "$sp_row" 2)" = file ]; then
-                say "$sp_n has a new version; update asks first if you changed it"
+                say "$sp_n has a new version; upgrade asks first if you changed it"
             else
                 say "$sp_n $(field "$sp_row" 3) is available; you have $(installed_version "$sp_n")"
             fi
         done
     fi
-    [ "$sp_pkgs" = 0 ] || say "Packages are checked by the package manager when you update."
+    [ "$sp_pkgs" = 0 ] || say "Packages are checked by the package manager when you upgrade."
     [ "$DRY_RUN" = 0 ] || say "Nothing was changed."
     if [ "$PLAN_OFFLINE" = 1 ]; then
         for sp_n in $sp_wait; do
-            say "$sp_n is checked against its source when you update."
+            say "$sp_n is checked against its source when you upgrade."
         done
     fi
 }
@@ -5199,7 +5249,7 @@ journal_done() {
     [ ! -f "$JOURNAL" ] || printf 'done\t%s\t%s\n' "$1" "$2" >> "$JOURNAL" 2>/dev/null || true
 }
 
-# A held item named on update's command line: updating it lets go of the hold.
+# A held item named on upgrade's command line: updating it lets go of the hold.
 plan_let_go() {
     is_held "$1" || return 0
     hold_drop "$1"
@@ -5399,6 +5449,11 @@ cmd_install() {
         err "install --dry-run needs a name; there is nothing to pick from without asking"
         return 2
     fi
+    # The newest list first (Revision 19), so what is installed is what the
+    # release says today, not what the list said when it was last refreshed.
+    install_refresh
+    need_catalog
+
     if [ -z "$ci_names" ]; then
         mkdir -p "$CACHE_DIR"
         ci_cand="$CACHE_DIR/choices"
@@ -5462,12 +5517,18 @@ cmd_remove() {
     plan_apply
 }
 
-# The item half of update; cmd_update adds the self-update on top of it.
+# The item half of update and upgrade. cmd_upgrade adds the self-update on top
+# of it; cmd_update sets cu_list=1, which plans and shows what is pending the
+# way --check does and installs nothing (Revision 19). Under cu_list a plain
+# run, with no --check, --tsv or --offline, still asks for a missing minisign
+# with someone there or -y, as update always has.
 update_items() {
     cu_check=0
     cu_offline=0
     cu_tsv=0
     cu_names=""
+    cu_verb=upgrade
+    [ "${cu_list:-0}" = 0 ] || cu_verb=update
     for cu_a in "$@"; do
         case "$cu_a" in
             --check) cu_check=1 ;;
@@ -5477,10 +5538,12 @@ update_items() {
             --progress) PROGRESS=1; ASSUME_YES=1 ;;
             -y|--yes) ASSUME_YES=1 ;;
             -n|--dry-run) cu_check=1; DRY_RUN=1 ;;
-            -*) bad_opt update "$cu_a"; return 2 ;;
+            -*) bad_opt "$cu_verb" "$cu_a"; return 2 ;;
             *) cu_names="$cu_names $cu_a" ;;
         esac
     done
+    cu_show="$cu_check"
+    [ "${cu_list:-0}" = 0 ] || cu_show=1
     need_catalog
     if [ "$cu_offline" = 0 ]; then
         [ "$cu_tsv" = 1 ] || status "Checking the item list"
@@ -5492,12 +5555,12 @@ update_items() {
         [ "$cu_tsv" = 1 ] || say "Nothing is installed yet."
         return 0
     fi
-    PLAN_CHECK="$cu_check"
+    PLAN_CHECK="$cu_show"
     PLAN_OFFLINE="$cu_offline"
     PLAN_TSV="$cu_tsv"
     # shellcheck disable=SC2086  # a list of names, split on purpose
     plan_build update $cu_names || return 1
-    if [ "$cu_check" = 1 ]; then
+    if [ "$cu_show" = 1 ]; then
         if [ "$cu_tsv" = 1 ]; then
             plan_tsv
         else
@@ -5509,24 +5572,72 @@ update_items() {
         say "Everything is up to date."
         return 0
     fi
-    # An update asks nothing, unless the Termux packages it needs are large (Revision 15).
+    # An upgrade asks nothing, unless the Termux packages it needs are large (Revision 15).
     if plan_weight_say; then
         ask_yn "Go ahead?" || { say "Nothing was updated."; return 0; }
     fi
     plan_apply
 }
 
-# An update offers the newer tlstore, and the store program that pairs with
-# it, when there is one — never offline, never on `--check` (the refresh
-# tlstore-ui runs in the background; swapping the files under a running UI is
-# what `self-update --progress` exists to do in plain view), and not inside a
-# --progress stream, which carries the item lines alone. A plain update
-# (Revision 16) asks first, before any item is planned: taken, the newer
-# tlstore is run in this one's place with the same arguments, so the newer
-# engine plans the items, and TLSTORE_UPDATED_FROM keeps it from offering or
-# restarting again. Declined, never, offline or nothing newer, this one carries
-# on. `update --tsv` without --check still asks at the end, as it always has.
+# update_wants_upgrade <args> — true when these are an upgrade's: an item
+# named, or an option that only means something while installing (--progress,
+# --configs). `update` with them is `upgrade` with them, word for word, so a
+# script or an older store app that runs `update --progress <names>` still
+# installs. -y, --check, -n/--dry-run, --tsv and --offline keep it a list.
+update_wants_upgrade() {
+    for uw_a in "$@"; do
+        case "$uw_a" in
+            -y|--yes|--check|-n|--dry-run|--tsv|--offline) ;;
+            --progress|--configs) return 0 ;;
+            -*) ;;
+            *) return 0 ;;
+        esac
+    done
+    return 1
+}
+
+# tlstore update — fetch the newest item list, then say what is pending: the
+# items an upgrade would install, and a newer tlstore when one is out. It
+# installs nothing and changes nothing installed (Revision 19); `upgrade` does
+# that. Two runs are an upgrade instead: one whose arguments are an upgrade's
+# (update_wants_upgrade), and one an engine older than UPGRADE_SPLIT handed
+# over after it took this one — that engine ran `update`, meaning the whole
+# thing, and the one run still has to finish it.
 cmd_update() {
+    if update_wants_upgrade "$@" ||
+        { [ -n "$SU_FROM" ] && version_newer "$UPGRADE_SPLIT" "$SU_FROM"; }; then
+        cmd_upgrade "$@"
+        return $?
+    fi
+    cu_list=1
+    cu_su=0
+    sp_pend=0
+    update_items "$@"
+    cu_status=$?
+    # A plain update names a newer tlstore and leaves it for upgrade; --check,
+    # -n, --tsv (the store app's background check, whose stdout is its rows
+    # alone) and --offline do not look, as they never have.
+    if [ "$cu_status" = 0 ] && [ "$cu_check" = 0 ] && [ "$cu_tsv" = 0 ] && [ "$cu_offline" = 0 ]; then
+        [ "$sp_pend" = 0 ] || say "Run 'tlstore upgrade' to install them."
+        [ -n "$SU_FROM" ] || self_update_note || cu_su=1
+    fi
+    # A refused tlstore (a bad signature) fails the command, as it always has.
+    [ "$cu_su" = 0 ] || [ "$cu_status" != 0 ] || cu_status=1
+    status_clear
+    return "$cu_status"
+}
+
+# An upgrade offers the newer tlstore, and the store program that pairs with
+# it, when there is one — never offline, never on `--check`, and not inside a
+# --progress stream, which carries the item lines alone. A plain upgrade
+# (Revision 16, when it was `update`) asks first, before any item is planned:
+# taken, the newer tlstore is run in this one's place as `upgrade` with the
+# same arguments, so the newer engine plans the items, and TLSTORE_UPDATED_FROM
+# keeps it from offering or restarting again. Declined, never, offline or
+# nothing newer, this one carries on. `upgrade --tsv` without --check still
+# asks at the end, as `update --tsv` did.
+cmd_upgrade() {
+    cu_list=0
     cu_plain=1
     cu_su=0
     su_moved=0
@@ -5544,7 +5655,7 @@ cmd_update() {
             status_clear
             export TLSTORE_UPDATED_FROM="$TLSTORE_VERSION"
             export TLSTORE_ASSUME_YES="$ASSUME_YES"
-            exec "$su_target" update "$@"
+            exec "$su_target" upgrade "$@"
         fi
     fi
     update_items "$@"
@@ -6018,6 +6129,32 @@ self_update_offer() {
     return 0
 }
 
+# The newer tlstore a plain `update` names (Revision 19): one line, nothing
+# taken. The script is fetched and verified as for the offer, so only a
+# release that checks out is named, and dropped again; upgrade fetches its own.
+# Nothing newer, offline, cannot verify or after "never": silence. A refused
+# script is said and returns 1, as the offer's is.
+self_update_note() {
+    SU_NOTE=""
+    su_ready || return 0
+    su_fetch_script 0
+    su_rc=$?
+    case "$su_rc" in
+        0) ;;
+        2) err "$SU_NOTE"; return 1 ;;
+        *) return 0 ;;
+    esac
+    if [ ! -f "$SU_QUIET" ]; then
+        if su_ui_digest_named; then
+            say "tlstore $su_version is out: tlstore upgrade installs it"
+        else
+            say "$SU_NOTE"
+        fi
+    fi
+    rm -f "$su_new" "$su_sig"
+    return 0
+}
+
 # tlstore self-update --check --tsv — for tlstore-ui, when it starts: one
 # line, `self <installed> <latest> <available 0|1> <outcome> <reason>` (an
 # older UI reads the first four; the reason is `-` when there is none). Only
@@ -6333,7 +6470,8 @@ main() {
         prefetch) cmd_prefetch "$@" ;;
         install|add) cmd_install "$@" ;;
         remove|uninstall) cmd_remove "$@" ;;
-        update|upgrade) cmd_update "$@" ;;
+        update) cmd_update "$@" ;;
+        upgrade) cmd_upgrade "$@" ;;
         rollback) cmd_rollback "$@" ;;
         hold) cmd_hold "$@" ;;
         unhold) cmd_unhold "$@" ;;
