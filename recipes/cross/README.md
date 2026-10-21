@@ -17,7 +17,7 @@ NDK plus a sysroot assembled with `dpkg-deb -x`.
 | `build-kitten.sh` | kitty's standalone `kitten` client | Go + python3 (+ NDK for x86_64) |
 | `build-btop.sh` | patched btop, fully static, for the launcher's Shizuku lane | NDK + GNU make |
 | `build-tl-priv.sh` | `tl-priv`, the lane's client (`tl-priv/tl-priv.c`), fully static | NDK |
-| `fetch-herdr.sh` | herdr, upstream's own static musl build, digest-pinned (not built) | curl |
+| `fetch-herdr.sh` | herdr as a `.tar.gz` app tree: upstream's own static musl build, digest-pinned (not built), behind a launcher script that turns its terminal notifications on in Termux Launcher | curl, GNU tar, gzip |
 | `fetch-launcher-skills.sh` | the launcher's agent skills, one `.tar.gz` each, packed by the launcher's own `scripts/pack-agent-skills.sh` at a pinned commit (not built; the same on every processor) | git, GNU tar, gzip |
 | `build-terminal-browser.sh` | terminal-browser as a `.tar.gz` app tree, from our fork: its JavaScript built as upstream releases it, `pixel.node` and `agent-browser` built for Android, Termux's `electron42` in place of upstream's Electron | rustup `<arch>-linux-android` + NDK, Node 22 + pnpm 10.13.1, GNU tar |
 
@@ -273,6 +273,18 @@ Device-verified 2026-08-16 on Pong (A065, Android 16), running inside the launch
   endpoint. Use `launcherctl` and the terminal action registry instead.
 - Every kitten that expects kitty's desktop application (window management, its own config
   parsing) is out of scope; only the terminal-facing kittens are meaningful here.
+
+**herdr**
+
+- The asset is a gzipped tar of the app root, not the bare binary: upstream's binary, unchanged,
+  as `libexec/herdr`, and `bin/herdr`, the script the catalog runs. It is packed as
+  terminal-browser's is (sorted names, one fixed mtime, numeric owner 0, gzip -n), so the same pin
+  gives the same archive.
+- herdr writes its terminal notifications (`[ui.toast] delivery = "terminal"`) only for Ghostty,
+  iTerm2, WezTerm and kitty, and nothing for any other terminal. When `TERM_PROGRAM` is
+  `termux-launcher` and `KITTY_WINDOW_ID` is unset, `bin/herdr` sets `KITTY_WINDOW_ID=1`, so herdr
+  writes kitty's OSC 99, which the launcher shows as an Android notification. herdr reads the
+  variable for nothing else and removes it from every pane it starts.
 
 ## Redistribution
 
