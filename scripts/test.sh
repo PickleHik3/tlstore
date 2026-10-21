@@ -2373,6 +2373,70 @@ EOF
     ARCH_KNOB=riscv64
     tl list --tsv
     expect_no_out "no archive is offered on a processor with no prebuilt tools" $'^app\t'
+
+    # --- a binary that becomes an archive: the same name, a new kind, taken by update ---
+    # herdr went from one mirrored binary to an archive (the upstream binary plus a launcher
+    # script) at 0.9.5+tl.0. The phone has the binary at ~/.local/bin/<name>; the update must
+    # put the wrapper there and the tree in ~/.local/lib/<name>, keep no .bak of the old binary
+    # (it was the item's own file), and remove must take both away. The old binary is a real
+    # ELF, still running while the update writes the wrapper over its path, as a herdr server
+    # started from it would be.
+    rm -rf "$TESTHOME/.local/share/tlstore/installed.tsv" "$TESTHOME/.local/lib" "$TESTHOME/.local/bin"
+    mkdir -p "$FX/rel/4.0" "$FX/rel/4.1" "$FX/kindsrc/bin" "$FX/kindsrc/libexec"
+    cp -L "$(command -v sleep)" "$FX/rel/4.0/kindswap-aarch64"
+    chmod 755 "$FX/rel/4.0/kindswap-aarch64"
+    printf '#!/bin/sh\necho "kindswap archive $*"\n' > "$FX/kindsrc/bin/kindswap"
+    chmod 755 "$FX/kindsrc/bin/kindswap"
+    cp "$FX/rel/4.0/kindswap-aarch64" "$FX/kindsrc/libexec/kindswap"
+    tar czf "$FX/rel/4.1/kindswap-aarch64" -C "$FX/kindsrc" .
+    {
+        printf '# tlstore catalog\tserial=2026090655\n'
+        printf 'kindswap\tbinary\t1.0\t*\tbinaries:kindswap@4.0\t%s\t-\t-\t-\tOne file for now.\t%s\n' \
+            "$(sha "$FX/rel/4.0/kindswap-aarch64")" "$R5_NONE"
+    } > "$user_catalog"
+    ks_bin="$TESTHOME/.local/bin/kindswap"
+    ks_dir="$TESTHOME/.local/lib/kindswap"
+    tl install kindswap -y
+    expect_status "the binary installs first" 0
+    if cmp -s "$ks_bin" "$FX/rel/4.0/kindswap-aarch64"; then pass; else fail "as one file at ~/.local/bin/<name>"; fi
+    ks_pid=""
+    if "$ks_bin" 0 2>/dev/null; then
+        "$ks_bin" 300 &
+        ks_pid=$!
+    fi
+    {
+        printf '# tlstore catalog\tserial=2026090656\n'
+        printf 'kindswap\tarchive\t1.0+tl.0\t*\tbinaries:kindswap@4.1\t%s\t-\t-\texe=bin/kindswap\tA folder now.\t%s\n' \
+            "$(sha "$FX/rel/4.1/kindswap-aarch64")" "$R5_NONE"
+    } > "$user_catalog"
+    tl update --check --offline
+    expect_out "update --check offers the archive in its place" "kindswap 1.0+tl.0 is available; you have 1.0"
+    tl update --offline -y kindswap
+    ks_out="$OUT"
+    expect_status "update takes the binary to the archive" 0
+    expect_content "the wrapper is where the binary was" "$ks_bin" \
+        "$(printf '#!%s/bin/sh\n# written by termux-launcher\nexec "%s/bin/kindswap" "$@"' "$TPREFIX" "$ks_dir")"
+    if [ "$("$ks_bin" hi 2>&1)" = "kindswap archive hi" ]; then pass; else fail "and runs the program inside the directory" "$("$ks_bin" hi 2>&1)"; fi
+    if cmp -s "$ks_dir/libexec/kindswap" "$FX/rel/4.0/kindswap-aarch64"; then pass; else fail "the tree is unpacked into ~/.local/lib/<name>"; fi
+    ks_baks="$(find "$TESTHOME/.local/bin" -name 'kindswap.bak-*' 2>/dev/null)"
+    if [ -z "$ks_baks" ]; then pass; else fail "no .bak of the old binary is kept: it was the item's own" "$ks_baks"; fi
+    OUT="$ks_out"
+    expect_no_out "and none is announced" "kept a copy"
+    if awk -F'\t' -v d="$ks_dir $ks_bin" '$1=="kindswap" { exit ($2=="archive" && $3=="1.0+tl.0" && $5==d && $8=="1.0") ? 0 : 1 }' "$TESTHOME/.local/share/tlstore/installed.tsv"; then pass; else fail "the state records the new kind, both paths, and the binary's version before it" "$(cat "$TESTHOME/.local/share/tlstore/installed.tsv")"; fi
+    if [ -n "$ks_pid" ]; then
+        if kill -0 "$ks_pid" 2>/dev/null; then pass; else fail "the old binary kept running through the update"; fi
+        kill "$ks_pid" 2>/dev/null
+        wait "$ks_pid" 2>/dev/null
+    else
+        skip "the update over a running binary" "sleep here does not run under another name"
+    fi
+    tl remove kindswap -y
+    expect_status "the archive that replaced a binary is removed" 0
+    expect_no_file "its wrapper goes" "$ks_bin"
+    expect_no_file "and its directory" "$ks_dir"
+    ks_baks="$(find "$TESTHOME/.local/bin" -name 'kindswap*' 2>/dev/null)"
+    if [ -z "$ks_baks" ]; then pass; else fail "nothing of either kind is left in ~/.local/bin" "$ks_baks"; fi
+    if grep -q '^kindswap	' "$TESTHOME/.local/share/tlstore/installed.tsv" 2>/dev/null; then fail "and its state row goes"; else pass; fi
     rm -rf "$TESTHOME/.local"
     mv "$ROOT/saved-local" "$TESTHOME/.local"
 
