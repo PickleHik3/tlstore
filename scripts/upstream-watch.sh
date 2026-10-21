@@ -18,14 +18,18 @@
 #
 # Ours is what the recipe pins, and every items.tsv row of the item must carry the same version
 # (the tag without its leading v): a row that disagrees is reported as a mismatch for a hand to
-# settle, and the watch leaves the item alone. --tsv adds what the last store release carries
+# settle, and the watch leaves the item alone. A row version <upstream>+<suffix> reads as
+# <upstream> here: herdr's 0.9.5+tl.0 is upstream's 0.9.5 plus the store's own build number
+# (bins-record.sh bumps it when the asset changes, as for any +….N version). --tsv adds what the last store release carries
 # (dist/catalog.tsv, committed by release.yml) and whether a release is owed: the item's version
 # on main is ahead of the release and, for a built item, its items.tsv source has moved to a new
 # bins-… tag too (built and recorded, not yet released). A version that moved without a build is
 # "unbuilt", never released on its own.
 #
 # A bump writes only the item's recipe lines and the version column (and, for a url item, the
-# source) of its items.tsv rows. The binary itself, its bins-… tag and its SHA256SUMS lines are
+# source) of its items.tsv rows; a row with a +tl.N suffix gets the new version with +tl.0, so the
+# store's build number starts again, and a row with any other suffix is left for a hand. The
+# binary itself, its bins-… tag and its SHA256SUMS lines are
 # build.yml's to move (scripts/bins-record.sh), so a bump is what makes phones see the rebuild as
 # an update (docs/maintainer/catalog.md, "Rebuilding a binary"). A bump that cannot verify what it
 # pins — a tag that does not resolve, an asset whose digest GitHub does not publish or does not
@@ -108,6 +112,9 @@ row_version() {
         END { print (v == "" ? "-" : v) }' "$items"
 }
 
+# The upstream version in a row version: everything before a +<suffix> (0.9.5+tl.0 is 0.9.5).
+upstream_of() { printf '%s\n' "${1%%+*}"; }
+
 # A column of the item's first items.tsv row, or of its first row in the released catalog.
 row_field() {
     awk -F '\t' -v i="$2" -v c="$3" '!/^#/ && $1 == i { print $c; exit }' "$1"
@@ -120,7 +127,7 @@ ours() {
         commit) v="$(sed -n "s/^${var}_VERSION=\"\\([^\"]*\\)\".*/\\1/p" "$repo/$file")" ;;
         tag)    v="$(sed -n "s/^${var}=\\\${${var}:-\\([^}]*\\)}.*/\\1/p" "$repo/$file")" ;;
         asset=*) v="$(sed -n "s/^${var}_VERSION=\\\${${var}_VERSION:-\\([^}]*\\)}.*/\\1/p" "$repo/$file")" ;;
-        url)    v="$(row_version "$item")" ;;
+        url)    v="$(upstream_of "$(row_version "$item")")" ;;
         *) die "$item: unknown style $style" ;;
     esac
     [ "$(printf '%s\n' "$v" | grep -c .)" = 1 ] || die "$item: no single pin in ${file/#-/scripts\/items.tsv}"
@@ -146,7 +153,7 @@ check() {
             status=error
         else
             theirs="${tag#v}"
-            if [ "$row" != "$our" ]; then status=mismatch
+            if [ "$(upstream_of "$row")" != "$our" ]; then status=mismatch
             elif newer "$our" "$theirs"; then status=behind
             elif [ "$our" = "$theirs" ]; then status=current
             else status=ahead
@@ -157,7 +164,7 @@ check() {
             released="$(row_field "$released_catalog" "$item" 3)"
             released="${released:--}"
         fi
-        if [ "$row" = "$our" ] && [ "$released" != - ] && newer "$released" "$our"; then
+        if [ "$(upstream_of "$row")" = "$our" ] && [ "$released" != - ] && newer "$released" "$our"; then
             owed=yes
             # A built item is owed only once build.yml recorded a new binary for it.
             if [ "$tool" != - ] && [ "$(row_field "$items" "$item" 5)" = "$(row_field "$released_catalog" "$item" 5)" ]; then
@@ -188,10 +195,14 @@ rewrite() {
 }
 
 bump() {
-    local item="$1" tag="${2:-}" our ver commit url="" from arch asset digest want got dir tmp_items files
+    local item="$1" tag="${2:-}" our row suffix ver row_ver commit url="" from arch asset digest want got dir tmp_items files
     load "$item"
     our="$(ours)"
-    [ "$(row_version "$item")" = "$our" ] || die "$item: items.tsv says $(row_version "$item"), the recipe $our; settle that by hand first"
+    row="$(row_version "$item")"
+    [ "$(upstream_of "$row")" = "$our" ] || die "$item: items.tsv says $row, the recipe $our; settle that by hand first"
+    suffix="${row#"$our"}"
+    [ -z "$suffix" ] || [[ "$suffix" =~ ^\+tl\.[0-9]+$ ]] ||
+        die "$item: items.tsv says $row; a bump moves only a +tl.N suffix, so settle this one by hand"
     if [ -z "$tag" ]; then
         tag="$(latest_tag "$upstream")" || die "$item: could not read the latest release of $upstream"
     fi
@@ -202,6 +213,8 @@ bump() {
         return 0
     fi
     newer "$our" "$ver" || die "$item: $tag is not later than ours ($our)"
+    row_ver="$ver"
+    [ -z "$suffix" ] || row_ver="$ver+tl.0"
 
     # Everything is resolved and verified before the first write.
     declare -A sums=()
@@ -264,12 +277,12 @@ bump() {
     esac
 
     tmp_items="$(mktemp)"
-    awk -F '\t' -v OFS='\t' -v i="$item" -v ver="$ver" -v url="$url" -v style="$style" '
+    awk -F '\t' -v OFS='\t' -v i="$item" -v ver="$row_ver" -v url="$url" -v style="$style" '
         /^#/ || NF < 5 || $1 != i { print; next }
         { $3 = ver; if (style == "url") $5 = url; print }' "$items" > "$tmp_items"
     cat "$tmp_items" > "$items"
     rm -f "$tmp_items"
-    [ "$(row_version "$item")" = "$ver" ] || die "$item: items.tsv did not move to $ver"
+    [ "$(row_version "$item")" = "$row_ver" ] || die "$item: items.tsv did not move to $row_ver"
 
     files="scripts/items.tsv"
     [ "$file" = - ] || files="$file, $files"
