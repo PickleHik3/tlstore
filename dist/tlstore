@@ -56,7 +56,7 @@
 
 set -u
 
-TLSTORE_VERSION=0.19
+TLSTORE_VERSION=0.20
 
 # The store program that pairs with this script, one digest per processor.
 # Empty in the source tree: scripts/release.sh --prepare fills them in from
@@ -2071,7 +2071,7 @@ do_npm_musl() {
         rm -rf "$np_dir.old"
     fi
 
-    wrapper_write "$np_wrapper" "$np_dir/$np_exe"
+    wrapper_write "$np_wrapper" "$np_dir/$np_exe" || return 1
     state_record "$ii_name" "$ii_kind" "$np_version" "$np_dir" "$np_wrapper"
     say "  $np_wrapper"
     return 0
@@ -2081,11 +2081,15 @@ do_npm_musl() {
 # lives in a directory of its own (the npm kinds, an archive): it exports what
 # env= names, sets TZ for tz=1, and execs the program with args= in front of
 # the person's own arguments. What was at <wrapper> before is kept as a .bak
-# unless this item wrote it (backup_existing). Reads ii_options.
+# unless this item wrote it (backup_existing). Reads ii_options. It is written
+# beside <wrapper> and moved over it: what is there may be a program that is
+# still running (a binary item that became an archive, its server still up),
+# which cannot be opened for writing ("Text file busy") but can be replaced.
 wrapper_write() {
     mkdir -p "$BIN_DIR"
     backup_existing "$1"
     ww_envs=$(commas "$(opt "$ii_options" env)")
+    ww_tmp="$(dirname "$1")/.$(basename "$1").$$.part"
     {
         printf '#!%s/bin/sh\n' "$PREFIX"
         printf '# written by termux-launcher\n'
@@ -2103,8 +2107,9 @@ wrapper_write() {
         else
             printf 'exec "%s" "$@"\n' "$2"
         fi
-    } > "$1"
-    chmod 755 "$1"
+    } > "$ww_tmp" || { rm -f "$ww_tmp"; err "could not write $1"; return 1; }
+    chmod 755 "$ww_tmp"
+    mv -f "$ww_tmp" "$1" || { rm -f "$ww_tmp"; err "could not put $1 in place"; return 1; }
 }
 
 # do_archive — an app that is a whole directory (an Electron app's tree, say),
@@ -2144,7 +2149,7 @@ do_archive() {
     fi
     replace_dir "$da_dir.new" "$da_dir"
 
-    wrapper_write "$da_wrapper" "$da_dir/$da_exe"
+    wrapper_write "$da_wrapper" "$da_dir/$da_exe" || return 1
     state_record "$ii_name" archive "$ii_version" "$da_dir" "$da_wrapper"
     say "  $da_wrapper"
     return 0
