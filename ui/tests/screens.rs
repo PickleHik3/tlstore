@@ -517,7 +517,7 @@ fn updates_filter_shows_only_updates_and_updates_them_all() {
     h.key(Key::Char('u'));
     assert_eq!(h.r().top(), "installing");
     h.settle();
-    assert!(h.log("calls.log").lines().any(|l| l == "update --progress fastfetch kitten"));
+    assert!(h.log("calls.log").lines().any(|l| l == "upgrade --progress fastfetch kitten"));
     assert!(h.has("fastfetch and kitten are up to date."), "{}", h.text);
     h.key(Key::Esc);
     assert!(!h.has("updates"), "{}", h.text);
@@ -533,7 +533,7 @@ fn update_key_on_an_updatable_row_updates_that_item() {
     h.key(Key::Char('u'));
     assert_eq!(h.r().top(), "installing");
     h.settle();
-    assert!(h.log("calls.log").lines().any(|l| l == "update --progress kitten"));
+    assert!(h.log("calls.log").lines().any(|l| l == "upgrade --progress kitten"));
 }
 
 #[test]
@@ -769,7 +769,7 @@ fn item_keys_star_repo_and_jobs() {
     h.key(Key::Char('u'));
     assert_eq!(h.r().top(), "installing");
     h.settle();
-    assert!(h.log("calls.log").lines().any(|l| l == "update --progress kitten"));
+    assert!(h.log("calls.log").lines().any(|l| l == "upgrade --progress kitten"));
     h.key(Key::Enter);
     assert_eq!(h.r().top(), "item");
     assert!(!h.has("u update"), "no update left: the slot is empty\n{}", h.text);

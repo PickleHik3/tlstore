@@ -83,7 +83,7 @@ the browser, ctrl+shift+m toggles it. The setting is `site.mode` in the settings
 - Pasting an image from the clipboard into a page does not work on Android; pasting text does.
 - Telemetry is off in this build. Upstream sends anonymous usage events and crash reports; to send
   them, set `TERMINAL_BROWSER_NO_TELEMETRY=0` before starting it.
-- Keep it current with `tlstore update`, like everything else from the store.
+- Keep it current with `tlstore upgrade`, like everything else from the store.
   `terminal-browser upgrade` is turned off here, because it would install upstream's desktop
   build over this one.
 - Upstream's project page is

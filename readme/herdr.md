@@ -61,7 +61,7 @@ herdr --remote myserver
   `[ui.toast]` in that file. herdr only sends them to terminals it knows, so in the launcher's
   terminal the store's copy tells it it is running in kitty, whose notifications the launcher
   shows. The agents in its panes never see the difference.
-- Keep it current with `tlstore update`, like everything else from the store. herdr tells you
+- Keep it current with `tlstore upgrade`, like everything else from the store. herdr tells you
   when a new version is out; `herdr update` also works, but then the store no longer knows which
   version you have.
 - This is herdr's own Linux build, unchanged, started through a short script that does only the

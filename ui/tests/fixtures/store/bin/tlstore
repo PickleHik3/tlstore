@@ -125,7 +125,7 @@ case "$cmd" in
         ;;
 esac
 case "$cmd" in
-    install|update|remove) ;;
+    install|upgrade|remove) ;;
     *) exit 2 ;;
 esac
 [ "$1" = --progress ] || exit 2
@@ -163,7 +163,7 @@ for n in "$@"; do
     printf 'step\t%s\t100\tready\n' "$n"
     msg=installed
     [ "$cmd" = remove ] && msg=removed
-    [ "$cmd" = update ] && msg=updated
+    [ "$cmd" = upgrade ] && msg=updated
     [ -f "$d/kept" ] && msg="kept your config.fish"
     printf 'done\t%s\tok\t%s\n' "$n" "$msg"
     case "$cmd" in
@@ -172,7 +172,7 @@ for n in "$@"; do
             sed -i "s/^$n${TAB}installed${TAB}\([^$TAB]*\)${TAB}[^$TAB]*${TAB}/$n${TAB}available${TAB}\1${TAB}${TAB}/" "$d/list.tsv"
             sed -i "/^$n$TAB/d" "$d/updates.tsv"
             ;;
-        update) sed -i "/^$n$TAB/d" "$d/updates.tsv" ;;
+        upgrade) sed -i "/^$n$TAB/d" "$d/updates.tsv" ;;
     esac
 done
 exit $failed

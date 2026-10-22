@@ -410,8 +410,10 @@ EOF
     printf '{"name":"demo-droid","version":"3.0.0","dist":{"tarball":"file://%s/demo-droid-3.0.0.tgz","integrity":"sha512-%s"}}\n' \
         "$FX" "$(sha512_b64 "$FX/demo-droid-3.0.0.tgz")" > "$FX/registry/demo-droid/latest"
 
-    # The catalog the app ships, plus three the refresh can be pointed at.
+    # The catalog the app ships, plus the ones the refresh can be pointed at:
+    # same.tsv is the shipped one again, the same serial.
     write_catalog "$TPREFIX/libexec/termux-launcher/tlstore/catalog.tsv" 2026090601 1 fakebin-1
+    cp "$TPREFIX/libexec/termux-launcher/tlstore/catalog.tsv" "$FX/same.tsv"
     write_catalog "$FX/newer.tsv" 2026090602 2 fakebin-2
     write_catalog "$FX/older.tsv" 2026090600 1 fakebin-1
     write_catalog "$FX/newest.tsv" 2026090603 2 fakebin-2
@@ -424,7 +426,7 @@ EOF
     fi
     if [ "$HAVE_MINISIGN" = 1 ]; then
         cp "$ROOT/key.pub" "$TPREFIX/libexec/termux-launcher/tlstore/trusted.pub"
-        for c in newer older newest tampered; do
+        for c in same newer older newest tampered; do
             minisign -S -s "$ROOT/key.sec" -x "$FX/$c.tsv.minisig" -m "$FX/$c.tsv" >/dev/null 2>&1
         done
         # Signed, then changed: the signature no longer covers the file.
@@ -615,7 +617,10 @@ expect_content() {
 
 run_suite() {
     build_fixture
-    CATALOG_URL="file://$FX/newer.tsv"
+    # install refreshes the item list first (Revision 19). Until the update
+    # tests below move it on, the refresh offers the list already in use, so
+    # every install takes the list it is given; those tests point it further.
+    CATALOG_URL="file://$FX/same.tsv"
     STDIN_TEXT=""
     ARCH_KNOB=""
     HOST_KNOB=""
@@ -636,10 +641,7 @@ run_suite() {
     T=$'\t'
     PUB="$TPREFIX/libexec/termux-launcher/tlstore/trusted.pub"
     if [ "$HAVE_MINISIGN" = 1 ]; then
-        # A signed copy of the list the app ships: the same serial.
-        cp "$TPREFIX/libexec/termux-launcher/tlstore/catalog.tsv" "$FX/same.tsv"
-        minisign -S -s "$ROOT/key.sec" -x "$FX/same.tsv.minisig" -m "$FX/same.tsv" >/dev/null 2>&1
-
+        # same.tsv (build_fixture) is a signed copy of the list the app ships.
         CATALOG_URL="file://$FX/newer.tsv"
         ch_fetch catalog
         expect_out "channel_fetch catalog: a newer signed list returns 0" "^rc=0$"
@@ -694,7 +696,7 @@ run_suite() {
         expect_out "channel_fetch catalog: no minisign cannot verify" "^outcome=cannot-verify$"
         expect_out "channel_fetch catalog: and names the fix" "^reason=minisign is not installed (pkg install minisign)$"
         if [ "$(printf '%s\n' "$OUT" | grep -c "^catalog${T}")" = 1 ]; then pass; else fail "channel.tsv keeps one line per channel" "$OUT"; fi
-        CATALOG_URL="file://$FX/newer.tsv"
+        CATALOG_URL="file://$FX/same.tsv"
     else
         skip "channel_fetch catalog tests" "minisign is not installed"
     fi
@@ -711,7 +713,15 @@ run_suite() {
     tl help install; expect_status "help install" 0; expect_out "help install names --configs" "configs"
     tl update -h; expect_out "update -h documents --check" "check"
     expect_out "update -h documents --offline" "offline"
-    tl upgrade --help; expect_status "an alias has the page too" 0
+    expect_out "update -h says it installs nothing" "It installs$"
+    expect_out "and that upgrade does" "'tlstore upgrade' does that"
+    expect_no_out "update -h no longer documents --configs" "^  --configs"
+    tl upgrade --help; expect_status "upgrade has a page of its own" 0
+    expect_out "upgrade --help is upgrade's page" "Usage: tlstore \[-y\] upgrade"
+    expect_out "upgrade --help documents --configs" "^  --configs"
+    expect_out "upgrade --help documents --progress" "^  --progress"
+    tl help; expect_out "help lists update as the list" "^  update  .*say what can be upgraded"
+    expect_out "help lists upgrade" "^  upgrade \[name"
     tl help nope; expect_status "help for an unknown command is a usage error" 2
     tl -y list; expect_status "-y before the command works" 0
     expect_out "and the command still runs" "hello"
@@ -946,7 +956,7 @@ run_suite() {
     expect_out "plan: what is current is skipped" "^musl-loader${T}skip${T}binary${T}1${T}auto${T}-$"
     if [ "$(plan_seq)" = "musl-loader demo-pkg claude-code " ]; then pass; else fail "plan: the new part before what needs it" "$(plan_seq)"; fi
     tl update --check --offline
-    expect_out "update --check names the new part" "demo-pkg is needed by claude-code; update will install it"
+    expect_out "update --check names the new part" "demo-pkg is needed by claude-code; upgrade will install it"
     tl update --check --tsv --offline
     expect_no_out "update --check --tsv has no line for it" "^demo-pkg${T}"
     rm -f "$PSTATE"
@@ -1032,7 +1042,7 @@ run_suite() {
     printf 'the users own greeting\n' > "$TESTHOME/.config/hello.conf"
     write_catalog "$UCAT" 2026099991 2 fakebin-2
     : > "$ROOT/curl.log"
-    tl update hello --offline --configs -y
+    tl upgrade hello --offline --configs -y
     expect_status "fetch first: a changed config file updates" 0
     expect_content "fetch first: from the staged copy" "$TESTHOME/.config/hello.conf" "greeting from the catalog"
     if [ "$(grep -c "hello.conf" "$ROOT/curl.log")" = 1 ]; then pass; else fail "fetch first: one fetch for the payload" "$(tr '\n' '|' < "$ROOT/curl.log")"; fi
@@ -1040,7 +1050,7 @@ run_suite() {
     # The same file as yours: recorded, from the one fetch too.
     write_catalog "$UCAT" 2026099992 3 fakebin-3
     : > "$ROOT/curl.log"
-    tl update hello --offline -y
+    tl upgrade hello --offline -y
     expect_status "fetch first: a config file that is the same as yours" 0
     if [ "$(grep -c "hello.conf" "$ROOT/curl.log")" = 1 ]; then pass; else fail "fetch first: one fetch for it as well" "$(tr '\n' '|' < "$ROOT/curl.log")"; fi
     if awk -F "$T" '$1 == "hello" && $3 == "3"' "$PSTATE" | grep -q .; then pass; else fail "fetch first: and it is recorded" "$(cat "$PSTATE")"; fi
@@ -1164,7 +1174,7 @@ run_suite() {
     sed -i "s|file://$FX/hello.conf$T$(sha "$FX/hello.conf")$T~/.config/hello.conf$T|file://$FX/hello2.conf$T$(sha "$FX/hello2.conf")$T~/.config/hello.conf$T|" "$wr_cat"
     TTY_KNOB=1
     STDIN_TEXT=$'y\n'
-    tl update hello --offline
+    tl upgrade hello --offline
     expect_status "an update of a config nobody edited" 0
     expect_content "it is replaced" "$TESTHOME/.config/hello.conf" "greeting, second edition"
     expect_no_out "without a question" "Replace"
@@ -1175,7 +1185,7 @@ run_suite() {
     wr_version 1
     TTY_KNOB=1
     STDIN_TEXT=$'d\nn\n'
-    tl update hello --offline
+    tl upgrade hello --offline
     expect_status "an update of a config the person changed" 0
     expect_out "asks on one line, naming the change as theirs" "You changed ~/.config/hello.conf. Replace it with the new one? \[y/N/d\]"
     expect_out "d shows the change" "^-my own edit"
@@ -1184,7 +1194,7 @@ run_suite() {
     if [ "$(wr_written)" = "$(sha "$FX/hello2.conf")" ]; then pass; else fail "the row holds the declined file's digest, so the edit still reads as yours" "$(wr_written)"; fi
 
     wr_version 1
-    tl update hello --offline --configs
+    tl upgrade hello --offline --configs
     expect_status "--configs on an edited config" 0
     expect_content "--configs replaces it" "$TESTHOME/.config/hello.conf" "greeting, second edition"
     expect_no_out "without asking" "You changed"
@@ -1199,7 +1209,7 @@ run_suite() {
         "$TESTHOME/.config/hello.conf" "$FX" "$(sha "$FX/hello.conf")" >> "$wr_state"
     TTY_KNOB=1
     STDIN_TEXT=$'y\n'
-    tl update hello --offline
+    tl upgrade hello --offline
     expect_status "an update over a row from an older tlstore" 0
     expect_content "the unedited file is replaced" "$TESTHOME/.config/hello.conf" "greeting, second edition"
     expect_no_out "without a question" "Replace"
@@ -1500,6 +1510,7 @@ y
     # Put a config item back first, from the catalog the app ships, so the
     # refresh below has something whose shipped version has moved on.
     tl install hello -y --configs
+    CATALOG_URL="file://$FX/newer.tsv"
     tl update --check
     expect_status "update --check" 0
     expect_out "update --check took the newer item list" "Updated the list of items"
@@ -1507,12 +1518,21 @@ y
     expect_out "a config with a new version says the change will be shown" "hello has a new version"
     tl version
     expect_out "the refreshed item list is in use" "2026090602"
-    tl update -y
-    expect_status "update" 0
+    tl update
+    expect_status "a plain update" 0
+    expect_out "names what upgrade would install" "^fakebin 2 is available; you have 1$"
+    expect_out "and says how to install it" "^Run 'tlstore upgrade' to install them\.$"
     OUT="$("$TESTHOME/.local/bin/fakebin" 2>&1)"; ST=$?
-    expect_out "update replaced the payload" "fakebin 2"
+    expect_out "a plain update installs nothing" "fakebin 1"
+    tl upgrade -y
+    expect_status "upgrade" 0
+    OUT="$("$TESTHOME/.local/bin/fakebin" 2>&1)"; ST=$?
+    expect_out "upgrade replaced the payload" "fakebin 2"
     tl update --check
     expect_out "nothing is out of date afterwards" "up to date"
+    tl update
+    expect_out "nor for a plain update" "^Everything is up to date\.$"
+    expect_no_out "which then has nothing to point at" "tlstore upgrade"
     tl update --check --offline
     expect_status "update --offline" 0
 
@@ -1591,10 +1611,12 @@ y
         tl update --check -y
         expect_no_out "update --check never asks" "Install it?"
         tl_stdout update --check --tsv -y
-        tl_stdout update --progress
+        tl_stdout upgrade --progress
         if tail -n "+$((pk_seen + 1))" "$ROOT/pkg.log" | grep -q minisign; then fail "--check, --tsv and --progress never install minisign"; else pass; fi
         RUNPATH="$RUNPATH_SAVED"
-        CATALOG_URL="file://$FX/newer.tsv"
+        # newest.tsv's list is the one in use now: the refresh offers it
+        # again, so an install below neither moves it nor hears it refused.
+        CATALOG_URL="file://$FX/newest.tsv"
     else
         skip "catalog signature tests" "minisign is not installed"
     fi
@@ -2302,7 +2324,7 @@ EOF
     expect_no_out "doctor finds the directory and the wrapper" "Missing"
 
     : > "$ROOT/curl.log"
-    tl update --offline -y app
+    tl upgrade --offline -y app
     expect_out "the same build again is not an update" "Everything is up to date."
     if grep -q "app-aarch64" "$ROOT/curl.log"; then fail "and nothing is fetched for it"; else pass; fi
 
@@ -2312,7 +2334,7 @@ EOF
     write_app_catalog 1.1 2.1
     tl update --check --offline
     expect_out "update --check names the newer build" "app 1.1 is available; you have 1.0"
-    tl update --offline -y app
+    tl upgrade --offline -y app
     expect_status "the newer build installs" 0
     if [ "$("$app_cmd" 2>&1 | head -1)" = "app 2 " ]; then pass; else fail "the wrapper runs the new build" "$("$app_cmd" 2>&1)"; fi
     expect_content "the directory is replaced whole: an edit inside it goes" "$app_dir/lib/deep/data" "data of app 2"
@@ -2411,7 +2433,7 @@ EOF
     } > "$user_catalog"
     tl update --check --offline
     expect_out "update --check offers the archive in its place" "kindswap 1.0+tl.0 is available; you have 1.0"
-    tl update --offline -y kindswap
+    tl upgrade --offline -y kindswap
     ks_out="$OUT"
     expect_status "update takes the binary to the archive" 0
     expect_content "the wrapper is where the binary was" "$ks_bin" \
@@ -2528,7 +2550,7 @@ EOF
     expect_no_out "doctor finds the directory and the link" "Missing"
 
     : > "$ROOT/curl.log"
-    tl update --offline -y sk
+    tl upgrade --offline -y sk
     expect_out "the same build again is not an update" "Everything is up to date."
     if grep -q "sk-aarch64" "$ROOT/curl.log"; then fail "and nothing is fetched for it"; else pass; fi
 
@@ -2538,7 +2560,7 @@ EOF
     printf 'mine\n' > "$sk_dir/mine.txt"
     mkdir -p "$TESTHOME/.codex"
     write_skill_catalog 1.1 3.1 0
-    tl update --offline -y sk
+    tl upgrade --offline -y sk
     expect_status "the newer build installs" 0
     expect_content "the directory is replaced whole: an edit inside it goes" "$sk_dir/docs/guide.md" "guide of skill 2"
     expect_no_file "a file of yours in it goes too" "$sk_dir/mine.txt"
@@ -2600,7 +2622,7 @@ EOF
     expect_status "the old bundle installs its loose files" 0
     expect_content "into ~/.claude/skills/<name>" "$sk_claude/SKILL.md" "$(cat "$FX/oldsk-SKILL.md")"
     write_skill_catalog 1.0 3.0 1
-    tl update --offline -y
+    tl upgrade --offline -y
     expect_status "the update that moves it over succeeds" 0
     expect_out "it says it replaced the old files" "replaced the files an earlier version put in $sk_claude"
     if [ -L "$sk_claude" ] && [ "$(readlink "$sk_claude")" = "$sk_dir" ]; then pass; else fail "~/.claude/skills/<name> is the link now" "$(ls -la "$TESTHOME/.claude/skills" 2>&1)"; fi
@@ -2615,7 +2637,7 @@ EOF
     tl install skb -y
     printf 'my notes\n' >> "$sk_claude/SKILL.md"
     write_skill_catalog 1.0 3.0 1
-    tl update --offline -y
+    tl upgrade --offline -y
     expect_status "the update succeeds with an edited old file" 0
     expect_out "it leaves the folder alone and says so" "left $sk_claude alone"
     if [ -L "$sk_claude" ]; then fail "no link replaces the folder"; else pass; fi
@@ -2748,8 +2770,8 @@ EOF
 
         su_reset
         RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"
-        tl update -y
-        expect_status "update inside the launcher" 0
+        tl upgrade -y
+        expect_status "upgrade inside the launcher" 0
         expect_out "it says which version is in place now" "tlstore is now version 9.9"
         if grep -q "^# the newer one" "$TPREFIX/bin/tlstore"; then pass; else fail "the newer tlstore replaced the app's copy"; fi
         expect_content "the store program moved with it" "$ui" "$(printf '#!/bin/sh\necho the new ui')"
@@ -2758,34 +2780,73 @@ EOF
         expect_no_file "no staging file is left beside the script" "$TPREFIX/bin/tlstore.new"
         expect_no_file "no staging file is left beside the UI" "$ui.new"
 
-        # Revision 16: a plain update takes the newer tlstore before it plans
-        # anything, then runs it in its own place with the same arguments.
+        # Revision 16: a plain upgrade takes the newer tlstore before it plans
+        # anything, then runs it in its own place with the same arguments,
+        # as upgrade (Revision 19).
         su_cur="$(sed -n 's/^TLSTORE_VERSION=//p' "$TLSTORE" | head -1)"
-        expect_out "the newer tlstore plans the items, with the same arguments" "^the newer tlstore plans this, after $su_cur: update -y$"
+        expect_out "the newer tlstore plans the items, with the same arguments" "^the newer tlstore plans this, after $su_cur: upgrade -y$"
         if [ "$(printf '%s\n' "$OUT" | grep -c 'tlstore is now version')" = 1 ]; then pass; else fail "and it never offers itself again"; fi
 
         su_reset
         RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"; TTY_KNOB=1; STDIN_TEXT=$'n\nn\n'
         tl -y update --configs
-        expect_status "-y before update, with an option after it" 0
-        expect_out "the restart keeps the arguments" "^the newer tlstore plans this, after $su_cur: update --configs$"
+        expect_status "-y before update --configs, which is upgrade --configs" 0
+        expect_out "the restart keeps the arguments, as upgrade" "^the newer tlstore plans this, after $su_cur: upgrade --configs$"
         expect_no_out "and the -y: nothing is asked" "Update now"
 
         su_reset
         UI_KNOB="$ui"; TTY_KNOB=1; STDIN_TEXT=$'y\ny\n'
-        tl update
-        expect_status "update with no release to reach" 0
+        tl upgrade
+        expect_status "upgrade with no release to reach" 0
         expect_no_out "carries on with this tlstore" "the newer tlstore plans this"
         expect_no_out "and asks nothing about itself" "Update now"
-        su_untouched "update, no release"
+        su_untouched "upgrade, no release"
 
         su_reset
-        RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"; TTY_KNOB=1; STDIN_TEXT=$'y\ny\n'; FROM_KNOB="0.17"
-        tl update
+        RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"; TTY_KNOB=1; STDIN_TEXT=$'y\ny\n'; FROM_KNOB="$su_cur"
+        tl upgrade
         expect_status "the run a restart hands over to" 0
         expect_no_out "never offers a newer tlstore again" "Update now"
         expect_no_out "nor says one is there" "is available"
-        su_untouched "update after a restart"
+        su_untouched "upgrade after a restart"
+
+        # An engine from before the split hands its run over as `update`.
+        su_reset
+        RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"; TTY_KNOB=1; STDIN_TEXT=$'y\ny\n'; FROM_KNOB="0.17"
+        tl update
+        expect_status "an update a pre-split engine handed over" 0
+        expect_no_out "never offers a newer tlstore again" "Update now"
+        expect_no_out "nor names one" "is out"
+        su_untouched "update after a pre-split restart"
+
+        # A plain update names the newer tlstore, and takes nothing.
+        su_reset
+        RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"; TTY_KNOB=1; STDIN_TEXT=$'y\ny\n'
+        tl update
+        expect_status "update with a newer tlstore out" 0
+        expect_out "names it, and what installs it" "^tlstore 9.9 is out: tlstore upgrade installs it$"
+        expect_no_out "and asks nothing" "Update now"
+        expect_no_out "and takes nothing" "tlstore is now version"
+        su_untouched "update, a newer tlstore"
+        su_reset
+        RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"
+        tl update -y
+        expect_status "update -y with a newer tlstore out" 0
+        expect_out "names it too" "^tlstore 9.9 is out: tlstore upgrade installs it$"
+        expect_no_out "-y takes nothing either" "tlstore is now version"
+        su_untouched "update -y, a newer tlstore"
+        su_reset
+        RELEASE_KNOB="file://$FX/release-same"; UI_KNOB="$ui"
+        tl update
+        expect_status "update with the same tlstore out" 0
+        expect_no_out "names nothing" "is out"
+        su_reset
+        RELEASE_KNOB="file://$FX/release-bad"; UI_KNOB="$ui"
+        tl update
+        expect_status "update with a tlstore the signature does not cover exits 1" 1
+        expect_out "and says it was refused" "not signed by the launcher"
+        expect_no_out "and names nothing" "is out"
+        su_untouched "update, bad signature"
 
         # The paths tlstore-ui reads keep what they did: nothing up front.
         su_reset
@@ -2796,17 +2857,24 @@ EOF
 
         su_reset
         RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"
-        tl_stdout update --progress
-        expect_no_out "update --progress never offers it" "Update now"
+        tl_stdout upgrade --progress
+        expect_no_out "upgrade --progress never offers it" "Update now"
         expect_no_out "nor says one is there" "is available"
-        su_untouched "update --progress"
+        su_untouched "upgrade --progress"
+
+        su_reset
+        RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"; TTY_KNOB=1; STDIN_TEXT=$'n\nn\n'
+        tl upgrade --tsv
+        if printf '%s\n' "$OUT" | tail -1 | grep -q "Update now"; then pass; else fail "upgrade --tsv still asks, at the end" "$OUT"; fi
+        if [ "$(printf '%s\n' "$OUT" | grep -c 'Update now')" = 1 ]; then pass; else fail "and only there"; fi
+        expect_no_out "and never restarts" "the newer tlstore plans this"
+        su_untouched "upgrade --tsv"
 
         su_reset
         RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"; TTY_KNOB=1; STDIN_TEXT=$'n\nn\n'
         tl update --tsv
-        if printf '%s\n' "$OUT" | tail -1 | grep -q "Update now"; then pass; else fail "update --tsv still asks, at the end" "$OUT"; fi
-        if [ "$(printf '%s\n' "$OUT" | grep -c 'Update now')" = 1 ]; then pass; else fail "and only there"; fi
-        expect_no_out "and never restarts" "the newer tlstore plans this"
+        expect_no_out "update --tsv is a list: it never asks" "Update now"
+        expect_no_out "nor names it among its rows" "is out"
         su_untouched "update --tsv"
 
         # update --check is the refresh tlstore-ui runs in the background: it
@@ -2817,6 +2885,7 @@ EOF
         tl update --check
         expect_status "update --check, the UI's background refresh" 0
         expect_no_out "no longer updates tlstore itself" "tlstore is now version"
+        expect_no_out "nor looks for one" "is out"
         su_untouched "update --check"
 
         su_reset
@@ -2826,42 +2895,46 @@ EOF
         su_untouched "update --check --tsv"
 
         cur_ver_q="$(sed -n 's/^TLSTORE_VERSION=//p' "$TLSTORE" | head -1)"
-        # update asks before taking a newer tlstore: yes (or just Enter), no,
+        # upgrade asks before taking a newer tlstore: yes (or just Enter), no,
         # never; -y and nobody-to-ask are covered above and below.
         su_quiet="$TESTHOME/.local/share/tlstore/self-update-quiet"
         rm -f "$su_quiet"
         su_reset
         RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"; TTY_KNOB=1; STDIN_TEXT=$'n\ny\n'
-        tl update
-        expect_status "update, answered no" 0
+        tl upgrade
+        expect_status "upgrade, answered no" 0
         expect_out "asks first" "tlstore 9.9 is available; you have $cur_ver_q. Update now"
         expect_no_out "does not update" "tlstore is now version"
         expect_no_out "carries on with this tlstore" "the newer tlstore plans this"
         if [ "$(printf '%s\n' "$OUT" | grep -c 'Update now')" = 1 ]; then pass; else fail "and does not ask again at the end"; fi
-        su_untouched "update, answered no"
+        su_untouched "upgrade, answered no"
         expect_no_file "no is not remembered" "$su_quiet"
 
         su_reset
         RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"; TTY_KNOB=1; STDIN_TEXT=$'\ny\n'
-        tl update
-        expect_status "update, answered with Enter" 0
+        tl upgrade
+        expect_status "upgrade, answered with Enter" 0
         expect_out "Enter means yes" "tlstore is now version 9.9"
         if grep -q "^# the newer one" "$TPREFIX/bin/tlstore"; then pass; else fail "Enter updates tlstore"; fi
 
         su_reset
         RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"; TTY_KNOB=1; STDIN_TEXT=$'never\ny\n'
-        tl update
-        expect_status "update, answered never" 0
+        tl upgrade
+        expect_status "upgrade, answered never" 0
         expect_out "says how to get it later" "tlstore self-update still gets it"
         expect_file "never is remembered" "$su_quiet"
-        su_untouched "update, answered never"
+        su_untouched "upgrade, answered never"
 
         RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"; TTY_KNOB=1; STDIN_TEXT=$'y\ny\n'
-        tl update
-        expect_status "update after never" 0
+        tl upgrade
+        expect_status "upgrade after never" 0
         expect_no_out "no question any more" "Update now"
         expect_no_out "and no update" "tlstore is now version"
-        su_untouched "update after never"
+        su_untouched "upgrade after never"
+        RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"
+        tl update
+        expect_status "update after never" 0
+        expect_no_out "names no newer tlstore either" "is out"
 
         RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"
         tl self-update
@@ -2871,11 +2944,11 @@ EOF
 
         su_reset
         RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"
-        tl update
-        expect_status "update, nobody to ask" 0
+        tl upgrade
+        expect_status "upgrade, nobody to ask" 0
         expect_out "says it is there" "tlstore 9.9 is available. Run tlstore self-update to get it."
         expect_no_out "and asks nothing" "Update now"
-        su_untouched "update, nobody to ask"
+        su_untouched "upgrade, nobody to ask"
 
         # --- self-update --check --tsv: the first thing tlstore-ui asks ---
         cur_ver="$(sed -n 's/^TLSTORE_VERSION=//p' "$TLSTORE" | head -1)"
@@ -2990,15 +3063,15 @@ EOF
 
         su_reset
         RELEASE_KNOB="file://$FX/release-same"; UI_KNOB="$ui"
-        tl update -y
+        tl upgrade -y
         expect_no_out "the same version is not installed again" "tlstore is now version"
         su_untouched "same version"
 
         su_reset
         RELEASE_KNOB="file://$FX/release-bad"; UI_KNOB="$ui"
-        tl update -y
+        tl upgrade -y
         expect_out "a tlstore whose signature does not cover it is refused" "not signed by the launcher"
-        expect_status "and the update exits 1" 1
+        expect_status "and the upgrade exits 1" 1
         su_untouched "bad signature"
 
         su_reset
@@ -3025,30 +3098,65 @@ EOF
 
         su_reset
         RELEASE_KNOB="file://$FX/release-badui"; UI_KNOB="$ui"
-        tl update -y
-        expect_status "a tampered store program fails the update" 1
+        tl upgrade -y
+        expect_status "a tampered store program fails the upgrade" 1
         expect_out "it is refused by the digest the signed script names" "does not match what tlstore 9.9 expects"
         expect_no_out "and nothing claims to be updated" "tlstore is now version"
         su_untouched "tampered UI"
 
         su_reset
         RELEASE_KNOB="file://$FX/release-noui"; UI_KNOB="$ui"
-        tl update -y
+        tl upgrade -y
         expect_out "a release without the store program is refused" "could not download the store program"
         su_untouched "missing UI"
 
         su_reset
         RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"
-        tl update -y --offline
+        tl upgrade -y --offline
         expect_no_out "offline, tlstore leaves itself alone" "tlstore is now version"
         su_untouched "offline"
+
+        # The hand-off from a phone's pre-split engine (0.20): its `update -y`
+        # takes this engine (release-new is this source at 9.9) and runs it as
+        # `update -y` with TLSTORE_UPDATED_FROM=0.20 — which has to upgrade the
+        # items in that same run, or the phone's first update after the split
+        # would quietly install nothing.
+        su_old="$ROOT/tlstore-0.20"
+        su_old_ok=0
+        for su_c in $(git -C "$repo" log --format=%H -G '^TLSTORE_VERSION=0\.20$' -- engine/tlstore 2>/dev/null); do
+            if git -C "$repo" show "$su_c:engine/tlstore" > "$su_old" 2>/dev/null &&
+                grep -qx 'TLSTORE_VERSION=0.20' "$su_old"; then
+                su_old_ok=1
+                break
+            fi
+        done
+        if [ "$su_old_ok" = 1 ]; then
+            su_reset
+            tl install fakebin hello -y
+            cp "$su_old" "$TPREFIX/bin/tlstore"
+            su_cat="$TESTHOME/.local/share/tlstore/catalog.tsv"
+            write_catalog "$su_cat" 2026090680 3 fakebin-3
+            RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ui"
+            TLSTORE_SAVED="$TLSTORE"; TLSTORE="$su_old"
+            tl update -y
+            TLSTORE="$TLSTORE_SAVED"
+            expect_status "a 0.20 update -y that takes the split engine" 0
+            expect_out "the 0.20 engine took the newer tlstore" "tlstore is now version 9.9"
+            expect_out "and handed it update -y, from 0.20" "^the newer tlstore plans this, after 0.20: update -y$"
+            OUT="$("$TESTHOME/.local/bin/fakebin" 2>&1)"
+            expect_out "which upgraded the items in the same run" "fakebin 3"
+            write_catalog "$su_cat" 2026090603 2 fakebin-2
+            tl upgrade fakebin hello -y --offline
+        else
+            skip "the hand-off from a 0.20 engine" "no commit with TLSTORE_VERSION=0.20 in this checkout's history"
+        fi
 
         # A hand-installed tlstore on plain Termux: no store program to pair.
         su_reset
         rm -f "$ui" "$store/.installed"
         printf 'file://%s\n' "$FX" > "$store/.standalone"
         RELEASE_KNOB="file://$FX/release-new"; UI_KNOB="$ROOT/no-such-tlstore-ui"
-        tl update -y
+        tl upgrade -y
         expect_out "a standalone tlstore updates itself" "tlstore is now version 9.9"
         if grep -q "^# the newer one" "$TPREFIX/bin/tlstore"; then pass; else fail "the newer tlstore replaced the hand-installed one"; fi
         expect_no_file "no store program is put down where none was" "$ROOT/no-such-tlstore-ui"
@@ -3158,7 +3266,7 @@ EOF
     expect_no_out "a failed item never claims to be ready" $'^step\tbadsum\t100\tready$'
 
     write_catalog "$TESTHOME/.local/share/tlstore/catalog.tsv" 2026090699 9 fakebin-3
-    tl update --progress --offline
+    tl upgrade --progress --offline
     expect_status "a --progress update" 0
     expect_out "the update steps stream on stdout" $'^step\tfakebin\t10\tfetched$'
     expect_out "and finish ready" $'^step\tfakebin\t100\tready$'
@@ -3204,11 +3312,11 @@ EOF
     expect_no_out "no tsv line for the retired file item" $'^retiree\t'
     expect_no_out "nor for the retired pkg item" $'^retiree-pkg\t'
     tl update --check --offline
-    expect_out "the human check says it will go" "retiree was retired; update will remove it"
+    expect_out "the human check says it will go" "retiree was retired; upgrade will remove it"
 
     # (a) update removes an unmodified retired file item, and the now-empty
     # directories it leaves behind; the pkg item just stops being tracked
-    tl update -y --offline
+    tl upgrade -y --offline
     expect_status "update retires the fixture" 0
     expect_out "the file item was retired and removed" "retiree was retired and removed"
     expect_out "the pkg item just stops being tracked" \
@@ -3234,7 +3342,7 @@ EOF
     expect_status "reinstalling the fixture" 0
     printf 'edited by the person, never touched again\n' > "$TESTHOME/.config/retiree/nested/retiree.conf"
     write_catalog "$TESTHOME/.local/share/tlstore/catalog.tsv" 2026090703 9 fakebin-3 1
-    tl update -y --offline
+    tl upgrade -y --offline
     expect_status "update still succeeds on an edited copy" 0
     expect_out "it says the edited file was kept" "kept your retiree.conf — retiree was retired"
     expect_content "and the file itself is never touched" \
@@ -3251,7 +3359,7 @@ EOF
     write_catalog "$TESTHOME/.local/share/tlstore/catalog.tsv" 2026090704 9 fakebin-3
     tl install retiree -y
     write_catalog "$TESTHOME/.local/share/tlstore/catalog.tsv" 2026090705 9 fakebin-3 1
-    tl_stdout update --progress --offline
+    tl_stdout upgrade --progress --offline
     expect_status "a --progress retirement" 0
     expect_out "the remove-shaped steps stream" $'^step\tretiree\t30\tfetched$'
     expect_out "and finish ready" $'^step\tretiree\t100\tready$'
@@ -3432,7 +3540,7 @@ n
     expect_out "and says nothing is recorded" "no earlier version of droid is recorded"
     cp "$FX/registry/demo-droid/3.1.0" "$FX/registry/demo-droid/latest"
     PATCHELF_KNOB=false
-    tl update droid -y --offline
+    tl upgrade droid -y --offline
     expect_status "rollback: droid updates to the newer version" 0
     OUT="$("$TESTHOME/.local/bin/droid" 2>&1)"
     expect_out "the newer droid is in place" "demo-droid 3.1.0"
@@ -3463,15 +3571,15 @@ n
     tl update --check --offline
     expect_out "update --check says a held item is held" "droid is held at 3.0.0; 'tlstore unhold droid' lets it update"
     PATCHELF_KNOB=false
-    tl update -y --offline
-    expect_out "a plain update skips the held item and says so" "droid is held at 3.0.0"
+    tl upgrade -y --offline
+    expect_out "a plain upgrade skips the held item and says so" "droid is held at 3.0.0"
     OUT="$("$TESTHOME/.local/bin/droid" 2>&1)"
     expect_out "and it stays at the old version" "demo-droid 3.0.0"
     tl update --check --tsv --offline
     expect_no_out "update --check --tsv has no row for it" "^droid${T}"
     PATCHELF_KNOB=false
-    tl update droid -y --offline
-    expect_status "naming a held item updates it" 0
+    tl upgrade droid -y --offline
+    expect_status "naming a held item upgrades it" 0
     expect_out "and says the hold is let go" "droid was held; updating it lets go of the hold"
     OUT="$("$TESTHOME/.local/bin/droid" 2>&1)"
     expect_out "it is at the newer version again" "demo-droid 3.1.0"
@@ -3517,7 +3625,7 @@ n
     OUT="$("$TESTHOME/.local/bin/fakebin" 2>&1)"
     expect_out "fakebin 1 is in place" "fakebin 1"
     write_catalog "$TESTHOME/.local/share/tlstore/catalog.tsv" 2026090621 2 fakebin-2
-    tl update fakebin -y --offline
+    tl upgrade fakebin -y --offline
     OUT="$("$TESTHOME/.local/bin/fakebin" 2>&1)"
     expect_out "fakebin 2 is in place" "fakebin 2"
     write_catalog "$TESTHOME/.local/share/tlstore/catalog.tsv" 2026090622 3 fakebin-3
@@ -3529,8 +3637,8 @@ n
     tl_stdout snapshot --tsv
     expect_no_out "snapshot --tsv has no update line for a held item" "^update${T}fakebin${T}"
     expect_out "but still lists it" "^item${T}fakebin${T}installed"
-    tl update -y --offline
-    expect_out "a plain update says fakebin is held" "fakebin is held at 2"
+    tl upgrade -y --offline
+    expect_out "a plain upgrade says fakebin is held" "fakebin is held at 2"
     OUT="$("$TESTHOME/.local/bin/fakebin" 2>&1)"
     expect_out "and leaves it" "fakebin 2"
     tl unhold fakebin
@@ -3565,7 +3673,7 @@ n
     tl rollback fakebin -y
     expect_status "rollback of a five-column row exits 1" 1
     expect_out "and says nothing is recorded" "no earlier version of fakebin is recorded"
-    tl update fakebin -y --offline
+    tl upgrade fakebin -y --offline
     expect_status "a five-column row still updates" 0
     OUT="$("$TESTHOME/.local/bin/fakebin" 2>&1)"
     expect_out "to the list's version" "fakebin 3"
@@ -3585,6 +3693,162 @@ n
     expect_status "rollback of something not installed exits 1" 1
     expect_out "and says so" "nonesuch is not installed"
     write_catalog "$TESTHOME/.local/share/tlstore/catalog.tsv" 2026090603 2 fakebin-2
+
+    # --- Revision 19: update lists, upgrade installs, install refreshes first ---
+    # Self-contained: nothing installed to start with, a list written by hand
+    # (its serial ahead of every fixture's), and the release out of reach
+    # unless a test points the refresh somewhere.
+    T=$'\t'
+    forget_state
+    rm -rf "$TESTHOME/.local/bin" "$TESTHOME/.config/hello.conf" "$TESTHOME/.local/share/tlstore/held"
+    sp_cat="$TESTHOME/.local/share/tlstore/catalog.tsv"
+    sp_ver() { awk -F "$T" -v n="$1" '$1 == n { print $3 }' "$PSTATE"; }
+    sp_fb() { "$TESTHOME/.local/bin/fakebin" 2>&1; }
+    write_catalog "$sp_cat" 2026090680 1 fakebin-1
+    CATALOG_URL="file://$FX/no-such.tsv"
+
+    # install: the release out of reach is one line, and the install goes on.
+    tl install fakebin hello -y
+    expect_status "install with the release out of reach still installs" 0
+    expect_out "and says so in one line" "^Could not check for a newer item list: the release could not be reached\. Using the one you have\.$"
+    if [ "$(printf '%s\n' "$OUT" | grep -c 'Could not check')" = 1 ]; then pass; else fail "one line, no more" "$OUT"; fi
+    if [ "$(sp_fb)" = "fakebin 1" ]; then pass; else fail "from the list it has" "$(sp_fb)"; fi
+    tl_stdout install twin --progress
+    expect_status "a --progress install with the release out of reach" 0
+    expect_no_out "keeps the line off its stream" "Could not check"
+    expect_out "and still streams" $'^done\ttwin\tok\tinstalled$'
+    tl remove twin -y
+
+    # update with a newer list in place: it names, and installs nothing.
+    write_catalog "$sp_cat" 2026090681 2 fakebin-2
+    sp_before="$(cat "$PSTATE")"
+    tl update
+    expect_status "a plain update with items out of date exits 0" 0
+    expect_out "it says the list could not be checked" "^Could not check for a newer item list: the release could not be reached\.$"
+    expect_out "it names what is out of date" "^fakebin 2 is available; you have 1$"
+    expect_out "a config file too" "^hello has a new version; upgrade asks first if you changed it$"
+    expect_out "and says what installs them" "^Run 'tlstore upgrade' to install them\.$"
+    expect_content "update changes nothing installed" "$PSTATE" "$sp_before"
+    if [ "$(sp_fb)" = "fakebin 1" ]; then pass; else fail "update leaves the payload" "$(sp_fb)"; fi
+    tl update -y --offline
+    expect_status "update -y --offline" 0
+    expect_out "lists the same" "^fakebin 2 is available; you have 1$"
+    expect_content "-y installs nothing either" "$PSTATE" "$sp_before"
+    tl update -n
+    expect_status "update -n" 0
+    expect_out "says nothing was changed" "Nothing was changed"
+    expect_no_out "and is no prompt to upgrade" "Run 'tlstore upgrade'"
+    tl_stdout update --check --tsv
+    expect_out "update --check --tsv keeps its rows" "^fakebin${T}1${T}2${T}\$"
+    expect_out "the config row too" "^hello${T}1${T}2${T}config-asks\$"
+    if [ "$(printf '%s\n' "$OUT" | grep -vc "${T}")" = 0 ]; then pass; else fail "and nothing else on stdout" "$OUT"; fi
+    tl_stdout update --tsv
+    expect_out "update --tsv is the same list" "^fakebin${T}1${T}2${T}\$"
+    expect_content "and installs nothing" "$PSTATE" "$sp_before"
+    tl update --bogus
+    expect_status "update with an option it does not know" 2
+    expect_out "points at update's page" "tlstore help update"
+    tl upgrade --bogus
+    expect_status "upgrade with an option it does not know" 2
+    expect_out "points at upgrade's page" "tlstore help upgrade"
+
+    if [ "$HAVE_MINISIGN" = 1 ]; then
+        # A newer signed list: update takes it, lists, and still installs nothing.
+        write_catalog "$FX/split82.tsv" 2026090682 3 fakebin-3
+        write_catalog "$FX/split83.tsv" 2026090683 3 fakebin-3
+        for c in split82 split83; do
+            minisign -S -s "$ROOT/key.sec" -x "$FX/$c.tsv.minisig" -m "$FX/$c.tsv" >/dev/null 2>&1
+        done
+        CATALOG_URL="file://$FX/split82.tsv"
+        tl update
+        expect_status "update with a newer signed list" 0
+        expect_out "takes the list" "^Updated the list of items\.$"
+        expect_out "and names what it moved on" "^fakebin 3 is available; you have 1$"
+        expect_content "and installs nothing" "$PSTATE" "$sp_before"
+        tl version
+        expect_out "the newer list is in use" "2026090682"
+        # install refreshes first, silently; an older list offered is one line.
+        CATALOG_URL="file://$FX/split83.tsv"
+        tl install mine -y
+        expect_status "install refreshes first" 0
+        expect_no_out "and says nothing of it" "item list"
+        tl version
+        expect_out "the list install refreshed to is in use" "2026090683"
+        tl remove mine -y
+        CATALOG_URL="file://$FX/newer.tsv"
+        tl install mine -y
+        expect_status "install with an older list offered" 0
+        expect_out "says it, once" "^Could not check for a newer item list: the item list that was offered is older than the one you have\. Using the one you have\.$"
+        tl remove mine -y
+        CATALOG_URL="file://$FX/no-such.tsv"
+    else
+        skip "update and install against a newer signed list" "minisign is not installed"
+    fi
+
+    # upgrade <name>: only that one.
+    write_catalog "$sp_cat" 2026090690 3 fakebin-3
+    tl upgrade fakebin -y --offline
+    expect_status "upgrade of one named item" 0
+    if [ "$(sp_fb)" = "fakebin 3" ]; then pass; else fail "upgrades it" "$(sp_fb)"; fi
+    if [ "$(sp_ver hello)" = 1 ]; then pass; else fail "and only it" "hello is at $(sp_ver hello)"; fi
+    # update <name> is upgrade <name>, word for word.
+    write_catalog "$sp_cat" 2026090691 2 fakebin-2
+    tl update fakebin -y --offline
+    expect_status "update with a name" 0
+    if [ "$(sp_fb)" = "fakebin 2" ]; then pass; else fail "upgrades it, as upgrade does" "$(sp_fb)"; fi
+    if [ "$(sp_ver hello)" = 1 ]; then pass; else fail "and only it, too" "hello is at $(sp_ver hello)"; fi
+    # update --progress <names> (what a store app before the split runs) is upgrade too.
+    write_catalog "$sp_cat" 2026090692 3 fakebin-3
+    tl_stdout update --progress --offline fakebin
+    expect_status "update --progress with a name" 0
+    expect_out "streams the upgrade" $'^done\tfakebin\tok\tupdated$'
+    if [ "$(sp_fb)" = "fakebin 3" ]; then pass; else fail "and upgrades it" "$(sp_fb)"; fi
+    # update --configs with no name is upgrade --configs: everything.
+    printf 'my edit of hello\n' >> "$TESTHOME/.config/hello.conf"
+    tl update --configs -y --offline
+    expect_status "update --configs" 0
+    if [ "$(sp_ver hello)" = 3 ]; then pass; else fail "upgrades everything, as upgrade --configs does" "hello is at $(sp_ver hello)"; fi
+    expect_content "replacing your edited config" "$TESTHOME/.config/hello.conf" "greeting from the catalog"
+    rm -f "$TESTHOME/.config/hello.conf".bak-*
+
+    # Held: a plain upgrade skips it; naming it upgrades it and lets go of the hold.
+    tl hold fakebin
+    write_catalog "$sp_cat" 2026090693 2 fakebin-2
+    tl update
+    expect_out "update says it is held" "^fakebin is held at 3; 'tlstore unhold fakebin' lets it update$"
+    expect_no_out "and does not name it as out of date" "^fakebin 2 is available"
+    tl upgrade -y --offline
+    expect_status "upgrade with a held item" 0
+    expect_out "says it is held" "^fakebin is held at 3"
+    if [ "$(sp_fb)" = "fakebin 3" ]; then pass; else fail "and leaves it" "$(sp_fb)"; fi
+    if [ "$(sp_ver hello)" = 2 ]; then pass; else fail "while it upgrades the rest" "hello is at $(sp_ver hello)"; fi
+    tl upgrade fakebin -y --offline
+    expect_status "upgrade of a held item, named" 0
+    expect_out "lets go of the hold" "^fakebin was held; updating it lets go of the hold$"
+    if [ "$(sp_fb)" = "fakebin 2" ]; then pass; else fail "and upgrades it" "$(sp_fb)"; fi
+    if grep -qx fakebin "$TESTHOME/.local/share/tlstore/held" 2>/dev/null; then fail "the hold is gone"; else pass; fi
+
+    # The hand-off: `update` from an engine before the split (TLSTORE_UPDATED_FROM
+    # older than it) is that engine's whole update, so it upgrades; from one
+    # after it, update is the list it always is.
+    sp_cur="$(sed -n 's/^TLSTORE_VERSION=//p' "$TLSTORE" | head -1)"
+    write_catalog "$sp_cat" 2026090694 3 fakebin-3
+    FROM_KNOB=0.20
+    tl update -y
+    expect_status "update handed over by a 0.20 engine" 0
+    if [ "$(sp_fb)" = "fakebin 3" ]; then pass; else fail "upgrades the items" "$(sp_fb)"; fi
+    if [ "$(sp_ver hello)" = 3 ]; then pass; else fail "all of them" "hello is at $(sp_ver hello)"; fi
+    write_catalog "$sp_cat" 2026090695 2 fakebin-2
+    FROM_KNOB="$sp_cur"
+    tl update -y
+    expect_status "update handed over by an engine after the split" 0
+    expect_out "lists" "^fakebin 2 is available; you have 3$"
+    if [ "$(sp_fb)" = "fakebin 3" ]; then pass; else fail "and installs nothing" "$(sp_fb)"; fi
+
+    forget_state
+    rm -rf "$TESTHOME/.local/bin" "$TESTHOME/.config/hello.conf" "$TESTHOME/.config/mine.conf"
+    write_catalog "$sp_cat" 2026090603 2 fakebin-2
+    CATALOG_URL="file://$FX/newest.tsv"
 
     rm -rf "$ROOT"
 }

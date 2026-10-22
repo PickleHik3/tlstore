@@ -2,7 +2,7 @@
 # human step: once a day it checks every item scripts/upstream-watch.sh lists (herdr, btop,
 # fastfetch, kitten, sigye, fisher), moves each one that is behind, builds it with build.yml and,
 # when at least one bump landed, cuts a store release with release.yml, so phones get it on their
-# next `tlstore update`. All upstream tracking lives here; adding an item is a line in the script.
+# next `tlstore upgrade`. All upstream tracking lives here; adding an item is a line in the script.
 #
 #   check    scripts/upstream-watch.sh --check against every upstream (releases/latest: never a
 #            prerelease or a draft). Each item that is behind is bumped (--bump <item> <tag>: the

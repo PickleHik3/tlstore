@@ -150,9 +150,10 @@ Two workflows, in this order when a tool changed:
    first.
 
 Phones read the latest release: `tlstore` refreshes its catalog from
-`releases/latest/download/catalog.tsv` and, on `update` and on the UI's background
-`update --check`, takes a newer `tlstore` from there together with the `tlstore-ui-<abi>` it names
-(`docs/SPEC.md`, Revision 8). So a release is live for every phone the moment the workflow ends —
+`releases/latest/download/catalog.tsv` on `update`, `upgrade` and `install` (and the UI's
+background `update --check`), and `upgrade` (in the UI, `self-update --progress`) takes a newer
+`tlstore` from there together with the `tlstore-ui-<abi>` it names (`docs/SPEC.md`, Revisions 8,
+9 and 19). So a release is live for every phone the moment the workflow ends —
 whichever launcher APK installed the store — and the launcher's `app/tlstore.lock` only decides
 what a fresh install starts from. The `bins-…` releases are prereleases, so `releases/latest`
 never points at one.
@@ -201,7 +202,7 @@ asset under its catalog name plus a `SHA256SUMS` of them, and then commits to `m
   per tool, and that is fine.
 
 **A rebuilt binary is an update on a phone only when its version moves.** `tlstore` decides
-`update` by comparing the catalog's version with the installed one, not by digest. So:
+`upgrade` by comparing the catalog's version with the installed one, not by digest. So:
 
 - a version of the form `<upstream>+<commit>.<N>` (dawn: `0.1.3+0e958747.3`) is bumped to `.N+1`
   by `bins-record.sh` on its own whenever the asset's bytes changed. Use this shape for a tool
@@ -468,14 +469,14 @@ have it installed keep it; `tlstore remove <name>` still works from the old cata
 ## Retiring an item
 
 Dropping the row is fine for something nobody has. For an item phones already installed, retire it
-instead so `tlstore update` takes it away for them: keep the row (same kind, source, target and
+instead so `tlstore upgrade` takes it away for them: keep the row (same kind, source, target and
 digest — build-catalog.sh still computes the digest normally) and set `options` to
 `hidden=1;retired=1`. `hidden=1` is required alongside it, not just implied by it: an older engine
 that has never heard of `retired=1` reads the row as an ordinary hidden part and leaves it alone,
 so retiring never breaks a phone running an old tlstore. `install` refuses a retired item outright,
 and nothing may pull it in through `requires`.
 
-On a phone running the new engine, the next `tlstore update` — or, without anyone asking, the next
+On a phone running the new engine, the next `tlstore upgrade` — or, without anyone asking, the next
 `tlstore snapshot` the store UI runs when it opens (a retired row is hidden, so the UI never offers
 it as an update) — deletes an installed
 file/file-once/binary item only when the file on disk still matches the digest that shipped it —

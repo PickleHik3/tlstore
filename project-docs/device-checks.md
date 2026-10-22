@@ -32,7 +32,7 @@ and a catalog that has the terminal-browser row from `docs/maintainer/catalog.md
 7. With the first call failing (airplane mode as it starts): terminal-browser ends skipped ("needs
    electron42, which did not install"), another item in the same install still installs, and the
    next `tlstore install terminal-browser` starts from x11-repo again.
-8. `tlstore update` on a phone with several pkg items and an upgrade over 50 MB waiting asks
+8. `tlstore upgrade` on a phone with several pkg items and an upgrade over 50 MB waiting asks
    `Go ahead?` after the size line; with only small upgrades it asks nothing, as before.
 9. In the store app (Termux Launcher): terminal-browser's page shows the "Also installs …" line
    above the README while it is not installed; the first `i` puts "153 MB download, 862 MB on
@@ -102,13 +102,13 @@ Owed once `build.yml -f tools=launcher-skills` has published the tarballs and a 
 carries engine 0.19 with the two skill rows. On pong (com.termux, aarch64) and the x86_64 emulator:
 
 1. A phone that has claude-code (so the old `launcher-skill` bundle and its eight files under
-   `~/.claude/skills/termux-launcher/`): `tlstore update` installs `termux-launcher` and
+   `~/.claude/skills/termux-launcher/`): `tlstore upgrade` installs `termux-launcher` and
    `termux-launcher-speak`, says it replaced the files an earlier version put in
    `~/.claude/skills/termux-launcher`, and retires the eight `launcher-skill-*` rows without
    "kept your". `ls -l ~/.claude/skills` shows two symlinks into `~/.agents/skills/`, and
    `~/.agents/skills/termux-launcher/docs/` holds the user guide.
 2. The same phone opened in the store UI first (the snapshot retires the old rows before any
-   update): the old folder goes, and the next `tlstore update` installs both skills with links.
+   update): the old folder goes, and the next `tlstore upgrade` installs both skills with links.
 3. Claude Code, started in a launcher pane, lists `termux-launcher` and `termux-launcher-speak`
    under `/skills` and can read `help.md` and a page under `docs/` through the link.
 4. With `~/.codex` present (codex installed first), an install makes `~/.codex/skills/<name>`
@@ -117,3 +117,20 @@ carries engine 0.19 with the two skill rows. On pong (com.termux, aarch64) and t
    directories and their links; a folder of your own put at `~/.claude/skills/termux-launcher`
    beforehand is left, with the `left … alone` line, both on install and on remove.
 6. The x86_64 emulator installs the `-x86_64` assets (same bytes) the same way.
+
+## worktree-agent-a74e731ca8b3129cd — Revision 19: update lists, upgrade installs (tlstore 0.21)
+
+Owed once a store release carries engine 0.21. On pong (com.termux, aarch64); for 2 and 3 a sandbox
+HOME with `~/.local/share/tlstore/catalog.tsv*` copied into it (without them it falls back to the
+APK's old base catalog):
+
+1. The hand-off: a phone on 0.20 with an item out of date runs `tlstore update`, answers yes to the
+   newer tlstore; the same run then upgrades the item (it does not stop at a list), and
+   `tlstore version` says 0.21.
+2. `tlstore update` with something out of date lists it, ends with `Run 'tlstore upgrade' to install
+   them.`, installs nothing (`tlstore list -i` versions unchanged) and exits 0; `tlstore upgrade`
+   then installs it; `tlstore upgrade <name>` only that one.
+3. `tlstore install <name>` online takes a newer list silently; in airplane mode it says `Could not
+   check for a newer item list: … Using the one you have.` once and still installs.
+4. In the store app: the update button on an item and "update all" on Front still update (the app
+   now runs `upgrade --progress`), and the badge count still comes from the background check.

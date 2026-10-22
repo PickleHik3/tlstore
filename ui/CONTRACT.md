@@ -65,7 +65,8 @@ Store: cat (Catalog: items, updates, info(name)->&Info, loading, error), job: Op
   asset_path(name,src), header_shown(name)/header_rested(name,motion) /*150 ms rest, wake_at ticks the router*/, tasks_pending() /*tasks or decodes*/,
   take_job_finished(), leaving.
   Nothing runs synchronously: Store::new spawns `tlstore self-update --check --tsv` first, then `tlstore snapshot --tsv` (Catalog::loading until it
-  lands; Front says Loading…), `update --check --tsv` (which no longer touches tlstore itself) and `gh auth status`. The check (data::parse_self_check:
+  lands; Front says Loading…), `update --check --tsv` (which no longer touches tlstore itself) and `gh auth status`. Jobs run
+  `tlstore <Verb::arg> --progress <names>`: install, upgrade (Verb::Update; `update` only lists since tlstore 0.21), remove, self-update. The check (data::parse_self_check:
   `self\t<have>\t<new>\t<0|1>`) answering available, with no job running, starts Verb::SelfUpdate (`tlstore self-update --progress`, names ["tlstore"],
   not held for the refresh) and the router pushes Installing at once; anything else, and startup is as before. The snapshot's readme: Verb::SelfUpdate
   never takes a snapshot or sends an OSC 99. Env.self_updated ($TLSTORE_UI_SELF_UPDATED=<version>, set by the re-exec below) skips the check and puts
@@ -106,11 +107,11 @@ Installing, Verb::SelfUpdate: the same screen for the item `tlstore` — no cata
   "Could not update tlstore. Try again later."), ⏎ done → Back, the store goes on on the old files.
 Measured (tests/screens.rs, 53×26 kitty, push to item): frames ≤ 8 KB, nothing written at rest. Release binary (host x86_64, stripped): 1.41 MB.
 Binary: tlstore-ui | --probe | --version; env TLSTORE_UI_SELF_UPDATED=<version> (set only by the re-exec above). Fixture store: tests/fixtures/store
-  (stub tlstore speaks snapshot/prefetch/list/info/update/self-update/picture/readme/readme-asset/jobs; `picture` answers pics/<name>.png before
+  (stub tlstore speaks snapshot/prefetch/list/info/update/upgrade/self-update/picture/readme/readme-asset/jobs; `picture` answers pics/<name>.png before
   .jpg, so a test can drop in an APNG; `prefetch` reports every fixture asset only when the file prefetch-lines exists (Opts.prefetch), else
   nothing, so every asset is asked for on its own; `self-update --check` offers 0.6 → 0.7 only when the file self-update exists (Opts.self_update),
   `self-update --progress` plays the tlstore stream, sleeping at 44 with `hold`, failing with `fail-tlstore`; Opts.self_updated sets Env.self_updated;
-  install/update/remove --progress print a `row` per name first (binary, requested, -), then per name 10 [60 + sleep with `hold`] 60 90 100 done
+  install/upgrade/remove --progress print a `row` per name first (binary, requested, -), then per name 10 [60 + sleep with `hold`] 60 90 100 done
   (`broken`/fail-<n> fail); `part-<name>` holding a part's name announces it first (`pkg`, auto, `needed by <name>`) and runs it 10→100, done ok).
 
 # preview renderer (cargo feature `shot`; dev only, build-ui.sh never enables it)

@@ -84,10 +84,12 @@ pub enum Verb {
 }
 
 impl Verb {
+    /// The engine's command word. An update runs `upgrade`: since tlstore 0.21 `update` only
+    /// lists what is pending, and every engine before it took `upgrade` as update's alias.
     pub fn arg(self) -> &'static str {
         match self {
             Verb::Install => "install",
-            Verb::Update => "update",
+            Verb::Update => "upgrade",
             Verb::Remove => "remove",
             Verb::SelfUpdate => "self-update",
         }

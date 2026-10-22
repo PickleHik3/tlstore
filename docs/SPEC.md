@@ -22,7 +22,7 @@ Written 2026-09-06. Decisions here are settled; raise, do not silently change.
   `name kind version when files source digest prev_version prev_source prev_digest` — the last five
   were added for `rollback`, are appended only, and older rows without them read as empty ones, so
   an item installed before them has no earlier version to go back to until it updates once),
-  `~/.local/share/tlstore/held` (names `hold` keeps out of `update`, one per line),
+  `~/.local/share/tlstore/held` (names `hold` keeps out of `upgrade`, one per line),
   `~/.local/share/tlstore/catalog.tsv` (verified refreshed catalog, optional),
   `~/.cache/tlstore/` (downloads). Payloads go to `~/.local/bin/<name>` and `~/.local/lib/<name>/`,
   never `$PREFIX/bin` (a bootstrap reinstall wipes it; apt owns names there). Replaced user files
@@ -92,11 +92,12 @@ tlstore                       the store in the launcher, else the list
 tlstore list [-i|-a]          everything (installed marked), or installed only / available only
 tlstore search <term>         name and summary match
 tlstore info <name>           version, kind, source, digest, requires, files, summary
-tlstore install [name...] [-y] [--dry-run]   no names → multi-select picker (fzf --multi, else numbered toggles)
+tlstore install [name...] [-y] [--dry-run]   refresh catalog quietly, then install; no names → numbered picker
 tlstore remove <name...> [-y] [--dry-run]
-tlstore update [name...] [--check|--dry-run] [--offline]   refresh catalog, then upgrade what is newer (--check changes nothing)
+tlstore update [--check|--dry-run] [--offline]   refresh catalog, then list what is newer, tlstore too; installs nothing (Revision 19)
+tlstore upgrade [name...] [--check|--dry-run] [--offline]   newer tlstore first, refresh catalog, then upgrade what is newer
 tlstore rollback <name> [-y] [--dry-run]   one version back (npm, binary, file), then hold
-tlstore hold <name...>        skip these in update and in the store app's update list
+tlstore hold <name...>        skip these in upgrade and in the store app's update list
 tlstore unhold <name...>
 tlstore refresh               catalog only
 tlstore self-update [--check] tlstore itself (exit 1 when a newer one was refused or failed)
@@ -109,7 +110,7 @@ Global `-y`/`--yes`, `-h`, `-v` go before the command. Strict arguments: `doctor
 `refresh` and `self-update` reject stray words (exit 2). `tlstore shell` was removed and says
 `install fish-shell`. Exit codes 0/1/2 (ok / failed / usage). `TLSTORE_ASSUME_YES=1` = `-y` everywhere. Output is plain
 text, one line per action, product copy (no mechanism talk); errors start with `tlstore: `.
-`update` for `pkg` items runs the package manager's own upgrade for exactly those names
+`upgrade` for `pkg` items runs the package manager's own upgrade for exactly those names
 (`apt install --only-upgrade` / `pacman -S --needed`).
 
 ## Build plan
@@ -1227,3 +1228,83 @@ wrong folder or two entries, an update that replaces the directory whole, a syml
 path, a real folder of the person's (left, warned, install succeeds), the move from the retired
 file rows (and an edited one, left), remove (and a link the person replaced), x86_64, the
 `build-catalog.sh` row, the `bins-plan.sh` job, and the dev-branch engine refusing the kind.
+
+## Revision 19 — update lists, upgrade installs (tlstore 0.21)
+
+Termux's `pkg` uses two words: `pkg update` refreshes the package lists, `pkg upgrade` installs
+what moved on. Until 0.20 `tlstore update` did both, and `upgrade` was its alias. The words now
+mean what they mean in `pkg`, and `install` starts from a fresh list as well.
+
+| command | what it does now |
+|---|---|
+| `update` | refresh the item list (`update_refresh`, as before), plan the items as `--check` does, and say what is pending: each line `plan_show_update` prints (now worded "upgrade will …"), then `Run 'tlstore upgrade' to install them.` when something would install or retire, then `tlstore <v> is out: tlstore upgrade installs it` when a newer tlstore checks out (`self_update_note`). Installs nothing, changes nothing installed |
+| `upgrade [name...]` | what `update` did until 0.20: `self_update_offer` first and, when tlstore moved, `exec $PREFIX/bin/tlstore upgrade <the same arguments>` with `TLSTORE_UPDATED_FROM`; then refresh and install the pending items, all of them or the named ones. Held items are skipped unless named, and naming one lets go of its hold |
+| `install` | `install_refresh` before planning: `refresh_catalog` silent (quiet level 2: not even "Updated the list of items"), never asking for minisign. Offline, cannot verify or refused, it says `Could not check for a newer item list: <reason>. Using the one you have.` (stderr under `--progress`) and installs from the list it has; the refresh never fails an install. `--dry-run` refreshes too, as `update --check` always has |
+
+`self_update_note` fetches and verifies the newest release's script as the offer does, names it
+only when it is newer and names a store program for this processor (otherwise it says why it
+cannot be taken), and drops it again. It is silent when nothing is newer, offline, it cannot verify,
+after "never", or under `TLSTORE_UPDATED_FROM`; a refused script is said on stderr.
+
+### Which arguments make an `update` an upgrade
+
+`update` with any of these is `upgrade` with the same arguments, word for word
+(`update_wants_upgrade`), so a script, a habit, or a store app from before the split still installs:
+
+| argument | `update` treats it as | why |
+|---|---|---|
+| an item name | upgrade | only means something when installing those items |
+| `--progress` | upgrade | the store app's job stream; a tlstore-ui before 0.21 runs `update --progress <names>` |
+| `--configs` | upgrade | answers a question only an install asks |
+| (none) | list | |
+| `-y`, `--yes` | list | the only question left is installing a missing minisign for the refresh |
+| `--check` | list | already "change nothing"; it still never looks for a newer tlstore |
+| `-n`, `--dry-run` | list | the same as `--check`, plus `Nothing was changed.` |
+| `--tsv` | list | the rows `update --check --tsv` prints, with or without `--check`; byte for byte as before |
+| `--offline` | list | the list from the item list already here: no refresh, no registry, no newer-tlstore check |
+| anything else starting `-` | list | refused as before: exit 2, `run 'tlstore help update'` |
+
+`upgrade` takes every option `update` took before: `--check`, `-n`, `--offline`, `--tsv`,
+`--configs`, `--progress`, `-y`. `upgrade --tsv` without `--check` still offers a newer tlstore at
+the end, on stderr; `upgrade --check`, `--progress` and `--offline` never offer.
+
+### The hand-off from an older engine
+
+A phone on 0.20 that runs `tlstore update` takes the newer tlstore first and `exec`s it as
+`update <the same arguments>` with `TLSTORE_UPDATED_FROM=0.20` — meaning the whole update. So
+`cmd_update` treats an `update` whose `TLSTORE_UPDATED_FROM` is older than `UPGRADE_SPLIT` (0.21)
+as `upgrade`: the phone's first update after the split still installs its items, in that one run.
+An engine at or after the split hands over as `upgrade`, so a later `update` with
+`TLSTORE_UPDATED_FROM` set is the list.
+
+### Exit status
+
+`update` exits 0 once the list was checked, whether or not anything is pending (as `apt update`
+does); "could not check" is one line, not a failure. It exits 1 only for a newer tlstore whose
+signature was refused (as `update` always did) or when planning failed, and 2 for a usage error.
+`upgrade` keeps update's old statuses.
+
+### Store app
+
+tlstore-ui's Verb::Update runs `tlstore upgrade --progress <names>` (`ui/CONTRACT.md`); every
+engine before 0.21 took `upgrade` as update's alias, so the new UI works against an older engine,
+and an older UI's `update --progress <names>` works against this one. The background check stays
+`update --check --tsv`, unchanged. Its words on screen ("update", "updating", "updated") stay: in
+the app it is still an update.
+
+### Older engines
+
+The state file and the TSV formats are unchanged. As always `TLSTORE_VERSION` moves (0.21), which
+is also `UPGRADE_SPLIT`.
+
+Tests (`scripts/test.sh`): a plain `update` lists and installs nothing, with the hint line and a
+config's "upgrade asks first"; `update -y --offline`, `-n`, `--tsv` and `--check --tsv` (rows
+only on stdout) list; `update <name>`, `update --progress <name>` and `update --configs` upgrade;
+`upgrade <name>` leaves the rest; a held item skipped by a plain `upgrade` and released by naming
+it; unknown options pointing at each command's page; `install` with the release out of reach (one
+line, also kept off the `--progress` stream), against a newer signed list (taken silently) and an
+older one (one line); `update` naming a newer tlstore (also with `-y`), the same one, a refused
+one (exit 1) and after "never"; `upgrade -y` re-executing as `upgrade -y`, `update --configs` as
+`upgrade --configs`; `TLSTORE_UPDATED_FROM=0.20` with `update -y` upgrading and the current
+version listing; and the real hand-off — the 0.20 engine from this checkout's history running
+`update -y`, taking this engine, which upgrades the items in the same run.

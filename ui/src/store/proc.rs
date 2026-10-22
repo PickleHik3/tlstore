@@ -162,7 +162,7 @@ pub fn parse_prefetch(line: &str) -> Option<PrefetchLine> {
 /// What a background task is for; the router routes its result by this.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TaskKind {
-    /// `tlstore install|update|remove|self-update --progress …`
+    /// `tlstore install|upgrade|remove|self-update --progress …`
     Job,
     /// `tlstore self-update --check --tsv`: whether a newer store is offered, judged at exit.
     SelfCheck,

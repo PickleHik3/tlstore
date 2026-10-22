@@ -40,7 +40,7 @@ Nothing new in the engine's install path: each shim is a hidden `file` item
 (`termux-api-shim-<command>`, `mode=755`, target `~/.local/bin/<command>`), the source is
 `binaries:shims/termux-api/<command>@<ref>` (a path in this repository, digest from `SHA256SUMS`),
 and the visible item `termux-api-shims` is a `bundle` of them. `tlstore remove termux-api-shims`
-removes the whole set; `update` refreshes a shim whose file moved on and, as for any `file` item,
+removes the whole set; `upgrade` refreshes a shim whose file moved on and, as for any `file` item,
 asks before replacing one the user edited.
 
 They land in `~/.local/bin`, not `$PREFIX/bin`: that is where tlstore puts everything (see
@@ -83,5 +83,5 @@ from `raw.githubusercontent.com/PickleHik3/tlstore/<ref>/<path>`:
 
 Editing a shim later: change the file, update its `SHA256SUMS` line, point its row's `<ref>` at the
 new tag **and change its version column** (the first 8 characters of the ref, like the launcher's
-`file` items): `update` and `install` compare versions, not digests, so a row whose version did
+`file` items): `upgrade` and `install` compare versions, not digests, so a row whose version did
 not move is "already installed". Release as above.
