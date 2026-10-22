@@ -94,20 +94,23 @@ impl Verb {
             Verb::SelfUpdate => "self-update",
         }
     }
-    /// The facts-strip word while it runs.
+    /// The facts-strip word while it runs: an item's update reads `upgrading`, as its key
+    /// says `upgrade`; the store's own update keeps `updating`.
     pub fn ing(self) -> &'static str {
         match self {
             Verb::Install => "installing",
-            Verb::Update => "updating",
+            Verb::Update => "upgrading",
             Verb::Remove => "removing",
             Verb::SelfUpdate => "updating",
         }
     }
-    /// The plain verb of the summary's "Could not … " line.
+    /// The plain verb of the summary's "Could not … " line. An item's update says `upgrade`,
+    /// the word on its key and the engine's command; the store's own stays `update`.
     fn word(self) -> &'static str {
         match self {
             Verb::Install => "install",
-            Verb::Update | Verb::SelfUpdate => "update",
+            Verb::Update => "upgrade",
+            Verb::SelfUpdate => "update",
             Verb::Remove => "remove",
         }
     }

@@ -529,7 +529,7 @@ fn updates_filter_shows_only_updates_and_updates_them_all() {
 fn update_key_on_an_updatable_row_updates_that_item() {
     let mut h = H::new(53, 26, Opts::default());
     go_to(&mut h, "kitten");
-    assert!(h.has("u update"), "{}", h.text);
+    assert!(h.has("u upgrade"), "{}", h.text);
     h.key(Key::Char('u'));
     assert_eq!(h.r().top(), "installing");
     h.settle();
@@ -755,7 +755,7 @@ fn item_keys_star_repo_and_jobs() {
     let mut h = H::new(53, 26, Opts::default());
     open_item(&mut h, "kitten");
     h.pump(|r| r.st.starred("kovidgoyal/kitty").is_some());
-    assert!(h.has("r remove") && h.has("u update") && h.has("s star") && h.has("o repo"), "{}", h.text);
+    assert!(h.has("r remove") && h.has("u upgrade") && h.has("s star") && h.has("o repo"), "{}", h.text);
     h.key(Key::Char('s'));
     h.settle();
     assert!(h.has("s unstar") && h.has("· starred"), "{}", h.text);
@@ -772,7 +772,7 @@ fn item_keys_star_repo_and_jobs() {
     assert!(h.log("calls.log").lines().any(|l| l == "upgrade --progress kitten"));
     h.key(Key::Enter);
     assert_eq!(h.r().top(), "item");
-    assert!(!h.has("u update"), "no update left: the slot is empty\n{}", h.text);
+    assert!(!h.has("u upgrade"), "no update left: the slot is empty\n{}", h.text);
 }
 
 /// Revision 15: an item whose Termux packages are large says so on its page, and installing
@@ -979,15 +979,15 @@ fn job_from_item_with_the_snapshot_held(h: &mut H, key: char) {
 fn remove_from_item_shows_install_before_the_snapshot_lands() {
     let mut h = H::new(53, 26, Opts::default());
     open_item(&mut h, "kitten");
-    assert!(h.has("r remove") && h.has("u update"), "{}", h.text);
+    assert!(h.has("r remove") && h.has("u upgrade"), "{}", h.text);
     job_from_item_with_the_snapshot_held(&mut h, 'r');
     let facts = layout::header(53, 26, 7, None).facts as usize;
     assert!(!h.row(facts).contains("installed"), "{}", h.text);
-    assert!(h.has("i install") && !h.has("r remove") && !h.has("u update"), "{}", h.text);
+    assert!(h.has("i install") && !h.has("r remove") && !h.has("u upgrade"), "{}", h.text);
     std::fs::remove_file(h.dir.join("hold-snapshot")).unwrap();
     h.settle();
     assert!(!h.row(facts).contains("installed"), "the snapshot agrees\n{}", h.text);
-    assert!(h.has("i install") && !h.has("u update"), "{}", h.text);
+    assert!(h.has("i install") && !h.has("u upgrade"), "{}", h.text);
 }
 
 #[test]

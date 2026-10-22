@@ -275,7 +275,7 @@ pub enum Masthead {
 /// The facts strip: `[state] version [→ new] · more…`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Facts {
-    /// `installed`, `installing`, `updating`, `removing`, `failed`.
+    /// `installed`, `installing`, `upgrading`, `updating` (the store itself), `removing`, `failed`.
     pub state: Option<String>,
     pub version: String,
     /// The version an update brings: `version` is struck through, this follows an arrow.

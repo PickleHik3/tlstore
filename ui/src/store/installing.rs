@@ -1,4 +1,4 @@
-//! Installing (also updating and removing): the header of the item in progress, the 3×
+//! Installing (also upgrading and removing): the header of the item in progress, the 3×
 //! count-up percentage of the whole job, the plan's rows beside it (the live one with its
 //! step words), the drawn progress line, what comes next, and the summary when it ends.
 

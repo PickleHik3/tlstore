@@ -58,7 +58,7 @@ Gutter: 2 columns each side (1 under 44 columns). Content columns at 53 wide: 2�
 | 3+P | Blank (only when a picture is drawn). |
 | next 3 | Name: the script face rasterised at exactly 3 × cell height pixels in the ink colour, left at the gutter. If wider than 49 columns, or pictures are unavailable, mono OSC 66 scale 3 (scale 2 under 44 columns or if 3 does not fit). |
 | next | Standfirst, dim italic, `fit_line` to the content width. |
-| next | Facts strip, dim: `[installed \| installing \| updating \| removing] <version>` or plain `<version>`; then `· <licence>`, `· <author>`, `· <size>`, `· starred` as known. With an update: `<old>` struck through, ` → <new>`. |
+| next | Facts strip, dim: `[installed \| installing \| upgrading \| removing] <version>` (`updating` for the store itself) or plain `<version>`; then `· <licence>`, `· <author>`, `· <size>`, `· starred` as known. With an update: `<old>` struck through, ` → <new>`. |
 | next | Blank. |
 | … | Body (per screen). |
 | last−1 | Notice row (blank unless a notice or the selection bar is showing). |
@@ -89,7 +89,7 @@ seven two-line items. Header geometry is one pure function in `layout.rs`, teste
   `N selected · i installs them, ␣ clears` (or `r removes them` when all selected are installed);
   the verb slot follows.
 - Updates filter: `u` or the masthead item shows only items with an update; the masthead reads
-  `updates · all` (tap `all` or `esc`: back to all); `u` again updates every shown item
+  `updates · all` (tap `all` or `esc`: back to all); `u` again upgrades every shown item
   (→ Installing).
 - `s` with gh not ready: notice row `starring needs gh: pkg install gh, then gh auth login`
   until the next key. Otherwise stars silently and the facts strip gains `· starred`.
@@ -121,13 +121,13 @@ row, `PgUp`/`PgDn` a body height, `Home`. Body = the README rendered under these
 Offline with no cached README, or no upstream: header plus one dim line `read about it on GitHub`
 (link) — or for a setup, the standfirst alone.
 
-Keys: `i install` / `r remove` · `u update` (empty slot when none) · `s star` (dim until gh works;
+Keys: `i install` / `r remove` · `u upgrade` (not shown when none) · `s star` (dim until gh works;
 absent for setups) · `o repo` · `esc back`.
 
 ## Installing
 
 Header of the requested item in progress — a part it brings counts as it (facts strip verb:
-installing/updating/removing). Body, from the first body row b:
+installing/upgrading/removing). Body, from the first body row b:
 
 - `NN` at 3× in the accent at the gutter over rows b–b+2; `%` at 2× dim at gutter+6 on row b+1.
   One number for the whole job (Revision 17): the plan's rows' own 10 → 100 weighted by kind

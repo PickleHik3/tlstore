@@ -334,7 +334,7 @@ impl View for Front {
             }
         } else {
             match cur {
-                Some(i) if st.cat.update_for(&i.name).is_some() => Slot::new("u", "update", Key::Char('u')),
+                Some(i) if st.cat.update_for(&i.name).is_some() => Slot::new("u", "upgrade", Key::Char('u')),
                 Some(i) if i.installed.is_some() => Slot::new("r", "remove", Key::Char('r')),
                 _ => Slot::new("i", "install", Key::Char('i')),
             }

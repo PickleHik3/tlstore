@@ -301,7 +301,7 @@ impl View for ItemView {
         };
         [
             Some(verb),
-            st.cat.update_for(&self.name).map(|_| Slot::new("u", "update", Key::Char('u'))),
+            st.cat.update_for(&self.name).map(|_| Slot::new("u", "upgrade", Key::Char('u'))),
             (!setup).then(|| {
                 Slot::new("s", if starred { "unstar" } else { "star" }, Key::Char('s'))
                     .when(st.gh == Gh::Ready)
