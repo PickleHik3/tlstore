@@ -21,4 +21,4 @@
 20| Sends files between machines over the
 21| terminal connection, in both
 22|
-23| r rem… u upda… s star  o repo  esc back
+23| r rem…  u upg…  s star  o re…  esc ba…

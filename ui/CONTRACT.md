@@ -40,7 +40,9 @@ header(cols,rows,body_need,pic_rows:Option<u16>) -> Header { tier, narrow, gutte
   name:Rect(3 rows, 2 Compact), standfirst, facts, body:Rect, notice:rows-2, keys:rows-1 }
   Rows: masthead, blank, [picture P, blank], name, standfirst, facts, blank, body, notice, keys. P = rows − 11 − body_need, ≤12, ≤pic_rows
   (the picture's own rows; u16::MAX = reserve), 0 under 4 or when pic_rows is None; Compact never. 53×26 Front: P 8 over 7 rows; 53×40: P 9 over 20.
-key_slots(cols) = [2,12,24,34,45] (≥53) | [1,8,16,24,32] (<44) | spread between; key_rooms(cols) = columns per slot.
+Key row: key_label_gap(label) = 2 after a glyph (non-ASCII) label, 1 after letters; key_words_room(cols,&[(label+gap, words_w)]) cuts
+  words (`…`, ≥1 column) from the rightmost-longest until the shown items fit with KEY_MIN_GAP 2; key_starts(cols,&widths) justifies them:
+  first at the gutter, last ending at the right gutter, equal gaps (remainder to the leftmost).
 wrap(s,w,max_lines)/fit_line(s,w): whole words, `…` when cut. centre_x(rect,w).
 
 use tlstore_ui::store::{Router, Store, Go, View, Verb, Job, Gh, Got, Readme, SelfUpdate, Exit, GH_NOTICE, STORE_REPO, SELF_UPDATE_HOLD, UPDATED_NOTICE,
@@ -81,7 +83,7 @@ header_for(p, st, name, body_need, readme_first, reserve, animate) -> (Header, O
 picture_in(st, pics, path, box_w, box_h) -> Lookup  // a README picture, contain-fitted by the worker
 paint: Paint{f,fx,scene,clip,scroll}: text/text_clip/right/centred/fill/hline/sized/picture(el,pic,col,row,(off_x,off_y),pid)/hit/link; alpha fades
   toward the surface, pictures hide under 0.5. draw_header(p,&Header,&HeaderContent{masthead: Masthead::{Front{updates,filter},Page{repo,setup}},
-  picture, name, standfirst, facts: Facts{state,version,new,more}}); draw_keys(p,&Header,&Slots) /*[Option<Slot{label,words,key,on}>;5]*/;
+  picture, name, standfirst, facts: Facts{state,version,new,more}}); draw_keys(p,&Header,&Slots) /*[Option<Slot{label,words,key,on}>;5]; None not shown, off dim in place*/;
   draw_notice(p,&Header,text). Taps: A_HOME 1, A_BACK 2, A_CONTEXT 3 (updates / repo), A_ALL 4, A_HEADER 5, A_KEY0+i 10..14; screens use 100+.
 readme: parse(md, skip:&[String]) -> Doc{first_image, blocks: Vec<Block>} (drop rules of REVISION-6.md; SKIP_SECTIONS + skip, case-insensitive);
   fit(&Doc, width, repo_url) -> Vec<Row::{Blank, Text{indent,spans,quote}, H2, H3, Code, Image{src,alt}, Hairline, Link{text,url}}>;

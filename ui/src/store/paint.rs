@@ -1,5 +1,5 @@
 //! Drawing through the motion hooks, and the shared header every screen has: masthead,
-//! picture, name, standfirst, facts strip; plus the notice row and the fixed key slots.
+//! picture, name, standfirst, facts strip; plus the notice row and the key row.
 
 use crate::layout::{self, Header, Tier};
 use crate::picture::{mark, Picture};
@@ -501,26 +501,35 @@ pub fn key_glyphs(launcher: bool) -> (&'static str, &'static str) {
     if launcher { ("\u{f0311}", "\u{f1050}") } else { ("⏎", "␣") }
 }
 
-/// The five fixed slots.
+/// The key row's five slots, in the order they are drawn. A `None` slot is not shown at all
+/// (the items left spread out over the row); an `off` one is, dim.
 pub type Slots = [Option<Slot>; 5];
 
-/// Draws the key row: five fixed slots, label in the accent, words dim (everything dim when
-/// the slot is off); words are cut so a column stays free before the next slot. Taps on an
-/// `on` slot are `A_KEY0 + index`.
+/// Draws the key row: the shown slots justified across it (equal blanks between them, see
+/// [`layout::key_starts`]), label in the accent, words dim (everything dim when the slot is
+/// off), two blank columns after a glyph label and one after letters
+/// ([`layout::key_label_gap`]). Where the row does not fit, words are cut with `…`
+/// ([`layout::key_words_room`]). Taps on an `on` slot are `A_KEY0 + index`, the slot's index
+/// whatever its place on the row.
 pub fn draw_keys(p: &mut Paint, h: &Header, slots: &Slots) {
     let pal = *p.f.pal();
-    let cols = layout::key_slots(h.cols);
-    let rooms = layout::key_rooms(h.cols);
+    let shown: Vec<(usize, &Slot)> =
+        slots.iter().enumerate().filter_map(|(i, s)| Some((i, s.as_ref()?))).collect();
+    let heads: Vec<u16> =
+        shown.iter().map(|(_, s)| text_width(s.label) as u16 + layout::key_label_gap(s.label)).collect();
+    let full: Vec<(u16, u16)> =
+        shown.iter().zip(&heads).map(|((_, s), &head)| (head, text_width(s.words) as u16)).collect();
+    let rooms = layout::key_words_room(h.cols, &full);
+    let words: Vec<String> =
+        shown.iter().zip(&rooms).map(|((_, s), &room)| layout::fit_line(s.words, room)).collect();
+    // Placed by what is drawn: a cut that ends at a whole word may leave a word short of its room.
+    let widths: Vec<u16> = heads.iter().zip(&words).map(|(&head, w)| head + text_width(w) as u16).collect();
+    let starts = layout::key_starts(h.cols, &widths);
     let y = h.keys;
-    for (i, slot) in slots.iter().enumerate() {
-        let Some(s) = slot else { continue };
-        let x = cols[i];
+    for (((&(i, s), &head), words), &x) in shown.iter().zip(&heads).zip(&words).zip(&starts) {
         let label_st = if s.on { pal.accent_s() } else { pal.dim_s() };
-        let e = p.text(El::Keys, x, y, s.label, label_st);
-        let gap = u16::from(i + 1 < slots.len());
-        let words_w = rooms[i].saturating_sub(text_width(s.label) as u16 + 1 + gap);
-        let words = layout::fit_line(s.words, words_w);
-        let end = p.text(El::Keys, e + 1, y, &words, pal.dim_s());
+        p.text(El::Keys, x, y, s.label, label_st);
+        let end = p.text(El::Keys, x + head, y, words, pal.dim_s());
         if s.on {
             p.hit(Rect::new(x, y, end - x, 1), A_KEY0 + i as u32);
         }

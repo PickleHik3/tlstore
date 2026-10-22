@@ -182,25 +182,62 @@ fn picture_rows(room: u16, body_need: u16, body_min: u16, own: u16) -> u16 {
     }
 }
 
-/// The five key-row slots' columns. At 53 columns and up: 2, 13, 24, 34, 42 — two blank
-/// columns after the widest hint any screen puts in each slot (`i install`, `i install`,
-/// `␣ select`/`s unstar`, `f full`, `esc back`), and `esc back` ends inside the gutter; under 44
-/// columns: 1, 8, 16, 24, 32; between, evenly inside the gutters.
-pub fn key_slots(cols: u16) -> [u16; 5] {
-    if cols >= BASE_COLS {
-        [2, 13, 24, 34, 42]
-    } else if narrow(cols) {
-        [1, 8, 16, 24, 32]
+/// Blank columns between a key-row label and its words: two after a glyph label (`⏎`, `␣`, or
+/// the launcher's Nerd Font icons), one after a letter label (`q quit`). The launcher draws a
+/// Nerd Font icon two cells wide, over the space that follows it, so one space there leaves the
+/// icon touching its word.
+pub fn key_label_gap(label: &str) -> u16 {
+    if label.is_ascii() {
+        1
     } else {
-        let step = cols.saturating_sub(4) / 5;
-        [2, 2 + step, 2 + 2 * step, 2 + 3 * step, 2 + 4 * step]
+        2
     }
 }
 
-/// Columns each key slot may use: up to the next slot, the last one up to the edge.
-pub fn key_rooms(cols: u16) -> [u16; 5] {
-    let s = key_slots(cols);
-    [s[1] - s[0], s[2] - s[1], s[3] - s[2], s[4] - s[3], cols.saturating_sub(s[4])]
+/// The narrowest blank between two key-row items; under it, words are cut instead.
+pub const KEY_MIN_GAP: u16 = 2;
+
+/// Columns each key-row item's words may take. `items` are the shown items in order, each as
+/// (label and its gap, words at full length). When the items do not fit inside the gutters with
+/// [`KEY_MIN_GAP`] between them, the longest words give up a column at a time (the rightmost of
+/// equals first: the keys used most sit on the left), so the cuts even the long words out
+/// before touching the short ones. Words, not whole items, are compared: a long label
+/// (`esc`) cannot be cut, and measuring it in would leave its word only the `…`. Words never go
+/// under one column (the `…`).
+pub fn key_words_room(cols: u16, items: &[(u16, u16)]) -> Vec<u16> {
+    let inner = cols.saturating_sub(gutter(cols) * 2);
+    let gaps = KEY_MIN_GAP * (items.len().saturating_sub(1) as u16);
+    let mut room: Vec<u16> = items.iter().map(|&(_, w)| w).collect();
+    let total =
+        |room: &[u16]| -> u16 { items.iter().zip(room).map(|(&(h, _), &w)| h + w).sum::<u16>() + gaps };
+    while total(&room) > inner {
+        let longest = (0..items.len()).filter(|&i| room[i] > 1).max_by_key(|&i| (room[i], i));
+        let Some(i) = longest else { break };
+        room[i] -= 1;
+    }
+    room
+}
+
+/// Start columns of key-row items `widths` wide (as drawn: label, gap, words): justified, so
+/// the blanks between consecutive items are equal whatever the width and however many items a
+/// screen shows. The first starts at the gutter, the last ends at the right gutter, and the
+/// columns left over are shared out between the gaps, a remainder going to the leftmost. One
+/// item sits at the gutter; items that cannot fit (tiny grids) keep one blank between them
+/// and run off the edge.
+pub fn key_starts(cols: u16, widths: &[u16]) -> Vec<u16> {
+    let g = gutter(cols);
+    let inner = cols.saturating_sub(g * 2);
+    let n = widths.len() as u16;
+    let spare = inner.saturating_sub(widths.iter().sum());
+    let slots = n.saturating_sub(1).max(1);
+    let (each, extra) = if spare >= n.saturating_sub(1) { (spare / slots, spare % slots) } else { (1, 0) };
+    let mut x = g;
+    let mut out = Vec::with_capacity(widths.len());
+    for (i, &w) in widths.iter().enumerate() {
+        out.push(x);
+        x = x.saturating_add(w + each + u16::from((i as u16) < extra));
+    }
+    out
 }
 
 /// `s` word-wrapped to lines of at most `width` columns, at most `max_lines` of them; when the
@@ -424,20 +461,55 @@ mod tests {
         assert_eq!(h.keys, 29);
     }
 
+    /// The blanks between consecutive items placed by [`key_starts`].
+    fn gaps(cols: u16, widths: &[u16]) -> Vec<u16> {
+        let s = key_starts(cols, widths);
+        (1..s.len()).map(|i| s[i] - s[i - 1] - widths[i - 1]).collect()
+    }
+
     #[test]
-    fn key_slots_are_fixed() {
-        assert_eq!(key_slots(53), [2, 13, 24, 34, 42]);
-        assert_eq!(key_slots(60), [2, 13, 24, 34, 42]);
-        assert_eq!(key_slots(40), [1, 8, 16, 24, 32]);
-        assert_eq!(key_rooms(53), [11, 11, 10, 8, 11]);
-        // Two blank columns after the widest hint in each slot.
-        for (room, widest) in key_rooms(53).iter().zip(["i install", "i install", "s unstar", "f full"]) {
-            assert!(*room >= widest.len() as u16 + 2, "{widest}");
+    fn key_items_are_justified() {
+        // Front at 53: `⏎  open`, `i install`, `␣  select`, `q quit`.
+        assert_eq!(key_starts(53, &[7, 9, 9, 6]), [2, 15, 30, 45]);
+        assert_eq!(45 + 6, 53 - 2, "the last ends at the right gutter");
+        // Item at 53: `r remove`, `u upgrade`, `s star`, `o repo`, `esc back`.
+        assert_eq!(key_starts(53, &[8, 9, 6, 6, 8]), [2, 13, 25, 34, 43]);
+        // The remainder goes to the leftmost gaps.
+        assert_eq!(gaps(54, &[8, 9, 6, 6, 8]), [4, 3, 3, 3]);
+        assert_eq!(gaps(56, &[8, 9, 6, 6, 8]), [4, 4, 4, 3]);
+        // Two items (Installing): one at each gutter; one item at the gutter.
+        assert_eq!(key_starts(80, &[8, 8]), [2, 70]);
+        assert_eq!(key_starts(80, &[8]), [2]);
+        assert_eq!(key_starts(80, &[]), Vec::<u16>::new());
+        for cols in [36, 44, 53, 60, 80, 120] {
+            let g = gaps(cols, &[7, 9, 9, 6]);
+            assert!(g.iter().max().unwrap() - g.iter().min().unwrap() <= 1, "{cols}: {g:?}");
         }
-        assert!(key_slots(53)[4] + "esc back".len() as u16 <= 53 - 2);
-        assert_eq!(key_rooms(40), [7, 8, 8, 8, 8]);
-        let mid = key_slots(48);
-        assert!(mid.windows(2).all(|w| w[1] > w[0]) && mid[4] + key_rooms(48)[4] <= 48);
+    }
+
+    #[test]
+    fn glyph_labels_get_two_blank_columns() {
+        assert_eq!(key_label_gap("\u{f0311}"), 2);
+        assert_eq!(key_label_gap("⏎"), 2);
+        assert_eq!(key_label_gap("␣"), 2);
+        assert_eq!(key_label_gap("q"), 1);
+        assert_eq!(key_label_gap("esc"), 1);
+    }
+
+    #[test]
+    fn key_words_are_cut_from_the_rightmost_longest() {
+        // Everything fits: nothing is cut.
+        assert_eq!(key_words_room(53, &[(3, 4), (2, 7), (3, 6), (2, 4)]), [4, 7, 6, 4]);
+        // Front at 36 (34 inside the gutters): 31 columns of items and three gaps of two.
+        assert_eq!(key_words_room(36, &[(3, 4), (2, 7), (3, 6), (2, 4)]), [4, 5, 5, 4]);
+        // Item at 36: the longest words come down to the rest, then the rightmost of equals.
+        let items = [(2, 6), (2, 7), (2, 4), (2, 4), (4, 4)];
+        let room = key_words_room(36, &items);
+        assert_eq!(room, [3, 3, 3, 3, 2]);
+        let widths: u16 = items.iter().zip(&room).map(|(&(h, _), &w)| h + w).sum();
+        assert_eq!(widths + 4 * KEY_MIN_GAP, 34);
+        // Never under one column of words, however narrow.
+        assert!(key_words_room(10, &items).iter().all(|&w| w == 1));
     }
 
     #[test]

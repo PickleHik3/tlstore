@@ -450,10 +450,10 @@ fn rows_show_numbers_tags_and_statuses() {
     assert!(rows[2].contains("fastfetch Tools") && rows[2].trim_end().ends_with("↑ 2.67.0"), "{:?}", rows[2]);
     assert!(rows[3].trim_end().ends_with("installed"), "{:?}", rows[3]);
     assert!(rows[6].starts_with("  07  sigye Tools"), "{:?}", rows[6]);
-    // The key row: five fixed slots.
+    // The key row: four items justified between the gutters (six blanks between each), two
+    // blank columns after a glyph label.
     let keys = h.row(hdr.keys as usize);
-    // Two blank columns after the widest hint of every slot.
-    for (col, word) in [(2, "\u{f0311} open"), (13, "i install"), (24, "\u{f1050} select"), (34, "f full"), (42, "q quit")]
+    for (col, word) in [(2, "\u{f0311}  open"), (15, "i install"), (30, "\u{f1050}  select"), (45, "q quit")]
     {
         let at = keys.find(word).unwrap_or_else(|| panic!("{word} missing: {keys:?}"));
         assert_eq!(unicode_width_of(&keys[..at]), col, "{word} at {col}: {keys:?}");
@@ -630,38 +630,92 @@ fn paging_when_rows_do_not_fit() {
 }
 
 #[test]
-fn key_slots_stay_in_place_and_taps_send_their_key() {
+fn key_row_taps_send_their_key() {
     let mut h = H::new(53, 26, Opts { launcherctl: false, ..Opts::default() });
     let keys = layout::header(53, 26, 7, None).keys;
-    // The keyboard hint stays in place, dim, and does nothing.
-    assert!(h.row(keys as usize).contains("f full"), "{}", h.text);
-    assert_eq!(h.hits.at(34, keys), None);
-    h.tap_at(13, keys);
-    assert_eq!(h.r().top(), "installing", "slot 2 sends i");
+    // No keyboard hint: `f` works without one.
+    assert!(!h.has("f full"), "{}", h.text);
+    h.tap_at(15, keys);
+    assert_eq!(h.r().top(), "installing", "the second item sends i");
     h.settle();
     h.key(Key::Esc);
-    h.tap_at(42, keys);
+    h.tap_at(45, keys);
     assert!(h.key(Key::Char('q')) || true);
-    // Under 44 columns the slots are 1, 8, 16, 24, 32.
+    // An off slot keeps its place, dim, and does nothing: `s star` with gh signed out.
+    let mut h = H::new(53, 26, Opts { gh: Gh::SignedOut, ..Opts::default() });
+    open_item(&mut h, "kitten");
+    let row = h.row(keys as usize);
+    let col =
+        |word: &str| unicode_width_of(&row[..row.find(word).unwrap_or_else(|| panic!("{word}: {row:?}"))]);
+    assert_eq!((col("r remove"), col("u upgrade"), col("s star"), col("o repo")), (2, 13, 25, 34), "{row:?}");
+    assert_eq!(h.hits.at(25, keys), None);
+    assert!(h.hits.at(34, keys).is_some());
+    // Under 44 columns the gutter is one column and the items still spread to it.
     let h = H::new(40, 24, Opts::default());
     let keys = layout::header(40, 24, 7, None).keys;
     let row = h.row(keys as usize);
     let col =
         |word: &str| unicode_width_of(&row[..row.find(word).unwrap_or_else(|| panic!("{word}: {row:?}"))]);
-    assert_eq!(col("\u{f0311} open"), 1, "{row:?}");
-    assert_eq!(col("i inst…"), 8, "{row:?}");
-    assert_eq!(col("q quit"), 32, "{row:?}");
+    assert_eq!(col("\u{f0311}  open"), 1, "{row:?}");
+    assert_eq!(col("i install"), 11, "{row:?}");
+    assert_eq!(col("q quit"), 33, "{row:?}");
+}
+
+/// The key row's items as (first column, column after the last), read off a drawn row: every
+/// label and every slot's words are one word, so the row's words pair up label, words.
+fn key_items(row: &str) -> Vec<(usize, usize)> {
+    let mut words = Vec::new();
+    let mut col = 0;
+    let mut start = None;
+    for c in row.chars().chain([' ']) {
+        if c == ' ' {
+            if let Some(s) = start.take() {
+                words.push((s, col));
+            }
+        } else if start.is_none() {
+            start = Some(col);
+        }
+        col += unicode_width_of(c.encode_utf8(&mut [0; 4]));
+    }
+    assert_eq!(words.len() % 2, 0, "labels and words pair up: {row:?}");
+    words.chunks(2).map(|w| (w[0].0, w[1].1)).collect()
+}
+
+#[test]
+fn key_row_gaps_are_equal_at_every_width() {
+    for cols in [36, 44, 53, 60, 80, 120] {
+        let mut h = H::new(cols, 26, Opts::default());
+        let keys = layout::header(cols, 26, 7, None).keys as usize;
+        let g = layout::gutter(cols) as usize;
+        for (screen, n) in [("front", 4), ("item", 5)] {
+            if screen == "item" {
+                open_item(&mut h, "kitten");
+                h.pump(|r| r.st.starred("kovidgoyal/kitty").is_some());
+                h.settle();
+            }
+            let row = h.row(keys);
+            let items = key_items(&row);
+            assert_eq!(items.len(), n, "{screen} at {cols}: {row:?}");
+            assert_eq!(items[0].0, g, "{screen} at {cols} starts at the gutter: {row:?}");
+            assert_eq!(items[n - 1].1, cols as usize - g, "{screen} at {cols} ends at the gutter: {row:?}");
+            let gaps: Vec<usize> = items.windows(2).map(|w| w[1].0 - w[0].1).collect();
+            let (lo, hi) = (gaps.iter().min().unwrap(), gaps.iter().max().unwrap());
+            assert!(hi - lo <= 1 && *lo >= 2, "{screen} at {cols}: gaps {gaps:?} in {row:?}");
+            // The wider gaps come first.
+            assert!(gaps.windows(2).all(|w| w[0] >= w[1]), "{screen} at {cols}: {gaps:?}");
+        }
+    }
 }
 
 #[test]
 fn fullscreen_calls_launcherctl_and_restores_on_exit() {
     let mut h = H::new(53, 26, Opts::default());
-    assert!(h.has("f full"), "{}", h.text);
+    assert!(!h.has("f full"), "the key is not hinted\n{}", h.text);
     h.key(Key::Char('f'));
     assert!(h.r().st.fullscreen, "held at once; launcherctl runs in the background");
     h.settle();
     assert_eq!(h.log("launcherctl.log"), "keyboard hide --hold\n");
-    h.tap("f full");
+    h.key(Key::Char('f'));
     h.settle();
     assert_eq!(h.log("launcherctl.log"), "keyboard hide --hold\nkeyboard show\n");
     h.key(Key::Char('f'));
@@ -842,10 +896,10 @@ fn installing_shows_the_number_steps_and_summary() {
     assert!(h.row(hdr.body.y as usize).ends_with("sigye  signature checked"), "{}", h.text);
     assert_eq!(h.row(hdr.body.y as usize + 1).trim(), "", "{}", h.text);
     assert!(h.row(hdr.body.y as usize + 5).contains("───"), "a text track without pictures");
-    assert!(h.has("x cancel") && h.has("esc back") && !h.has("\u{f0311} done"));
+    assert!(h.has("x cancel") && h.has("esc back") && !h.has("\u{f0311}  done"));
     h.key(Key::Char('x'));
     h.settle();
-    assert!(h.has("Stopped before sigye was done.") && h.has("\u{f0311} done"), "{}", h.text);
+    assert!(h.has("Stopped before sigye was done.") && h.has("\u{f0311}  done"), "{}", h.text);
     std::fs::remove_file(h.dir.join("hold")).unwrap();
 }
 
@@ -933,7 +987,7 @@ fn a_failed_item_shows_failed_on_installing_and_front() {
     let hdr = layout::header(53, 26, 7, None);
     assert!(h.row(hdr.facts as usize).starts_with("  failed 0.6.0"), "{}", h.text);
     assert!(h.row(hdr.notice as usize).contains("Could not install sigye. Try again later."), "{}", h.text);
-    assert!(h.has("\u{f0311} done"));
+    assert!(h.has("\u{f0311}  done"));
     h.key(Key::Enter);
     assert_eq!(h.r().top(), "front");
     let y = list_row(&h, "sigye");
@@ -1067,7 +1121,7 @@ fn a_refused_self_update_is_reported_and_the_store_goes_on() {
     let hdr = layout::header(53, 26, 7, None);
     assert!(h.row(hdr.facts as usize).starts_with("  failed 0.6 → 0.7"), "{}", h.text);
     assert!(h.row(hdr.notice as usize).contains("Could not update tlstore. Try again later."), "{}", h.text);
-    assert!(h.has("\u{f0311} done"), "{}", h.text);
+    assert!(h.has("\u{f0311}  done"), "{}", h.text);
     assert!(h.r().st.exit.borrow().is_none() && !h.r().finished());
     h.key(Key::Enter);
     assert_eq!(h.r().top(), "front");

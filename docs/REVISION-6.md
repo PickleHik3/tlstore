@@ -93,7 +93,8 @@ seven two-line items. Header geometry is one pure function in `layout.rs`, teste
   (→ Installing).
 - `s` with gh not ready: notice row `starring needs gh: pkg install gh, then gh auth login`
   until the next key. Otherwise stars silently and the facts strip gains `· starred`.
-- Keys: slots `⏎ open` · `i install` / `r remove` / `u update` · `␣ select` · `f full` (the launcher's keyboard held down) · `q quit`.
+- Keys: `⏎ open` · `i install` / `r remove` / `u upgrade` · `␣ select` · `q quit`. `f` (the launcher's keyboard
+  held down) works but is not hinted.
 
 ## Item
 
@@ -151,12 +152,17 @@ installing/upgrading/removing). Body, from the first body row b:
 - Keys while running: `x cancel` · (empty) · (empty) · (empty) · `esc back` (the job continues; the
   Front row of the requested item shows the live row's step word; the finish notice to the phone stays as today).
 
-## Key row: fixed slots
+## Key row: justified
 
-Five slots at columns 2, 13, 24, 34, 42 (at 53 columns: two blank columns after the widest hint any screen puts in a slot; under 44 columns the slots are 1, 8, 16,
-24, 32 and words are `fit_line`d to 7). A slot's position never changes; its content may
-(`i install` / `r remove` / `u update` share slot 2 on Front and slot 1 on Item). An unavailable
-hint stays in place, dim. Tapping a slot sends its key.
+Up to five slots, and the ones a screen shows are justified: the first starts at the gutter, the
+last ends at the right gutter, and the blanks between consecutive items are equal (the leftover
+columns shared out, a remainder to the leftmost gaps), measured from each item as drawn (label,
+gap, words). A glyph label (`⏎`, `␣`, the launcher's Nerd Font icons, which it draws two cells
+wide over the next column) has two blank columns before its words; a letter label one. Where the
+items do not fit with two blanks between them, words are cut with `…` from the rightmost-longest
+word, one column at a time, never under the `…`. A slot a screen leaves out (Item's `u upgrade`
+with no update) is not shown and the others spread; an unavailable hint stays in its place, dim.
+Tapping an item sends its key.
 
 ## Motion (D7)
 
