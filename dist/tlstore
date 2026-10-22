@@ -56,7 +56,7 @@
 
 set -u
 
-TLSTORE_VERSION=0.23
+TLSTORE_VERSION=0.24
 
 # The first tlstore whose `update` only refreshes and lists (Revision 19);
 # `upgrade` installs. An engine before it hands an update it has just
@@ -70,9 +70,9 @@ UPGRADE_SPLIT=0.21
 # self_update, which reads them out of the downloaded copy, not this one).
 # Keep these two lines exactly in this shape.
 # shellcheck disable=SC2034
-TLSTORE_UI_SHA256_arm64_v8a=b1c9984088034f3a929a2dddba6385de2d209a344c2f11721434865c1dce9e25
+TLSTORE_UI_SHA256_arm64_v8a=13ca04c02046f04c1d73fd96e40434400c702b2fcc6f6d7d4e82b85635ae9cf2
 # shellcheck disable=SC2034
-TLSTORE_UI_SHA256_x86_64=9c2272cea7c5a0b3c95499bff717950c92b3a00195a39b54f7d98e2c5a5f0125
+TLSTORE_UI_SHA256_x86_64=485b26f4b56248c216b5161b66630cecadd4ec48a6c7bf3ed815bbb10af529f9
 
 PREFIX="${TLSTORE_PREFIX:-${PREFIX:-${HOME%/files/home}/files/usr}}"
 HOME="${HOME:?tlstore needs HOME}"
