@@ -708,6 +708,27 @@ fn key_row_gaps_are_equal_at_every_width() {
 }
 
 #[test]
+fn key_row_holds_still_as_the_verb_changes() {
+    // remove, install and upgrade take turns in one front slot; the row must not shift a column
+    // when the cursor moves between items that show different ones.
+    for cols in [44, 53, 80] {
+        let mut h = H::new(cols, 26, Opts::default());
+        let keys = layout::header(cols, 26, 7, None).keys as usize;
+        let mut seen: Vec<(String, Vec<usize>)> = Vec::new();
+        for _ in 0..7 {
+            let row = h.row(keys);
+            let starts: Vec<usize> = key_items(&row).iter().map(|i| i.0).collect();
+            let verb = ["r remove", "i install", "u upgrade"].iter().find(|v| row.contains(**v)).unwrap();
+            seen.push((verb.to_string(), starts));
+            h.key(Key::Char('j'));
+        }
+        let verbs: std::collections::BTreeSet<&str> = seen.iter().map(|(v, _)| v.as_str()).collect();
+        assert!(verbs.len() >= 2, "the walk shows more than one verb at {cols}: {verbs:?}");
+        assert!(seen.windows(2).all(|w| w[0].1 == w[1].1), "starts move at {cols}: {seen:?}");
+    }
+}
+
+#[test]
 fn fullscreen_calls_launcherctl_and_restores_on_exit() {
     let mut h = H::new(53, 26, Opts::default());
     assert!(!h.has("f full"), "the key is not hinted\n{}", h.text);

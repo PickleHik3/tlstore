@@ -476,11 +476,19 @@ pub struct Slot {
     pub words: &'static str,
     pub key: Key,
     pub on: bool,
+    /// The widest words this slot ever shows, in columns. The row is laid out by it, so a slot
+    /// whose words change with the cursor (remove, install, upgrade) does not shift the others.
+    pub span: u16,
 }
 
 impl Slot {
     pub fn new(label: &'static str, words: &'static str, key: Key) -> Slot {
-        Slot { label, words, key, on: true }
+        Slot { label, words, key, on: true, span: 0 }
+    }
+    /// Laid out as wide as `widest`, the longest words this slot takes turns showing.
+    pub fn as_wide_as(mut self, widest: &str) -> Slot {
+        self.span = text_width(widest) as u16;
+        self
     }
     pub fn off(mut self) -> Slot {
         self.on = false;
@@ -518,12 +526,19 @@ pub fn draw_keys(p: &mut Paint, h: &Header, slots: &Slots) {
     let heads: Vec<u16> =
         shown.iter().map(|(_, s)| text_width(s.label) as u16 + layout::key_label_gap(s.label)).collect();
     let full: Vec<(u16, u16)> =
-        shown.iter().zip(&heads).map(|((_, s), &head)| (head, text_width(s.words) as u16)).collect();
+        shown.iter().zip(&heads).map(|((_, s), &head)| (head, (text_width(s.words) as u16).max(s.span))).collect();
     let rooms = layout::key_words_room(h.cols, &full);
     let words: Vec<String> =
         shown.iter().zip(&rooms).map(|((_, s), &room)| layout::fit_line(s.words, room)).collect();
     // Placed by what is drawn: a cut that ends at a whole word may leave a word short of its room.
-    let widths: Vec<u16> = heads.iter().zip(&words).map(|(&head, w)| head + text_width(w) as u16).collect();
+    // A span is kept only while its words were not cut: then the row has room for the widest.
+    let widths: Vec<u16> = shown
+        .iter()
+        .zip(&heads)
+        .zip(&words)
+        .zip(&rooms)
+        .map(|(((&(_, s), &head), w), &room)| head + (text_width(w) as u16).max(s.span.min(room)))
+        .collect();
     let starts = layout::key_starts(h.cols, &widths);
     let y = h.keys;
     for (((&(i, s), &head), words), &x) in shown.iter().zip(&heads).zip(&words).zip(&starts) {

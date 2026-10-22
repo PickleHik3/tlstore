@@ -339,6 +339,8 @@ impl View for Front {
                 _ => Slot::new("i", "install", Key::Char('i')),
             }
         };
+        // remove, install and upgrade take turns in one slot; laid out at the widest of them.
+        let verb = verb.as_wide_as("upgrade");
         let (enter, space) = paint::key_glyphs(st.env.launcherctl.is_some());
         [
             Some(Slot::new(enter, "open", Key::Enter).when(has)),
