@@ -48,15 +48,15 @@
 #                       the file and call them directly)
 #   TLSTORE_STYLE       1|0 = colour, icons and a status line on, or plain
 #                       text, whatever stdout is (default: on for a terminal)
-#   TLSTORE_ICONS       nerd|plain — which icons styled output draws (default:
-#                       nerd in the launcher's terminal, plain elsewhere)
+#   TLSTORE_ICONS       accepted and ignored since 0.23: styled output draws
+#                       the clack glyphs (◇ ◆ ▲ ■ ● and a ◒◐◓◑ spinner)
 #   TLSTORE_UPDATED_FROM  set by an upgrade (an update, before 0.21) that just
 #                       took a newer tlstore and hands the rest of the run to
 #                       it; that run never offers a newer tlstore again
 
 set -u
 
-TLSTORE_VERSION=0.22
+TLSTORE_VERSION=0.23
 
 # The first tlstore whose `update` only refreshes and lists (Revision 19);
 # `upgrade` installs. An engine before it hands an update it has just
@@ -241,6 +241,8 @@ say() {
     elif [ "$STATUS_SCOPE" = 1 ]; then
         # An item's narration: its status and closing lines say what matters.
         :
+    elif [ "$INTRO" = 1 ]; then
+        say_rail "$*"
     else
         status_clear
         printf '%s\n' "$*"
@@ -251,9 +253,17 @@ err() {
     LAST_ERR="$*"
     [ "$STATUS_SCOPE" = 1 ] && [ -n "$ROW_NAME" ] && return 0
     status_clear
+    # Inside a styled run the error takes a step on the rail, when stderr is a
+    # terminal too (or the style was forced, as a test does).
+    if [ "$INTRO" = 1 ] && { [ -t 2 ] || [ -n "${TLSTORE_STYLE:-}" ]; }; then
+        rail_gap
+        printf '%s%s%s%s%s\n' "$C_BAD" "$I_BAD" "$C_OFF" "$GAP" "$*" >&2
+        RAIL_UP=0
+        return 0
+    fi
     printf 'tlstore: %s\n' "$*" >&2
 }
-die() { ROW_NAME=""; err "$*"; exit 1; }
+die() { ROW_NAME=""; err "$*"; outro 1; exit 1; }
 
 # progress_line <step> <name> <pct> <words> — one line of the --progress
 # stream. Always stdout, whether or not PROGRESS is set, since these lines are
@@ -287,7 +297,7 @@ curl_to() {
     if styled && [ -n "$DL_WHAT" ]; then
         ct_rc="$2.rc"
         status "Downloading $DL_WHAT" "$I_DL"
-        ct_head=$(status_text "$I_DL" "Downloading $DL_WHAT" $((BAR_CELLS + 5)))
+        ct_head=$(status_text "$SPIN_I" "Downloading $DL_WHAT" $((BAR_CELLS + 5)))
         { curl -fL -# --connect-timeout 5 --speed-limit 1 --speed-time 30 -o "$2" "$1" 2>&1
           echo "$?" > "$ct_rc"; } |
             tr '\r' '\n' |
@@ -360,23 +370,20 @@ C_OK="" C_BAD="" C_ASK="" C_DIM="" C_ACC="" C_OFF=""
 if [ "$STYLE" = 1 ]; then
     C_OK="${ESC}[32m" C_BAD="${ESC}[31m" C_ASK="${ESC}[33m" C_DIM="${ESC}[2m" C_ACC="${ESC}[34m" C_OFF="${ESC}[0m"
 fi
-ICONS="${TLSTORE_ICONS:-}"
-case "$ICONS" in
-    nerd|plain) ;;
-    *)
-        ICONS=plain
-        if [ -z "${SSH_CONNECTION:-}" ] && { [ "${TERM_PROGRAM:-}" = termux-launcher ] || have launcherctl; }; then
-            ICONS=nerd
-        fi
-        ;;
-esac
-# Nerd Fonts 3.5: fa-check, fa-xmark, fa-warning, fa-download, oct-package. The
-# launcher draws a glyph two cells wide over the space after it, hence the gap.
-I_OK="✓" I_BAD="✗" I_ASK="!" I_DOT="·" I_DL="·" I_PKG="·" GAP=" "
-if [ "$ICONS" = nerd ]; then
-    I_OK=$(printf '\357\200\214') I_BAD=$(printf '\357\200\215') I_ASK=$(printf '\357\201\261')
-    I_DL=$(printf '\357\200\231') I_PKG=$(printf '\357\222\207') GAP="  "
-fi
+# Clack's glyphs (the @clack/prompts look): a step done, one waiting on the
+# person, a warning, a failure, plain information. The colours are the
+# sixteen ANSI ones above; the rail and the spinner are drawn by the helpers
+# below, and only on a styled terminal (styled), so the plain path never sees
+# any of this.
+I_OK="◇" I_BAD="■" I_ASK="◆" I_WARN="▲" I_DOT="●" I_RAIL="│" I_DL="●" GAP="  "
+SPIN_I="●"
+SPIN_N=0
+# 1 between intro and outro (a command that does multi-step work, on a styled
+# terminal), and 1 in RAIL_UP while the last thing drawn is a rail line, so
+# two steps never have two rails between them.
+INTRO=0
+RAIL_UP=0
+OUTRO_TEXT=""
 # How many cells a download's bar takes on the status line.
 BAR_CELLS=20
 STATUS_ON=0
@@ -404,7 +411,22 @@ status_text() {
 status() {
     styled || return 0
     [ -n "$STATUS_COLS" ] || STATUS_COLS=$(term_cols)
-    printf '\r%s[K%s…' "$ESC" "$(status_text "${2:-$I_DOT}" "$1" 1)"
+    # Inside an intro the active step wears the spinner, a frame on from the
+    # last (the line moves when the work does, as it always has); the icon
+    # the caller names is for outside one.
+    if [ "$INTRO" = 1 ]; then
+        rail_gap
+        SPIN_N=$(( (SPIN_N + 1) % 4 ))
+        case "$SPIN_N" in
+            0) SPIN_I="◒" ;;
+            1) SPIN_I="◐" ;;
+            2) SPIN_I="◓" ;;
+            *) SPIN_I="◑" ;;
+        esac
+    else
+        SPIN_I="●"
+    fi
+    printf '\r%s[K%s…' "$ESC" "$(status_text "$SPIN_I" "$1" 1)"
     STATUS_ON=1
 }
 
@@ -419,13 +441,22 @@ status_clear() {
 row_mark() {
     styled || return 0
     case "$1" in
-        ok) ROWS_OK=$((ROWS_OK + 1)); rm_c="$C_OK" rm_i="$I_OK" rm_sep=" " ;;
-        failed) ROWS_BAD=$((ROWS_BAD + 1)); rm_c="$C_BAD" rm_i="$I_BAD" rm_sep=": " ;;
-        same) ROWS_SAME=$((ROWS_SAME + 1)); return 0 ;;
-        *) rm_c="$C_DIM" rm_i="$I_DOT" rm_sep=" " ;;
+        ok) ROWS_OK=$((ROWS_OK + 1)); row_line "$C_OK" "$I_OK" " " "$2" "$3" ;;
+        failed) ROWS_BAD=$((ROWS_BAD + 1)); row_line "$C_BAD" "$I_BAD" ": " "$2" "$3" ;;
+        same) ROWS_SAME=$((ROWS_SAME + 1)) ;;
+        *) row_line "$C_ASK" "$I_WARN" " " "$2" "$3" ;;
     esac
+    return 0
+}
+
+# row_line <colour> <glyph> <separator> <name> <words> — one step on the rail.
+# (The glyph is an argument, not copied into a variable: dash mangles a byte
+# of some of them when an assignment expands one.)
+row_line() {
     status_clear
-    printf '%s%s%s%s%s%s%s%s\n' "$rm_c" "$rm_i" "$C_OFF" "$GAP" "$C_ACC" "$2" "$C_OFF$rm_sep" "$3"
+    rail_gap
+    printf '%s%s%s%s%s%s%s%s\n' "$1" "$2" "$C_OFF" "$GAP" "$C_ACC" "$4" "$C_OFF$3" "$5"
+    RAIL_UP=0
 }
 
 # row_summary <done word> <current words> — "2 updated · 1 failed · 6 already current".
@@ -436,7 +467,73 @@ row_summary() {
     [ "$ROWS_BAD" = 0 ] || rs_out="$rs_out${rs_out:+ $C_DIM·$C_OFF }$C_BAD$ROWS_BAD failed$C_OFF"
     [ "$ROWS_SAME" = 0 ] || rs_out="$rs_out${rs_out:+ $C_DIM·$C_OFF }$C_DIM$ROWS_SAME $2$C_OFF"
     status_clear
-    [ -z "$rs_out" ] || printf '%s\n' "$rs_out"
+    # Inside an intro the summary is the outro's line.
+    if [ "$INTRO" = 1 ]; then
+        OUTRO_TEXT="$rs_out"
+    else
+        [ -z "$rs_out" ] || printf '%s\n' "$rs_out"
+    fi
+}
+
+# rail_gap — one dim rail line between steps, unless one was just drawn.
+rail_gap() {
+    [ "$INTRO" = 1 ] || return 0
+    [ "$RAIL_UP" = 0 ] || return 0
+    printf '%s%s%s\n' "$C_DIM" "$I_RAIL" "$C_OFF"
+    RAIL_UP=1
+}
+
+# say_rail <text> — say() inside an intro: a line that starts a thought is a
+# step (● and the words), one indented under it hangs off the rail.
+say_rail() {
+    status_clear
+    case "$1" in
+        '') rail_gap ;;
+        ' '*) printf '%s%s%s%s\n' "$C_DIM" "$I_RAIL" "$C_OFF" "$1"; RAIL_UP=0 ;;
+        *)
+            rail_gap
+            printf '%s%s%s%s%s\n' "$C_ACC" "$I_DOT" "$C_OFF" "$GAP" "$1"
+            RAIL_UP=0
+            ;;
+    esac
+}
+
+# ask_prep — before a question: inside an intro, the rail, and then, styled
+# or not, the diamond for a person to be waiting on; the question follows it
+# on the same line. (Printed, not kept in a variable: see pm_styled.)
+ask_prep() {
+    styled || return 0
+    rail_gap
+    printf '%s%s%s%s' "$C_ASK" "$I_ASK" "$C_OFF" "$GAP"
+    [ "$INTRO" = 0 ] || RAIL_UP=0
+}
+
+# intro <command> — the head of a styled run: "┌  tlstore install". Not drawn
+# for a machine's run (--tsv, whose stdout is its rows), and not twice: the
+# newer tlstore an upgrade hands the run to carries on under the intro the
+# older one drew.
+intro() {
+    styled || return 0
+    [ "$INTRO" = 0 ] || return 0
+    case " $* " in *" --tsv "*) return 0 ;; esac
+    INTRO=1
+    RAIL_UP=0
+    [ -z "$SU_FROM" ] || return 0
+    printf '%s┌%s%s%stlstore%s %s\n' "$C_DIM" "$C_OFF" "$GAP" "$C_ACC" "$C_OFF" "$1"
+}
+
+# outro <status> — the tail: "└  " and the run's summary (row_summary left it
+# in OUTRO_TEXT), or a word for how it went.
+outro() {
+    [ "$INTRO" = 1 ] || return 0
+    status_clear
+    rail_gap
+    INTRO=0
+    if [ -z "$OUTRO_TEXT" ]; then
+        if [ "$1" = 0 ]; then OUTRO_TEXT="Done"; else OUTRO_TEXT="${C_BAD}Failed${C_OFF}"; fi
+    fi
+    printf '%s└%s%s%s\n' "$C_DIM" "$C_OFF" "$GAP" "$OUTRO_TEXT"
+    OUTRO_TEXT=""
 }
 
 # Runs on SIGTERM (a plain kill or the whole process group tlstore-ui signals
@@ -1115,6 +1212,7 @@ yes_reply() {
 ask_yn() {
     [ "$ASSUME_YES" = 1 ] && return 0
     status_clear
+    ask_prep
     printf '%s [Y/n] ' "$1"
     read -r ay_answer || ay_answer=""
     [ -n "$ay_answer" ] || ay_answer=y
@@ -1127,6 +1225,7 @@ ask_ny() {
     [ "$ASSUME_YES" = 1 ] && return 0
     interactive || return 1
     status_clear
+    ask_prep
     printf '%s [y/N] ' "$1"
     read -r an_answer || an_answer=""
     yes_reply "$an_answer"
@@ -1206,8 +1305,8 @@ pm_styled() {
     [ "$PM_LOGGED" = 1 ] || : > "$PM_LOG"
     PM_LOGGED=1
     pms_rc="$CACHE_DIR/pm.rc"
-    status "Installing Termux packages" "$I_PKG"
-    pms_head=$(status_text "$I_PKG" "Installing Termux packages" 30)
+    status "Installing Termux packages" "$I_DL"
+    pms_head=$(status_text "$SPIN_I" "Installing Termux packages" 30)
     { DPKG_FORCE=confdef,confold "$@" < /dev/null 2>&1; echo "$?" > "$pms_rc"; } |
         tr '\r' '\n' |
         awk -v lf="$PM_LOG" -v head="$pms_head" -v esc="$ESC" '
@@ -1224,9 +1323,24 @@ pm_styled() {
     STATUS_ON=1
     [ "$pms_status" = 0 ] && return 0
     status_clear
-    tail -n 10 "$PM_LOG" | sed "s/^/  $C_DIM/; s/\$/$C_OFF/"
-    printf '  %s\n' "The package manager stopped. Everything it said is in ~/${PM_LOG#"$HOME"/}"
+    # The rail's glyph is never put into a variable with others (dash mangles
+    # a byte of it in an assignment's expansion), only handed to printf.
+    rail_gap
+    tail -n 10 "$PM_LOG" | while IFS= read -r pms_line; do
+        pm_rail_line "$C_DIM$pms_line$C_OFF"
+    done
+    pm_rail_line "The package manager stopped. Everything it said is in ~/${PM_LOG#"$HOME"/}"
+    [ "$INTRO" = 0 ] || RAIL_UP=0
     return 1
+}
+
+# pm_rail_line <text> — a line hung off the rail (indented, outside an intro).
+pm_rail_line() {
+    if [ "$INTRO" = 1 ]; then
+        printf '%s%s%s  %s\n' "$C_DIM" "$I_RAIL" "$C_OFF" "$1"
+    else
+        printf '  %s\n' "$1"
+    fi
 }
 
 # -Sy as Termux's own pkg does on pacman: a fresh bootstrap has never synced its
@@ -1712,11 +1826,10 @@ confirm_replace() {
     case "$cf_cur" in "$HOME"/*) cf_show="~/${cf_cur#"$HOME"/}" ;; esac
     cf_ask="Replace your $cf_show with the new one?"
     [ "${3:-}" != 1 ] || cf_ask="You changed $cf_show. Replace it with the new one?"
-    cf_mark=""
-    ! styled || cf_mark="$C_ASK$I_ASK$C_OFF$GAP"
     while :; do
         status_clear
-        printf '%s%s [y/N/d] ' "$cf_mark" "$cf_ask"
+        ask_prep
+        printf '%s [y/N/d] ' "$cf_ask"
         read -r cf_answer || cf_answer=""
         case "$cf_answer" in
             d|D) ;;
@@ -6272,7 +6385,14 @@ cmd_self_update() {
     fi
 }
 
-cd_line() { printf '%-13s %s\n' "$1" "$2"; }
+cd_line() {
+    if [ "$INTRO" = 1 ]; then
+        printf '%s%s%s  %-13s %s\n' "$C_DIM" "$I_RAIL" "$C_OFF" "$1" "$2"
+        RAIL_UP=0
+        return 0
+    fi
+    printf '%-13s %s\n' "$1" "$2"
+}
 
 # doctor_channel catalog|self <what> — a Channel line: what the last check of
 # that channel found, when, and why when it found nothing it could take.
@@ -6303,6 +6423,7 @@ doctor_channel() {
 cmd_doctor() {
     [ $# -eq 0 ] || { bad_arg doctor "$1"; return 2; }
     pick_catalog || true
+    rail_gap
     cd_bad=0
     cd_line Prefix "$PREFIX"
     if [ -n "$APP_PACKAGE" ]; then
@@ -6459,6 +6580,22 @@ main() {
             done
             ;;
     esac
+    case "$tl_cmd" in
+        install|add|remove|uninstall|update|upgrade|rollback|refresh|self-update|doctor)
+            intro "$tl_cmd" "$@"
+            dispatch "$tl_cmd" "$@"
+            tl_rc=$?
+            outro "$tl_rc"
+            return "$tl_rc"
+            ;;
+    esac
+    dispatch "$tl_cmd" "$@"
+}
+
+# dispatch <command> <args...> — run one command.
+dispatch() {
+    tl_cmd="$1"
+    shift
     case "$tl_cmd" in
         list) cmd_list "$@" ;;
         search) cmd_search "$@" ;;

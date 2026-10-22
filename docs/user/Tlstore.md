@@ -245,21 +245,26 @@ the rest of the upgrade itself. After that it checks for a newer list of items, 
 anything you have that has moved on. Name items (`tlstore upgrade claude-code`) to upgrade only
 those. `tlstore refresh` only fetches the list, and says nothing about what it found.
 
-In a terminal, one line at the bottom says what is happening now, each item leaves one line when it
-is done, and the run ends with a count:
+In a terminal, install, upgrade, update, remove, rollback, refresh, self-update and doctor look like
+the `npx skills` installer: an intro line, a rail down the left, a spinner on the step that is
+running, a diamond for each step that is done, and an outro with a count:
 
 ```
 $ tlstore upgrade
-✓ claude-code 2.1.300
-✓ fish-prompt 3
-✗ opencode: could not download opencode
-2 updated · 1 failed · 6 already current
+┌  tlstore upgrade
+│
+◇  claude-code 2.1.300
+│
+◇  fish-prompt 3
+│
+■  opencode: could not download opencode
+│
+└  2 updated · 1 failed · 6 already current
 ```
 
 What the package manager says goes to `~/.cache/tlstore/last-update.log` instead of the screen;
 when it fails, its last lines are shown along with where the rest is. Colours are the terminal's
-own sixteen, so they follow your theme, and the icons come from the launcher's font when you are in
-its terminal. Set `NO_COLOR=1` for plain text; a script or a pipe always gets plain text.
+own sixteen, so they follow your theme. Set `NO_COLOR=1` for plain text; a script or a pipe always gets plain text.
 
 The list of items is signed by the launcher's maintainer, and tlstore only accepts an update to it
 when the signature checks out and it is genuinely newer than the one you have — so a compromised
