@@ -10,7 +10,7 @@ use crate::term::{Event, Key, MouseKind};
 
 use super::data::{Channels, Info, Item};
 use super::paint::{
-    self, draw_header, HeaderContent, Masthead, Paint, Slot, Slots, A_ALL, A_CONTEXT, A_HEADER, A_HOME,
+    self, draw_header, HeaderContent, Masthead, Paint, Slot, Slots, A_ALL, A_CONTEXT, A_HEADER, A_HOME, A_SELF,
 };
 use super::scene::El;
 use super::{header_for, installing::Installing, item::ItemView, Go, Store, Verb, View};
@@ -31,6 +31,19 @@ pub(super) fn channel_notice(notice: Option<&str>, selecting: bool, channels: &C
         return None;
     }
     channels.problem().map(|r| format!("Couldn't check for updates: {r}"))
+}
+
+/// The hint for a newer tlstore, longest form first: the whole line, then without "is out",
+/// then the bare key. Taken whole, the first that fits `width`.
+fn self_hint(new: &str, width: u16) -> String {
+    let forms = [
+        format!("● tlstore {new} is out · U to update"),
+        format!("● tlstore {new} · U to update"),
+        "● U to update".to_string(),
+        "U to update".to_string(),
+    ];
+    let fits = |s: &String| text_width(s) <= width as usize;
+    forms.iter().find(|s| fits(s)).cloned().unwrap_or_else(|| layout::fit_line("U to update", width))
 }
 
 pub struct Front {
@@ -138,6 +151,14 @@ impl Front {
 
     /// `u`: with the filter on, update everything shown; on an item with an update, update
     /// it; otherwise show the updates.
+    /// `U` or a tap on the hint: the store updates itself, on its own Installing screen.
+    fn self_update(&mut self, st: &mut Store) -> Go {
+        if st.start_self_update() {
+            return Go::Push(Box::new(Installing::new()));
+        }
+        Go::Stay
+    }
+
     fn update_key(&mut self, st: &mut Store) -> Go {
         if self.filter {
             let names: Vec<String> = self.shown(st).iter().map(|i| i.name.clone()).collect();
@@ -318,6 +339,23 @@ impl View for Front {
         // Otherwise, a channel that could not be checked.
         if let Some(text) = channel_notice(st.notice.as_deref(), !self.sel.is_empty(), &st.channels) {
             paint::draw_notice(p, &hdr, &text);
+        } else if st.notice.is_none() && self.sel.is_empty() {
+            // Otherwise, a newer tlstore waiting for `U`: the dot in the accent, the words dim
+            // italic like the other notices.
+            if let Some(new) = st.self_update_offer() {
+                let line = self_hint(new, hdr.content.w);
+                let x = hdr.gutter;
+                let (dot, rest) = match line.strip_prefix("● ") {
+                    Some(rest) => (true, rest),
+                    None => (false, line.as_str()),
+                };
+                if dot {
+                    p.text(El::Notice, x, hdr.notice, "●", pal.accent_s());
+                }
+                let rx = if dot { x + 2 } else { x };
+                p.text(El::Notice, rx, hdr.notice, rest, pal.dim_s().italic());
+                p.hit(Rect::new(x, hdr.notice, rx - x + text_width(rest) as u16, 1), A_SELF);
+            }
         }
     }
 
@@ -375,6 +413,7 @@ impl View for Front {
             Event::Key(Key::Char('i')) => return self.act(st, Verb::Install),
             Event::Key(Key::Char('r')) => return self.act(st, Verb::Remove),
             Event::Key(Key::Char('u')) => return self.update_key(st),
+            Event::Key(Key::Char('U')) => return self.self_update(st),
             Event::Key(Key::Char('s')) => {
                 if let Some(nm) = self.current(st) {
                     st.star(&nm);
@@ -398,6 +437,7 @@ impl View for Front {
                         }
                     }
                     A_ALL => self.set_filter(false, st),
+                    A_SELF => return self.self_update(st),
                     A_PREV => self.cursor = self.page().saturating_sub(1) * per,
                     A_NEXT => self.cursor = ((self.page() + 1) * per).min(last),
                     _ if (A_DOT..A_DOT + 50).contains(&a) => {

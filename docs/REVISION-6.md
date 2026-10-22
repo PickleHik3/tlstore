@@ -61,7 +61,7 @@ Gutter: 2 columns each side (1 under 44 columns). Content columns at 53 wide: 2�
 | next | Facts strip, dim: `[installed \| installing \| upgrading \| removing] <version>` (`updating` for the store itself) or plain `<version>`; then `· <licence>`, `· <author>`, `· <size>`, `· starred` as known. With an update: `<old>` struck through, ` → <new>`. |
 | next | Blank. |
 | … | Body (per screen). |
-| last−1 | Notice row (blank unless a notice or the selection bar is showing). |
+| last−1 | Notice row (blank unless a notice or the selection bar is showing; on Front, a newer tlstore shows `● tlstore <new> is out · U to update` when it has nothing else to say; `U` or a tap updates tlstore). |
 | last | Key row. |
 
 Compact (under 26 rows): no picture, no blank after it; name two rows tall (script at 2 × cell
@@ -93,7 +93,7 @@ seven two-line items. Header geometry is one pure function in `layout.rs`, teste
   (→ Installing).
 - `s` with gh not ready: notice row `starring needs gh: pkg install gh, then gh auth login`
   until the next key. Otherwise stars silently and the facts strip gains `· starred`.
-- Keys: `⏎ open` · `i install` / `r remove` / `u upgrade` · `␣ select` · `q quit`. `f` (the launcher's keyboard
+- Keys: `⏎ open` · `i install` / `r remove` / `u upgrade` · `␣ select` · `q quit`. `U` (shift) updates tlstore when the hint is up, not hinted in the key row. `f` (the launcher's keyboard
   held down) works but is not hinted.
 
 ## Item

@@ -1085,14 +1085,18 @@ fn install_from_item_shows_remove_before_the_snapshot_lands() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn a_newer_store_installs_itself_first_then_hands_over() {
+fn u_updates_a_newer_store_then_hands_over() {
     let clock = Rc::new(Cell::new(Instant::now()));
     let mut h = H::new(53, 26, Opts { self_update: true, clock: Some(clock.clone()), ..Opts::default() });
-    // The check is the first thing asked, beside the snapshot; a newer store means the
-    // Installing screen, for tlstore itself, before anything else.
+    // The check is asked beside the snapshot; a newer store only shows the hint.
     let calls = h.log("calls.log");
-    // The check and the snapshot start together; either may log first.
     assert!(calls.lines().any(|l| l == "self-update --check --tsv"), "{calls}");
+    assert!(!calls.contains("self-update --progress"), "{calls}");
+    assert_eq!(h.r().top(), "front", "{}", h.text);
+    // `U` starts it, on the Installing screen for tlstore itself.
+    h.key(Key::Char('U'));
+    h.settle();
+    let calls = h.log("calls.log");
     assert!(calls.lines().any(|l| l == "self-update --progress"), "{calls}");
     assert_eq!(h.r().top(), "installing", "{}", h.text);
     let hdr = layout::header(53, 26, 7, None);
@@ -1115,6 +1119,8 @@ fn a_newer_store_installs_itself_first_then_hands_over() {
 #[test]
 fn a_self_update_can_be_stopped_and_the_store_goes_on() {
     let mut h = H::new(53, 26, Opts { self_update: true, hold: true, ..Opts::default() });
+    h.key(Key::Char('U'));
+    h.pump(|r| r.st.job.as_ref().is_some_and(|j| j.pct >= 44));
     assert_eq!(h.r().top(), "installing", "{}", h.text);
     let hdr = layout::header(53, 26, 7, None);
     assert_eq!(h.row(hdr.facts as usize).trim(), "updating 0.6 → 0.7", "{}", h.text);
@@ -1138,6 +1144,8 @@ fn a_self_update_can_be_stopped_and_the_store_goes_on() {
 #[test]
 fn a_refused_self_update_is_reported_and_the_store_goes_on() {
     let mut h = H::new(53, 26, Opts { self_update: true, fail: Some("tlstore"), ..Opts::default() });
+    h.key(Key::Char('U'));
+    h.settle();
     assert_eq!(h.r().top(), "installing", "{}", h.text);
     let hdr = layout::header(53, 26, 7, None);
     assert!(h.row(hdr.facts as usize).starts_with("  failed 0.6 → 0.7"), "{}", h.text);
@@ -1146,6 +1154,8 @@ fn a_refused_self_update_is_reported_and_the_store_goes_on() {
     assert!(h.r().st.exit.borrow().is_none() && !h.r().finished());
     h.key(Key::Enter);
     assert_eq!(h.r().top(), "front");
+    // Still on offer: the hint is back, and `U` tries again.
+    assert!(h.row(hdr.notice as usize).contains("U to update"), "{}", h.text);
 }
 
 #[test]
@@ -1158,6 +1168,68 @@ fn no_newer_store_means_front_as_before() {
     assert!(!calls.contains("self-update --progress"), "{calls}");
     assert!(!h.has("tlstore updated to") && !h.r().animating(), "{}", h.text);
     assert!(h.r().st.exit.borrow().is_none());
+}
+
+#[test]
+fn the_hint_shows_with_an_offer_and_not_without() {
+    let h = H::new(53, 26, Opts { self_update: true, ..Opts::default() });
+    let hdr = layout::header(53, 26, 7, None);
+    assert_eq!(h.row(hdr.notice as usize).trim(), "● tlstore 0.7 is out · U to update", "{}", h.text);
+    assert!(!h.log("calls.log").contains("self-update --progress"));
+    let mut h = H::new(53, 26, Opts::default());
+    assert!(!h.has("U to update"), "{}", h.text);
+    h.key(Key::Char('U'));
+    assert_eq!(h.r().top(), "front", "nothing offered, nothing to do");
+    assert!(!h.log("calls.log").contains("self-update --progress"));
+}
+
+#[test]
+fn a_transient_notice_wins_then_the_hint_returns() {
+    let mut h = H::new(53, 26, Opts { self_update: true, ..Opts::default() });
+    let hdr = layout::header(53, 26, 7, None);
+    // A notice is up until the next key clears it.
+    h.r().st.notice = Some("hello there".into());
+    h.draw();
+    assert!(h.row(hdr.notice as usize).contains("hello there"), "{}", h.text);
+    assert!(!h.has("U to update"), "{}", h.text);
+    h.key(Key::Down);
+    assert!(h.row(hdr.notice as usize).contains("U to update"), "{}", h.text);
+}
+
+#[test]
+fn tapping_the_hint_starts_the_self_update() {
+    let mut h = H::new(53, 26, Opts { self_update: true, ..Opts::default() });
+    h.tap("U to update");
+    h.settle();
+    assert_eq!(h.r().top(), "installing", "{}", h.text);
+    assert!(h.log("calls.log").lines().any(|l| l == "self-update --progress"));
+}
+
+#[test]
+fn lower_u_still_upgrades_the_item_with_a_hint_up() {
+    let mut h = H::new(53, 26, Opts { self_update: true, ..Opts::default() });
+    go_to(&mut h, "kitten");
+    h.key(Key::Char('u'));
+    assert_eq!(h.r().top(), "installing");
+    h.settle();
+    let calls = h.log("calls.log");
+    assert!(calls.lines().any(|l| l == "upgrade --progress kitten"), "{calls}");
+    assert!(!calls.contains("self-update --progress"), "{calls}");
+}
+
+#[test]
+fn the_hint_is_cut_but_keeps_u_to_update_when_narrow() {
+    // 36 columns still holds the whole line (34); 30 drops "is out"; 20 keeps just the key.
+    let h = H::new(36, 26, Opts { self_update: true, ..Opts::default() });
+    let hdr = layout::header(36, 26, 7, None);
+    assert!(h.row(hdr.notice as usize).contains("● tlstore 0.7 is out · U to update"), "{}", h.text);
+    let h = H::new(30, 26, Opts { self_update: true, ..Opts::default() });
+    let hdr = layout::header(30, 26, 7, None);
+    let row = h.row(hdr.notice as usize);
+    assert!(row.contains("● tlstore 0.7 · U to update") && !row.contains("is out"), "{}", h.text);
+    let h = H::new(24, 26, Opts { self_update: true, ..Opts::default() });
+    let hdr = layout::header(24, 26, 7, None);
+    assert!(h.row(hdr.notice as usize).contains("● U to update"), "{}", h.text);
 }
 
 #[test]
