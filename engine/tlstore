@@ -56,7 +56,7 @@
 
 set -u
 
-TLSTORE_VERSION=0.23
+TLSTORE_VERSION=0.24
 
 # The first tlstore whose `update` only refreshes and lists (Revision 19);
 # `upgrade` installs. An engine before it hands an update it has just

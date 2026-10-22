@@ -17,6 +17,8 @@ pub const A_CONTEXT: u32 = 3;
 pub const A_ALL: u32 = 4;
 /// Front: the header body (picture, name, standfirst, facts) opens the item.
 pub const A_HEADER: u32 = 5;
+/// Front: the "tlstore is out" hint on the notice row.
+pub const A_SELF: u32 = 6;
 pub const A_KEY0: u32 = 10;
 
 /// A frame being drawn by one view: effects applied, elements recorded, and for scrolled

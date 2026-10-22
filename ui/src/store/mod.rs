@@ -533,8 +533,6 @@ pub struct Store {
     /// What the last check of the item list and of tlstore itself found (the snapshot's
     /// `channel` lines); Front says so when either could not be checked.
     pub channels: Channels,
-    /// A self-update job has just been started and Installing should be pushed (read once).
-    self_update_started: bool,
     /// The self-update went through: the app loop ends then, and `exit` says what follows.
     pub quit_at: Option<Instant>,
     /// What `main` does after the loop; shared so it can be read once the router is gone.
@@ -611,7 +609,6 @@ impl Store {
             confirm: None,
             self_update: SelfUpdate::Checking,
             channels: Channels::default(),
-            self_update_started: false,
             quit_at: None,
             exit: Rc::new(RefCell::new(None)),
             refreshing: false,
@@ -900,16 +897,24 @@ impl Store {
         std::mem::take(&mut self.job_finished)
     }
 
-    /// True once, after the startup check found a newer store and its job started (the
-    /// router pushes Installing).
-    pub fn take_self_update_started(&mut self) -> bool {
-        std::mem::take(&mut self.self_update_started)
+    /// The version Front offers on its notice row: set once the check found a newer store,
+    /// and only while no job runs (an item's job, or the update itself, hides it).
+    pub fn self_update_offer(&self) -> Option<&str> {
+        match &self.self_update {
+            SelfUpdate::Offered { new, .. } if !self.job_running() => Some(new.as_str()),
+            _ => None,
+        }
     }
 
-    /// The check's answer landed: a newer store starts installing itself at once, unless a
-    /// job is already running (then it waits for the next launch). What the check found
-    /// is kept, and a fresh snapshot asked for, so the self channel shows without waiting
-    /// for the next launch.
+    /// `U` or a tap on the hint: starts the store's own update. True when a job started
+    /// (the caller pushes Installing); nothing offered, or a job running, does nothing.
+    pub fn start_self_update(&mut self) -> bool {
+        self.self_update_offer().is_some() && self.start_job(Verb::SelfUpdate, vec!["tlstore".into()])
+    }
+
+    /// The check's answer landed: a newer store is only recorded (Front shows a hint and
+    /// waits for `U`). What the check found is kept, and a fresh snapshot asked for, so the
+    /// self channel shows without waiting for the next launch.
     fn on_self_check(&mut self, code: i32, lines: Vec<String>) {
         let check = match code {
             0 => parse_self_check(&lines.join("\n")),
@@ -920,13 +925,8 @@ impl Store {
         }
         let offered = check.filter(|c| c.available);
         match offered {
-            Some(c) if !self.job_running() => {
-                self.self_update = SelfUpdate::Offered { have: c.have, new: c.new };
-                if self.start_job(Verb::SelfUpdate, vec!["tlstore".into()]) {
-                    self.self_update_started = true;
-                }
-            }
-            _ => self.self_update = SelfUpdate::NotOffered,
+            Some(c) => self.self_update = SelfUpdate::Offered { have: c.have, new: c.new },
+            None => self.self_update = SelfUpdate::NotOffered,
         }
         self.take_snapshot();
     }
@@ -1767,10 +1767,6 @@ impl Screen for Router {
                     for v in &mut self.views {
                         v.refresh(&self.st);
                     }
-                }
-                if self.st.take_self_update_started() {
-                    // A newer store: its Installing screen comes before anything else.
-                    return self.navigate(Go::Push(Box::new(installing::Installing::new())));
                 }
                 if self.st.take_job_finished() {
                     if let Some(job) = self.st.job.as_ref().filter(|j| !j.running()) {

@@ -69,8 +69,13 @@ Store: cat (Catalog: items, updates, info(name)->&Info, loading, error), job: Op
   Nothing runs synchronously: Store::new spawns `tlstore self-update --check --tsv` first, then `tlstore snapshot --tsv` (Catalog::loading until it
   lands; Front says Loading…), `update --check --tsv` (which no longer touches tlstore itself) and `gh auth status`. Jobs run
   `tlstore <Verb::arg> --progress <names>`: install, upgrade (Verb::Update; `update` only lists since tlstore 0.21), remove, self-update. The check (data::parse_self_check:
-  `self\t<have>\t<new>\t<0|1>`) answering available, with no job running, starts Verb::SelfUpdate (`tlstore self-update --progress`, names ["tlstore"],
-  not held for the refresh) and the router pushes Installing at once; anything else, and startup is as before. The snapshot's readme: Verb::SelfUpdate
+  `self\t<have>\t<new>\t<0|1>`) answering available only records SelfUpdate::Offered{have,new}: nothing starts by itself. Front's notice row then shows
+  `● tlstore <new> is out · U to update` (● accent, the words dim italic) while no job runs and nothing else is on the row (a notice or the selection
+  bar wins; a channel problem too; the hint returns after). Narrow: "is out" goes first (`● tlstore <new> · U to update`), then the name
+  (`● U to update`), then the dot; `U to update` stays. `U` (Key::Char('U')) or a tap on the hint (paint::A_SELF 6, hit rect over the hint)
+  calls Store::start_self_update (Offered and no job): Verb::SelfUpdate (`tlstore self-update --progress`, names ["tlstore"], not held for
+  the refresh), and Front pushes Installing. `U` with nothing offered does nothing; `u` (upgrade) is unchanged. Item and Installing show no hint.
+  Anything else, and startup is as before. The snapshot's readme: Verb::SelfUpdate
   never takes a snapshot or sends an OSC 99. Env.self_updated ($TLSTORE_UI_SELF_UPDATED=<version>, set by the re-exec below) skips the check and puts
   "tlstore updated to <version>" on the notice row for UPDATED_NOTICE (4 s).
   The snapshot (data::Snapshot::parse: item/field/update/cached lines) fills the catalog and seeds fetched with every cached
@@ -84,7 +89,7 @@ picture_in(st, pics, path, box_w, box_h) -> Lookup  // a README picture, contain
 paint: Paint{f,fx,scene,clip,scroll}: text/text_clip/right/centred/fill/hline/sized/picture(el,pic,col,row,(off_x,off_y),pid)/hit/link; alpha fades
   toward the surface, pictures hide under 0.5. draw_header(p,&Header,&HeaderContent{masthead: Masthead::{Front{updates,filter},Page{repo,setup}},
   picture, name, standfirst, facts: Facts{state,version,new,more}}); draw_keys(p,&Header,&Slots) /*[Option<Slot{label,words,key,on}>;5]; None not shown, off dim in place*/;
-  draw_notice(p,&Header,text). Taps: A_HOME 1, A_BACK 2, A_CONTEXT 3 (updates / repo), A_ALL 4, A_HEADER 5, A_KEY0+i 10..14; screens use 100+.
+  draw_notice(p,&Header,text). Taps: A_HOME 1, A_BACK 2, A_CONTEXT 3 (updates / repo), A_ALL 4, A_HEADER 5, A_SELF 6 (Front: the tlstore hint), A_KEY0+i 10..14; screens use 100+.
 readme: parse(md, skip:&[String]) -> Doc{first_image, blocks: Vec<Block>} (drop rules of REVISION-6.md; SKIP_SECTIONS + skip, case-insensitive);
   fit(&Doc, width, repo_url) -> Vec<Row::{Blank, Text{indent,spans,quote}, H2, H3, Code, Image{src,alt}, Hairline, Link{text,url}}>;
   MAX_ROWS 400, CODE_LINES 12, IMAGE_ROWS 6; image_kind(src)->{Inline,Skip,Gif}; wrap_spans(spans,width). Item paints rows lazily (assets on view).
