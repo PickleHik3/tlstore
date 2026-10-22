@@ -3178,8 +3178,11 @@ EOF
     STYLE_KNOB=1; ICONS_KNOB=plain
     tl install fakebin -y
     expect_status "a styled install" 0
-    expect_out "the item's closing line, with its tick and version" "✓${E}\[0m ${E}\[34mfakebin${E}\[0m ${E}\[34m[0-9][0-9]*${E}\[0m$"
-    expect_out "the run ends with a summary" "1 installed"
+    expect_out "the item's closing line, with its diamond and version" "◇${E}\[0m  ${E}\[34mfakebin${E}\[0m ${E}\[34m[0-9][0-9]*${E}\[0m$"
+    expect_out "the run opens with the intro" "^${E}\[2m┌${E}\[0m  ${E}\[34mtlstore${E}\[0m install$"
+    expect_out "the rail runs between the steps" "^${E}\[2m│${E}\[0m$"
+    expect_out "the run ends with the outro and its summary" "^${E}\[2m└${E}\[0m  .*1 installed"
+    expect_out "the active step wears the spinner" "[◒◐◓◑]${E}\[0m  .*fakebin"
     expect_out "the status line is rewritten in place" $'\r'"${E}\[K"
     sgr_bad=$(printf '%s' "$OUT" | grep -o "${E}\[[0-9;]*m" | sed "s/^${E}\[//; s/m\$//" | tr ';' '\n' | grep -vxE '0|1|2|3[0-7]|9[0-7]')
     if [ -z "$sgr_bad" ]; then pass; else fail "only the sixteen colours, bold and dim" "$sgr_bad"; fi
@@ -3187,10 +3190,54 @@ EOF
     expect_no_out "nor true colour" "38;2"
     expect_no_out "the item's narration stays off the page" "^fetching fakebin$"
     tl remove fakebin -y
+    # The old plain and nerd icons are gone from a styled run; the knob is ignored.
     STYLE_KNOB=1; ICONS_KNOB=nerd
     tl install fakebin -y
-    expect_out "nerd icons where the launcher's font draws them" "$(printf '\357\200\214')"
-    expect_no_out "and not the plain tick" "✓"
+    expect_out "styled output draws clack's glyphs whatever TLSTORE_ICONS says" "◇"
+    expect_no_out "and not the old tick" "✓"
+
+    # The look of the other multi-step commands, and the questions on the rail.
+    STYLE_KNOB=1
+    tl update fakebin -y
+    expect_out "update opens with the intro" "┌.*tlstore.* update"
+    expect_out "and closes with the outro" "└"
+    STYLE_KNOB=1
+    tl remove fakebin -y
+    expect_status "a styled remove" 0
+    expect_out "remove opens with the intro" "┌.*tlstore.* remove"
+    expect_out "its item line is a finished step" "◇.*fakebin.* removed"
+    expect_out "and the outro counts it" "└.*1 removed"
+    STYLE_KNOB=1; STDIN_TEXT=$'n\n'; TTY_KNOB=1
+    tl install fakebin
+    expect_out "a question waits on the rail with a diamond" "◆.*Go ahead\?"
+    expect_out "declining is said as a step" "●.*Nothing was installed"
+    tl_status=$ST
+    STYLE_KNOB=1
+    tl install no-such-item -y
+    expect_out "an error takes a step on the rail" "■.*no-such-item"
+    expect_no_out "and loses the tlstore: prefix" "tlstore: "
+    expect_out "the run still closes" "└.*Failed"
+    STYLE_KNOB=1
+    tl install fakebin -n
+    expect_out "a dry run lists on the rail" "│${E}\[0m  *fakebin"
+    # Machine output never changes: --tsv has no intro or rail even when styled, and
+    # --progress is the same stream with or without the style forced.
+    STYLE_KNOB=1
+    tl_stdout update --check --tsv
+    expect_no_out "--tsv carries no rail" "[│┌└◇◆]"
+    expect_no_out "nor colour" "$E"
+    tl remove fakebin -y
+    STYLE_KNOB=0
+    tl_stdout install fakebin --progress
+    prog_plain="$OUT"
+    tl remove fakebin -y
+    STYLE_KNOB=1
+    tl_stdout install fakebin --progress
+    if [ "$OUT" = "$prog_plain" ]; then pass; else fail "--progress is byte-identical styled or not" "$prog_plain
+$OUT"; fi
+    STYLE_KNOB=0
+    tl remove fakebin -y
+    expect_no_out "plain remove: no rail or glyphs" "[│┌└◇◆■●▲]"
 
     # A package manager on a styled terminal writes to a log, not the screen.
     pm_log="$TESTHOME/.cache/tlstore/last-update.log"
@@ -3211,7 +3258,7 @@ EOF
     expect_status "a styled package install that fails" 1
     expect_out "shows the last lines it said" "error: target not found"
     expect_out "and where the rest is" "~/.cache/tlstore/last-update.log"
-    expect_out "the item's closing line says why" "✗.*demo-pkg.*: the package manager could not install demo-one, demo-two"
+    expect_out "the item's closing line says why" "■.*demo-pkg.*: the package manager could not install demo-one, demo-two"
     if [ -n "$pm_had" ]; then tl install demo-pkg -y; else tl remove demo-pkg -y; fi
 
     # --- --progress: the machine stream tlstore-ui reads ---

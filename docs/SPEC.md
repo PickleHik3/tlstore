@@ -1074,10 +1074,15 @@ without `--check` still offers at the end, on stderr, as it has since Revision 1
 
 - Colours: SGR 32 done, 31 failed, 33 needs you, 2 detail, 34 item names and versions, 0 reset.
   Never 256-colour or true colour: the launcher maps the sixteen to the person's scheme.
-- Icons follow `fish/prompt.fish`: Nerd glyphs (fa-check `f00c`, fa-xmark `f00d`, fa-warning
-  `f071`, fa-download `f019`, oct-package `f487`, written as octal escapes, followed by two spaces)
-  when `SSH_CONNECTION` is unset and `TERM_PROGRAM=termux-launcher` or `launcherctl` is on `PATH`;
-  `✓ ✗ ! ·` otherwise; `TLSTORE_ICONS=nerd|plain` decides it instead.
+- Since 0.23 the look is `@clack/prompts`: `INTRO` (set by `intro` for install, add, remove, update,
+  upgrade, rollback, refresh, self-update and doctor, never for `--tsv`) draws `┌  tlstore <command>`,
+  a dim `│` rail between steps (`rail_gap`, never two in a row), `◇` a finished step, `◆` a question
+  waiting on the person, `▲` a note, `■` a failure (also `err`, without its `tlstore:` prefix),
+  `●` plain information (`say`), and `└  <summary>` (`outro`; the summary is `row_summary`'s
+  counts). The active step wears a `◒◐◓◑` spinner that advances one frame per `status` redraw.
+  Glyphs are only ever handed to `printf` as arguments, never expanded into another variable:
+  dash inserts a stray `0x81` byte into some of them (`│`, `■`) when an assignment does.
+  `TLSTORE_ICONS` is accepted and ignored. Plain runs, `--progress` and `--tsv` are unchanged.
 - The status line is one line rewritten with `\r` + `ESC[K`, cut to `term_cols` (item names and
   versions are ASCII, so bytes are cells). It moves only when the work does: *Checking for a newer
   tlstore…*, *Checking the item list…*, *Asking npm for claude-code's latest version…*,
