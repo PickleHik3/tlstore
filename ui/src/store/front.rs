@@ -334,17 +334,21 @@ impl View for Front {
             }
         } else {
             match cur {
-                Some(i) if st.cat.update_for(&i.name).is_some() => Slot::new("u", "update", Key::Char('u')),
+                Some(i) if st.cat.update_for(&i.name).is_some() => Slot::new("u", "upgrade", Key::Char('u')),
                 Some(i) if i.installed.is_some() => Slot::new("r", "remove", Key::Char('r')),
                 _ => Slot::new("i", "install", Key::Char('i')),
             }
         };
+        // remove, install and upgrade take turns in one slot; laid out at the widest of them.
+        let verb = verb.as_wide_as("upgrade");
         let (enter, space) = paint::key_glyphs(st.env.launcherctl.is_some());
         [
             Some(Slot::new(enter, "open", Key::Enter).when(has)),
             Some(verb.when(has)),
             Some(Slot::new(space, "select", Key::Char(' ')).when(has)),
-            Some(Slot::new("f", "full", Key::Char('f')).when(st.env.launcherctl.is_some())),
+            // `f` (the launcher's keyboard held down) still works, unhinted: the row is for the
+            // keys an item needs.
+            None,
             Some(Slot::new("q", "quit", Key::Char('q'))),
         ]
     }

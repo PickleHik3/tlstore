@@ -58,7 +58,7 @@ Gutter: 2 columns each side (1 under 44 columns). Content columns at 53 wide: 2�
 | 3+P | Blank (only when a picture is drawn). |
 | next 3 | Name: the script face rasterised at exactly 3 × cell height pixels in the ink colour, left at the gutter. If wider than 49 columns, or pictures are unavailable, mono OSC 66 scale 3 (scale 2 under 44 columns or if 3 does not fit). |
 | next | Standfirst, dim italic, `fit_line` to the content width. |
-| next | Facts strip, dim: `[installed \| installing \| updating \| removing] <version>` or plain `<version>`; then `· <licence>`, `· <author>`, `· <size>`, `· starred` as known. With an update: `<old>` struck through, ` → <new>`. |
+| next | Facts strip, dim: `[installed \| installing \| upgrading \| removing] <version>` (`updating` for the store itself) or plain `<version>`; then `· <licence>`, `· <author>`, `· <size>`, `· starred` as known. With an update: `<old>` struck through, ` → <new>`. |
 | next | Blank. |
 | … | Body (per screen). |
 | last−1 | Notice row (blank unless a notice or the selection bar is showing). |
@@ -89,11 +89,12 @@ seven two-line items. Header geometry is one pure function in `layout.rs`, teste
   `N selected · i installs them, ␣ clears` (or `r removes them` when all selected are installed);
   the verb slot follows.
 - Updates filter: `u` or the masthead item shows only items with an update; the masthead reads
-  `updates · all` (tap `all` or `esc`: back to all); `u` again updates every shown item
+  `updates · all` (tap `all` or `esc`: back to all); `u` again upgrades every shown item
   (→ Installing).
 - `s` with gh not ready: notice row `starring needs gh: pkg install gh, then gh auth login`
   until the next key. Otherwise stars silently and the facts strip gains `· starred`.
-- Keys: slots `⏎ open` · `i install` / `r remove` / `u update` · `␣ select` · `f full` (the launcher's keyboard held down) · `q quit`.
+- Keys: `⏎ open` · `i install` / `r remove` / `u upgrade` · `␣ select` · `q quit`. `f` (the launcher's keyboard
+  held down) works but is not hinted.
 
 ## Item
 
@@ -121,13 +122,13 @@ row, `PgUp`/`PgDn` a body height, `Home`. Body = the README rendered under these
 Offline with no cached README, or no upstream: header plus one dim line `read about it on GitHub`
 (link) — or for a setup, the standfirst alone.
 
-Keys: `i install` / `r remove` · `u update` (empty slot when none) · `s star` (dim until gh works;
+Keys: `i install` / `r remove` · `u upgrade` (not shown when none) · `s star` (dim until gh works;
 absent for setups) · `o repo` · `esc back`.
 
 ## Installing
 
 Header of the requested item in progress — a part it brings counts as it (facts strip verb:
-installing/updating/removing). Body, from the first body row b:
+installing/upgrading/removing). Body, from the first body row b:
 
 - `NN` at 3× in the accent at the gutter over rows b–b+2; `%` at 2× dim at gutter+6 on row b+1.
   One number for the whole job (Revision 17): the plan's rows' own 10 → 100 weighted by kind
@@ -151,12 +152,17 @@ installing/updating/removing). Body, from the first body row b:
 - Keys while running: `x cancel` · (empty) · (empty) · (empty) · `esc back` (the job continues; the
   Front row of the requested item shows the live row's step word; the finish notice to the phone stays as today).
 
-## Key row: fixed slots
+## Key row: justified
 
-Five slots at columns 2, 13, 24, 34, 42 (at 53 columns: two blank columns after the widest hint any screen puts in a slot; under 44 columns the slots are 1, 8, 16,
-24, 32 and words are `fit_line`d to 7). A slot's position never changes; its content may
-(`i install` / `r remove` / `u update` share slot 2 on Front and slot 1 on Item). An unavailable
-hint stays in place, dim. Tapping a slot sends its key.
+Up to five slots, and the ones a screen shows are justified: the first starts at the gutter, the
+last ends at the right gutter, and the blanks between consecutive items are equal (the leftover
+columns shared out, a remainder to the leftmost gaps), measured from each item as drawn (label,
+gap, words). A glyph label (`⏎`, `␣`, the launcher's Nerd Font icons, which it draws two cells
+wide over the next column) has two blank columns before its words; a letter label one. Where the
+items do not fit with two blanks between them, words are cut with `…` from the rightmost-longest
+word, one column at a time, never under the `…`. A slot a screen leaves out (Item's `u upgrade`
+with no update) is not shown and the others spread; an unavailable hint stays in its place, dim.
+Tapping an item sends its key.
 
 ## Motion (D7)
 
