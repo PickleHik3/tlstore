@@ -231,7 +231,7 @@ reads the processor from what `build-asset.sh` derives (`TL_ARCH`, `TL_TRIPLE`, 
 
 ## Upstream watch
 
-herdr, btop, fastfetch, kitten, sigye and fisher follow their upstream's latest stable release
+herdr, btop, fastfetch, kitten, tuios, sigye and fisher follow their upstream's latest stable release
 with no hand on them: `.github/workflows/upstream-watch.yml` runs once a day and, for each item
 that is behind, moves its pin, builds it, and cuts a store release when at least one bump made it
 through. Which items, which upstream and which lines a bump rewrites live in one table at the top of

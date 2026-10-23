@@ -39,7 +39,7 @@ on:
   workflow_dispatch:
     inputs:
       tools:
-        description: "Tools to build: all, or a comma list of btop, tl-priv, kitten, sigye, herdr, terminal-browser, fastfetch, dawn, musl-loader, musl-runtime, launcher-skills"
+        description: "Tools to build: all, or a comma list of btop, tl-priv, kitten, tuios, sigye, herdr, terminal-browser, fastfetch, dawn, musl-loader, musl-runtime, launcher-skills"
         required: false
         default: "all"
   workflow_call:
@@ -113,16 +113,16 @@ jobs:
             libxinerama-dev libxcursor-dev libxkbcommon-x11-dev libx11-xcb-dev libwayland-dev \
             wayland-protocols libdbus-1-dev libfontconfig-dev
 
-      # kitten needs the NDK only on x86_64, where its link goes through the NDK's clang.
+      # kitten and tuios need the NDK only on x86_64, where its link goes through the NDK's clang.
       # musl-runtime and launcher-skills are fetched, not built.
       - name: NDK
-        if: matrix.tool != 'musl-runtime' && matrix.tool != 'launcher-skills' && (matrix.tool != 'kitten' || matrix.arch == 'x86_64')
+        if: matrix.tool != 'musl-runtime' && matrix.tool != 'launcher-skills' && ((matrix.tool != 'kitten' && matrix.tool != 'tuios') || matrix.arch == 'x86_64')
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" >/dev/null
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
 
       - name: Go
-        if: matrix.tool == 'kitten'
+        if: matrix.tool == 'kitten' || matrix.tool == 'tuios'
         uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
         with:
           go-version: stable

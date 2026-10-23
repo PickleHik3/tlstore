@@ -29,6 +29,7 @@ TOOLS='
 btop         -                     btop
 tl-priv      -                     tl-priv
 kitten       -                     kitten
+tuios        -                     tuios
 sigye        -                     sigye
 herdr        -                     herdr
 terminal-browser -                 terminal-browser

@@ -70,6 +70,7 @@ herdr      herdrdev/herdr           commit                    recipes/cross/buil
 btop       aristocratos/btop        commit                    recipes/cross/build-btop.sh       BTOP       btop
 fastfetch  fastfetch-cli/fastfetch  commit                    recipes/cross/build-fastfetch.sh  FASTFETCH  fastfetch
 kitten     kovidgoyal/kitty         tag                       recipes/cross/build-kitten.sh     KITTY_TAG  kitten
+tuios      Gaurav-Gosain/tuios      tag                       recipes/cross/build-tuios.sh      TUIOS_TAG  tuios
 sigye      am2rican5/sigye          commit                    recipes/cross/build-sigye.sh      SIGYE      sigye
 fisher     jorgebucaran/fisher      url                       -                                 -          -
 '
