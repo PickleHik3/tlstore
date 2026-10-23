@@ -61,11 +61,10 @@ herdr --remote myserver
   `[ui.toast]` in that file. herdr only sends them to terminals it knows, so in the launcher's
   terminal the store's copy tells it it is running in kitty, whose notifications the launcher
   shows. The agents in its panes never see the difference.
-- Keep it current with `tlstore upgrade`, like everything else from the store. herdr tells you
-  when a new version is out; `herdr update` also works, but then the store no longer knows which
-  version you have.
-- This is herdr's own Linux build, unchanged, started through a short script that does only the
-  above. Started from an SSH session into the phone, it can
-  fail with `unexpected e_type: 2`; run `export TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE=disable`
-  in that session first. In the launcher's own terminal it just runs.
+- It needs Android 10 or newer. On Android 8 or 9 it does not start.
+- Keep it current with `tlstore upgrade herdr`, like everything else from the store. herdr's own
+  update check and `herdr update` are switched off here: they would fetch upstream's Linux build,
+  which Android stops on some phones and tablets.
+- The store builds herdr for Android from upstream's source, with small changes so it runs there.
+  It starts through a short script that does only the notification step above.
 - The full documentation is at [herdr.dev/docs](https://herdr.dev/docs/).
