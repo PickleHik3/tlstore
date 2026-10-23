@@ -58,6 +58,13 @@ so the x86_64 musl loader is compiled for `x86_64-linux-musl`, against the build
 `libgcc.a` (the NDK ships compiler-rt for Android targets only). And btop's GPU support, which
 upstream offers on x86_64, stays off as on aarch64.
 
+The x86_64 musl loader also carries `0003-musl-x86_64-legacy-syscalls.patch`: Android's x86_64 app
+seccomp filter kills the legacy syscalls x86_64 Linux kept (access, poll, pipe, dup2, unlink,
+mkdir, rename, select, fork, ...; aarch64 never had them), and Bun reaches some through musl's
+`syscall()`. The patch makes libc itself use the modern calls (as on aarch64) and makes `syscall()`
+translate the legacy numbers programs pass in; aarch64 is unaffected. `pause` and `vfork` are only
+done inside libc: through `syscall()`, vfork cannot be made from C.
+
 On the runner the musl loader is built with the NDK's clang standing in for Termux's (the recipe
 names plain `clang` and a compiler-rt under `$PREFIX`; `build-asset.sh` puts a wrapper on `PATH`
 and passes `LIBCC`).

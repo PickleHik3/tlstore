@@ -15,6 +15,9 @@
 #   * LD_PRELOAD is read from MUSL_LD_PRELOAD (recipes/cross/0001-musl-ld-preload-var.patch).
 #   * syscall(SYS_close_range) answers ENOSYS (0002-musl-close-range-enosys.patch): older
 #     Android's app seccomp filter kills the process for it, and Bun calls it at start-up.
+#   * x86_64 only (0003-musl-x86_64-legacy-syscalls.patch): Android's x86_64 seccomp filter kills
+#     the legacy syscalls (access, poll, pipe, dup2, unlink, ...), so libc uses the modern ones
+#     (as on aarch64) and syscall() translates the legacy numbers programs pass in.
 # libc.so *is* the loader in musl; it is shipped under the ld-musl name.
 set -eu
 
@@ -43,6 +46,7 @@ cd "musl-$MUSL_VERSION"
 
 patch -p1 -s < "$SCRIPT_DIR/0001-musl-ld-preload-var.patch"
 patch -p1 -s < "$SCRIPT_DIR/0002-musl-close-range-enosys.patch"
+patch -p1 -s < "$SCRIPT_DIR/0003-musl-x86_64-legacy-syscalls.patch"
 sed -i "s|\"/etc/resolv.conf\"|\"$TERMUX_PREFIX/etc/resolv.conf\"|" src/network/resolvconf.c
 sed -i "s|\"/etc/hosts\"|\"$TERMUX_PREFIX/etc/hosts\"|" src/network/lookup_name.c src/network/getnameinfo.c
 grep -q "$TERMUX_PREFIX/etc/resolv.conf" src/network/resolvconf.c
