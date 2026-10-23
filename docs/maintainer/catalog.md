@@ -243,10 +243,11 @@ scripts/upstream-watch.sh --bump herdr       # pin herdr to upstream's latest, r
 ```
 
 "Latest stable" is GitHub's `releases/latest`: never a prerelease (herdr's "Preview build"s) or a
-draft. A bump moves the recipe's pin (the tag's commit, a tag, or for herdr the version and both
-assets' digests, which must match the sha256 GitHub publishes for them) and the version column of
+draft. A bump moves the recipe's pin (the tag's commit, or a tag; for an item fetched as upstream's
+own release asset, the version and each asset's digest, which must match the sha256 GitHub publishes
+for it) and the version column of
 every `items.tsv` row of the item. herdr's rows carry the store's own build number
-(`0.9.5+tl.<N>`: its asset is an archive, upstream's binary plus a launcher script, so a rebuild
+(`0.9.5+tl.<N>`: its asset is an archive, our bionic build plus a launcher script, so a rebuild
 of the same upstream version must still reach phones): the watch reads such a row as its upstream
 version, and a bump writes `<new>+tl.0`. The bins tag and `SHA256SUMS` stay `build.yml`'s to
 move. So the plain upstream versions in "Rebuilding a binary" above are moved for these items by

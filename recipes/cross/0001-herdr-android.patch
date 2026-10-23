@@ -1,0 +1,66 @@
+diff --git a/crates/ghostty-vt/build.rs b/crates/ghostty-vt/build.rs
+--- a/crates/ghostty-vt/build.rs
++++ b/crates/ghostty-vt/build.rs
+@@ -9,6 +9,8 @@
+         "aarch64-unknown-linux-gnu" => "aarch64-linux-gnu",
+         "x86_64-unknown-linux-musl" => "x86_64-linux-musl",
+         "aarch64-unknown-linux-musl" => "aarch64-linux-musl",
++        "x86_64-linux-android" => "x86_64-linux-android",
++        "aarch64-linux-android" => "aarch64-linux-android",
+         "x86_64-apple-darwin" => "x86_64-macos",
+         "aarch64-apple-darwin" => "aarch64-macos",
+         "aarch64-apple-ios" => "aarch64-ios",
+diff --git a/src/platform/linux.rs b/src/platform/linux.rs
+--- a/src/platform/linux.rs
++++ b/src/platform/linux.rs
+@@ -26,7 +26,10 @@
+ #[cfg(test)]
+ mod config_file_tests;
+ 
++// Android has no logind, so no zbus shutdown monitor: the fallback in platform/mod.rs applies.
++#[cfg(target_os = "linux")]
+ mod shutdown;
++#[cfg(target_os = "linux")]
+ pub(crate) use shutdown::monitor_host_shutdown;
+ 
+ const WSL_MARKER_ENV_VARS: &[&str] = &["WSL_DISTRO_NAME", "WSL_INTEROP"];
+diff --git a/src/platform/mod.rs b/src/platform/mod.rs
+--- a/src/platform/mod.rs
++++ b/src/platform/mod.rs
+@@ -69,7 +69,8 @@
+     }
+ }
+ 
+-#[cfg(not(any(any(target_os = "linux", target_os = "android"), target_os = "macos")))]
++// Android has no logind monitor (platform/linux.rs leaves it out), so it takes this no-op one.
++#[cfg(any(target_os = "android", not(any(target_os = "linux", target_os = "macos"))))]
+ fn monitor_host_shutdown(
+     _requested: std::sync::Arc<std::sync::atomic::AtomicBool>,
+     _intent: HostShutdownIntentCell,
+diff --git a/src/update.rs b/src/update.rs
+--- a/src/update.rs
++++ b/src/update.rs
+@@ -2107,6 +2107,12 @@
+ 
+ /// Manual self-update command (`herdr update`).
+ pub fn self_update(options: SelfUpdateOptions) -> Result<Version, String> {
++    // The Termux Launcher store builds herdr for Android and updates it (`tlstore upgrade herdr`);
++    // upstream's release is a musl build that Android's seccomp kills on x86_64.
++    if cfg!(target_os = "android") {
++        return Err("self-update is disabled for the Termux Launcher store; run `tlstore upgrade herdr`".into());
++    }
++
+     let channel = UpdateChannel::configured();
+ 
+     if is_homebrew_managed_install() {
+@@ -2346,6 +2352,10 @@
+ /// Background update check: only surface availability and release notes.
+ /// Runs in a background thread at startup.
+ pub fn auto_update(events: tokio::sync::mpsc::Sender<crate::events::AppEvent>) {
++    // No update check on Android: the store updates herdr, never upstream's musl release.
++    if cfg!(target_os = "android") {
++        return;
++    }
+     crate::logging::update_check_started();
+     if let Ok(version) = env::var(FAKE_UPDATE_VERSION_ENV) {
+         let version = version.trim();

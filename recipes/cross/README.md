@@ -17,7 +17,7 @@ NDK plus a sysroot assembled with `dpkg-deb -x`.
 | `build-kitten.sh` | kitty's standalone `kitten` client | Go + python3 (+ NDK for x86_64) |
 | `build-btop.sh` | patched btop, fully static, for the launcher's Shizuku lane | NDK + GNU make |
 | `build-tl-priv.sh` | `tl-priv`, the lane's client (`tl-priv/tl-priv.c`), fully static | NDK |
-| `fetch-herdr.sh` | herdr as a `.tar.gz` app tree: upstream's own static musl build, digest-pinned (not built), behind a launcher script that turns its terminal notifications on in Termux Launcher | curl, GNU tar, gzip |
+| `build-herdr.sh` | herdr, built from source for bionic (Rust, plus Zig 0.16.0 for libghostty-vt, which the script downloads and verifies itself), as a `.tar.gz` app tree behind a launcher script that turns its terminal notifications on in Termux Launcher; `0001-herdr-android.patch` | rustup (`<arch>-linux-android`), NDK, git, curl, xz, GNU tar, gzip |
 | `fetch-launcher-skills.sh` | the launcher's agent skills, one `.tar.gz` each, packed by the launcher's own `scripts/pack-agent-skills.sh` at a pinned commit (not built; the same on every processor) | git, GNU tar, gzip |
 | `build-terminal-browser.sh` | terminal-browser as a `.tar.gz` app tree, from our fork: its JavaScript built as upstream releases it, `pixel.node` and `agent-browser` built for Android, Termux's `electron42` in place of upstream's Electron | rustup `<arch>-linux-android` + NDK, Node 22 + pnpm 10.13.1, GNU tar |
 
@@ -108,7 +108,7 @@ row per edition and picks between them by `$PREFIX`, skipping the item with a bu
 prefix nothing is published for.
 
 `sigye`, `kitten` and `herdr` are prefix-independent — no `RUNPATH`, no absolute prefix anywhere in either
-binary — so one build of each serves every edition. So is `terminal-browser`: its two native pieces
+binary (herdr's NEEDED entries are libc, libm and libdl) — so one build of each serves every edition. So is `terminal-browser`: its two native pieces
 have no `RUNPATH` either, and `electron/pixel` finds Termux's Electron through `$PREFIX` at run
 time (falling back to `com.termux`'s prefix only when it is unset).
 
@@ -276,10 +276,28 @@ Device-verified 2026-08-16 on Pong (A065, Android 16), running inside the launch
 
 **herdr**
 
-- The asset is a gzipped tar of the app root, not the bare binary: upstream's binary, unchanged,
-  as `libexec/herdr`, and `bin/herdr`, the script the catalog runs. It is packed as
-  terminal-browser's is (sorted names, one fixed mtime, numeric owner 0, gzip -n), so the same pin
-  gives the same archive.
+- Built from source, not fetched. Upstream's release is a static musl binary, and Android's
+  x86_64 app seccomp filter kills musl's direct legacy syscalls (poll, pipe, dup2, unlink, mkdir,
+  access, epoll_wait, eventfd, fork, ...); a bionic build goes through the newer ones and runs.
+  So `build-herdr.sh` builds `<arch>-linux-android` for both processors from the pinned upstream
+  commit, linked by the NDK's clang as `build-sigye.sh` does.
+- libghostty-vt is Zig, built by upstream's `crates/ghostty-vt/build.rs`. The script downloads
+  Zig 0.16.0 (pinned by sha256; `ZIG` points it at one you have), lets Zig fetch libghostty-vt's
+  dependencies into `$TL_BUILD_DIR/zig-cache` (Zig checks each against the content hash in
+  upstream's `build.zig.zon`; a curl pre-fetch could not check more than a tarball digest), and
+  builds with SIMD off (`LIBGHOSTTY_VT_SIMD=0`: the SIMD code needs the NDK's libc++).
+- Upstream treats `target_os = "linux"` as the only Unix-with-procfs; a `sed` makes every such cfg
+  in the Rust sources true on android too, and the build fails if one is left. The small hand
+  patch `0001-herdr-android.patch` adds the two Android triples to `zig_target()`, leaves out the
+  logind (zbus) shutdown monitor, and switches `herdr update` and the background update check off
+  on Android: they would download upstream's musl release over this build. `herdr update` prints
+  that the store updates herdr (`tlstore upgrade herdr`) and exits 1.
+- A bump of the pins (`scripts/upstream-watch.sh --bump herdr`) moves `HERDR_COMMIT` and
+  `HERDR_VERSION`; if the patch no longer applies, the build says so and the patch is rebased by hand.
+- The asset is a gzipped tar of the app root, not the bare binary: the stripped binary as
+  `libexec/herdr`, and `bin/herdr`, the script the catalog runs. It is packed as
+  terminal-browser's is (sorted names, one fixed mtime, numeric owner 0, gzip -n), so the same
+  inputs give the same archive.
 - herdr writes its terminal notifications (`[ui.toast] delivery = "terminal"`) only for Ghostty,
   iTerm2, WezTerm and kitty, and nothing for any other terminal. When `TERM_PROGRAM` is
   `termux-launcher` and `KITTY_WINDOW_ID` is unset, `bin/herdr` sets `KITTY_WINDOW_ID=1`, so herdr

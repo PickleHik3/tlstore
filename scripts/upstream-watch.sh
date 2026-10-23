@@ -66,7 +66,7 @@ released_catalog="$repo/dist/catalog.tsv"
 # merge first); npm items, which follow `latest`; pkg items; the launcher-pinned files and skills;
 # the musl loader and runtime.
 WATCH='
-herdr      herdrdev/herdr           asset=herdr-linux-{arch}  recipes/cross/fetch-herdr.sh      HERDR      herdr
+herdr      herdrdev/herdr           commit                    recipes/cross/build-herdr.sh      HERDR      herdr
 btop       aristocratos/btop        commit                    recipes/cross/build-btop.sh       BTOP       btop
 fastfetch  fastfetch-cli/fastfetch  commit                    recipes/cross/build-fastfetch.sh  FASTFETCH  fastfetch
 kitten     kovidgoyal/kitty         tag                       recipes/cross/build-kitten.sh     KITTY_TAG  kitten
