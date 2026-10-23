@@ -60,7 +60,10 @@ PATCH="$SCRIPT_DIR/0001-herdr-android.patch"
 TL_NDK=${TL_NDK:-"$HOME/android-sdk/ndk/27.2.12479018"}
 TL_OUT=${TL_OUT:-"$PWD/out"}
 TL_BUILD_DIR=${TL_BUILD_DIR:-"$PWD/build-herdr"}
-TL_ANDROID_API=${TL_ANDROID_API:-26}
+# 29, not the launcher's 26: libghostty-vt's Zig objects use native ELF TLS, which bionic loads
+# only from Android 10, and only API 29's crtbegin carries the 64-aligned .tdata ARM64 bionic
+# requires of a TLS segment (an API 26 link aborts at start: "TLS segment is underaligned").
+TL_ANDROID_API=${TL_ANDROID_API:-29}
 TL_ARCH=${TL_ARCH:-aarch64}
 case "$TL_ARCH" in
     aarch64|x86_64) ;;
