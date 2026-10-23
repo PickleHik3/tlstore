@@ -45,6 +45,15 @@ if [ ! -d "$source_dir/.git" ]; then
     git clone --depth 1 --branch "$TUIOS_TAG" "$TUIOS_URL" "$source_dir"
 fi
 
+# The CPU meter reads /proc/stat, which Android closes to an app uid. The patch adds an Android-only
+# fallback that reads the samples of tuios-cpu (build-tuios-cpu.sh), which the launcher's
+# privileged lane runs as the shell uid; without that helper the meter shows n/a. It touches no
+# other platform. Skipped when a reused source tree already has it.
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if ! git -C "$source_dir" apply --reverse --check "$SCRIPT_DIR/0001-tuios-android-cpu.patch" 2>/dev/null; then
+    git -C "$source_dir" apply "$SCRIPT_DIR/0001-tuios-android-cpu.patch"
+fi
+
 revision=$(git -C "$source_dir" rev-parse HEAD)
 date=$(git -C "$source_dir" show -s --format=%cI HEAD)
 output="$TL_OUT/tuios-$TL_GOOS-$TL_GOARCH"

@@ -39,7 +39,7 @@ on:
   workflow_dispatch:
     inputs:
       tools:
-        description: "Tools to build: all, or a comma list of btop, tl-priv, kitten, tuios, sigye, herdr, terminal-browser, fastfetch, dawn, musl-loader, musl-runtime, launcher-skills"
+        description: "Tools to build: all, or a comma list of btop, tl-priv, tuios-cpu, kitten, tuios, sigye, herdr, terminal-browser, fastfetch, dawn, musl-loader, musl-runtime, launcher-skills"
         required: false
         default: "all"
   workflow_call:

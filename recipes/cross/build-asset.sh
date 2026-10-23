@@ -4,7 +4,7 @@
 #
 #   ./build-asset.sh <tool> [edition]
 #
-#   tool      btop | tl-priv | kitten | tuios | sigye | herdr | terminal-browser | fastfetch | dawn |
+#   tool      btop | tl-priv | tuios-cpu | kitten | tuios | sigye | herdr | terminal-browser | fastfetch | dawn |
 #             musl-loader | musl-runtime | launcher-skills
 #   edition   com.termux (default) | io.vaj.tl — only for fastfetch, dawn and musl-loader, the
 #             three whose binary carries the edition's prefix (README.md, "One build per
@@ -186,6 +186,10 @@ case "$tool" in
     tl-priv)
         "$SCRIPT_DIR/build-tl-priv.sh"
         cp "$TL_OUT/tl-priv" "$TL_ASSETS/$asset"
+        ;;
+    tuios-cpu)
+        "$SCRIPT_DIR/build-tuios-cpu.sh"
+        cp "$TL_OUT/tuios-cpu" "$TL_ASSETS/$asset"
         ;;
     kitten)
         if [ "$TL_GO_LINK_NDK" = 1 ]; then

@@ -15,6 +15,8 @@ NDK plus a sysroot assembled with `dpkg-deb -x`.
 | `build-dawn.sh` | patched dawn, the markdown writing pad | NDK + CMake |
 | `build-sigye.sh` | patched Sigye clock | rustup `<arch>-linux-android` + NDK |
 | `build-kitten.sh` | kitty's standalone `kitten` client | Go + python3 (+ NDK for x86_64) |
+| `build-tuios.sh` | tuios, the terminal window manager for agents (Go, `GOOS=android`, like kitten); `0001-tuios-android-cpu.patch` | Go + git (+ NDK for x86_64) |
+| `build-tuios-cpu.sh` | `tuios-cpu` (`tuios-cpu/tuios-cpu.c`), the `/proc/stat` reader tuios's CPU meter gets through the lane, fully static | NDK |
 | `build-btop.sh` | patched btop, fully static, for the launcher's Shizuku lane | NDK + GNU make |
 | `build-tl-priv.sh` | `tl-priv`, the lane's client (`tl-priv/tl-priv.c`), fully static | NDK |
 | `build-herdr.sh` | herdr, built from source for bionic (Rust, plus Zig 0.16.0 for libghostty-vt, which the script downloads and verifies itself), as a `.tar.gz` app tree behind a launcher script that turns its terminal notifications on in Termux Launcher; `0001-herdr-android.patch` | rustup (`<arch>-linux-android`), NDK, git, curl, xz, GNU tar, gzip |
@@ -114,7 +116,7 @@ Each result is uploaded as `<tool>-<package name>-<arch>` (`fastfetch-io.vaj.tl-
 row per edition and picks between them by `$PREFIX`, skipping the item with a build hint for a
 prefix nothing is published for.
 
-`sigye`, `kitten` and `herdr` are prefix-independent — no `RUNPATH`, no absolute prefix anywhere in either
+`sigye`, `kitten`, `tuios` and `herdr` are prefix-independent — no `RUNPATH`, no absolute prefix anywhere in either
 binary (herdr's NEEDED entries are libc, libm and libdl) — so one build of each serves every edition. So is `terminal-browser`: its two native pieces
 have no `RUNPATH` either, and `electron/pixel` finds Termux's Electron through `$PREFIX` at run
 time (falling back to `com.termux`'s prefix only when it is unset).
@@ -280,6 +282,25 @@ Device-verified 2026-08-16 on Pong (A065, Android 16), running inside the launch
   endpoint. Use `launcherctl` and the terminal action registry instead.
 - Every kitten that expects kitty's desktop application (window management, its own config
   parsing) is out of scope; only the terminal-facing kittens are meaningful here.
+
+**tuios**
+
+- Built like kitten: `GOOS=android` (a linux build dies on `faccessat2`, and on x86_64 on the legacy
+  syscalls), android/arm64 linked by Go, android/amd64 by the NDK's clang (`TL_CGO_CC`). The plain
+  `tuios` build of `cmd/tuios`, with goreleaser's ldflags, not `tuios-ghostty` (cgo) or
+  `tuios-web`. Go comes from `setup-go` `stable` with `GOTOOLCHAIN=auto`, which fetches the
+  toolchain go.mod asks for.
+- `main.builtBy` is `tlstore`, so `tuios update` refuses ("an unknown build") instead of replacing
+  the binary with upstream's linux one; `tlstore upgrade tuios` is the way.
+- Android keeps `/proc/stat` from a Termux uid, so the dock's CPU meter would read `n/a`.
+  `0001-tuios-android-cpu.patch` adds an Android-only fallback (`internal/app/sysinfo_android.go`):
+  when `/proc/stat` cannot be opened it starts `~/.local/bin/tuios-cpu 250` (the wrapper the store
+  writes for the hidden `priv=shizuku` item `tuios-cpu`, which runs the static helper as the shell
+  uid through tl-priv), reads its samples (the `cpu` line, then a `.` line; CRLF through the pty),
+  and feeds the same percent calculation. No helper, no lane or a dead helper (retried every 30
+  s) leaves `CPU: n/a`; RAM reads `/proc/meminfo`, which is open. The helper ends when tuios does.
+- The catalog has two `tuios` rows: `host=launcher`, requiring `tuios-cpu`, and `host=termux`
+  with no requirement, since a `requires` on a part with no row on the host blocks the install.
 
 **herdr**
 

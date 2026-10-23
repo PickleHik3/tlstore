@@ -453,6 +453,11 @@ run by the launcher as the shell uid (2000) instead. End to end:
    catalog digest: the row's `digest` is the identity the service checks against, so a rebuilt
    binary means a new tag, a new digest and a new catalog before it runs.
 
+A priv part can serve an ordinary item: tuios reads CPU counters from `tuios-cpu` when the shell
+uid can, and shows `n/a` when not. The engine refuses an item whose `requires` names a part with no
+row on this host, so such an item has two rows of one name, `host=launcher` (requiring the part)
+and `host=termux` (not), and `rows()` takes whichever applies.
+
 To add another one: build it static and prefix-free with a `recipes/cross/build-<name>.sh` (the
 btop script is the model — Bionic's `libc.a` through the NDK's `-static`, and mind that Bionic has
 no `pthread_cancel`), publish it under a tag, add a `binary` row with `priv=shizuku`, `requires`
