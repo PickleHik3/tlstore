@@ -1,0 +1,143 @@
+diff --git i/internal/app/sysinfo_android.go w/internal/app/sysinfo_android.go
+new file mode 100644
+index 0000000..ac7bee9
+--- /dev/null
++++ w/internal/app/sysinfo_android.go
+@@ -0,0 +1,110 @@
++//go:build android
++
++package app
++
++import (
++	"bufio"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"strconv"
++	"strings"
++	"sync"
++	"syscall"
++	"time"
++)
++
++// A Termux app uid cannot read /proc/stat on Android. Termux:Launcher can run
++// a helper as the shell uid through Shizuku, and the store installs it as
++// ~/.local/bin/tuios-cpu: it prints the cpu lines of /proc/stat every interval,
++// each sample ended by a line holding ".". readCPUTicksFallback starts it the
++// first time the CPU meter asks and keeps the newest sample; with no helper,
++// or no lane, the meter shows n/a as it does on any platform without a reader.
++
++const cpuHelperRetry = 30 * time.Second
++
++var cpuHelper struct {
++	mu      sync.Mutex
++	started time.Time
++	running bool
++	ticks   cpuTicks
++	ok      bool
++}
++
++func readCPUTicksFallback() (cpuTicks, bool) {
++	h := &cpuHelper
++	h.mu.Lock()
++	defer h.mu.Unlock()
++	if !h.running && (h.started.IsZero() || time.Since(h.started) >= cpuHelperRetry) {
++		h.started = time.Now()
++		startCPUHelper()
++	}
++	return h.ticks, h.ok
++}
++
++// startCPUHelper runs with cpuHelper.mu held.
++func startCPUHelper() {
++	home, err := os.UserHomeDir()
++	if err != nil {
++		return
++	}
++	path := filepath.Join(home, ".local", "bin", "tuios-cpu")
++	if st, err := os.Stat(path); err != nil || st.IsDir() {
++		return
++	}
++	cmd := exec.Command(path, "250")
++	// The helper dies with tuios; so does the lane's client if tuios is killed
++	// outright, because its writes then fail.
++	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
++	out, err := cmd.StdoutPipe()
++	if err != nil {
++		return
++	}
++	if err := cmd.Start(); err != nil {
++		return
++	}
++	cpuHelper.running = true
++	go func() {
++		scanner := bufio.NewScanner(out)
++		var pending cpuTicks
++		var have bool
++		for scanner.Scan() {
++			line := strings.TrimRight(scanner.Text(), "\r")
++			switch {
++			case strings.HasPrefix(line, "cpu "):
++				pending, have = parseCPUStatLine(line)
++			case line == ".":
++				if have {
++					cpuHelper.mu.Lock()
++					cpuHelper.ticks, cpuHelper.ok = pending, true
++					cpuHelper.mu.Unlock()
++				}
++				have = false
++			}
++		}
++		_ = cmd.Wait()
++		cpuHelper.mu.Lock()
++		cpuHelper.running, cpuHelper.ok = false, false
++		cpuHelper.mu.Unlock()
++	}()
++}
++
++// parseCPUStatLine reads the aggregate "cpu" line the way readCPUTicks does.
++func parseCPUStatLine(line string) (cpuTicks, bool) {
++	fields := strings.Fields(line)[1:]
++	if len(fields) < 4 {
++		return cpuTicks{}, false
++	}
++	var t cpuTicks
++	for i, f := range fields[:min(len(fields), 8)] {
++		v, err := strconv.ParseUint(f, 10, 64)
++		if err != nil {
++			return cpuTicks{}, false
++		}
++		t.total += v
++		if i == 3 {
++			t.idle = v
++		}
++	}
++	return t, true
++}
+diff --git i/internal/app/sysinfo_linux.go w/internal/app/sysinfo_linux.go
+index 09d770b..5850b1b 100644
+--- i/internal/app/sysinfo_linux.go
++++ w/internal/app/sysinfo_linux.go
+@@ -13,7 +13,7 @@ import (
+ func readCPUTicks() (cpuTicks, bool) {
+ 	file, err := os.Open("/proc/stat")
+ 	if err != nil {
+-		return cpuTicks{}, false
++		return readCPUTicksFallback()
+ 	}
+ 	defer func() { _ = file.Close() }()
+ 
+diff --git i/internal/app/sysinfo_notandroid.go w/internal/app/sysinfo_notandroid.go
+new file mode 100644
+index 0000000..e266481
+--- /dev/null
++++ w/internal/app/sysinfo_notandroid.go
+@@ -0,0 +1,8 @@
++//go:build linux && !android
++
++package app
++
++// readCPUTicksFallback: only Android closes /proc/stat to an app uid.
++func readCPUTicksFallback() (cpuTicks, bool) {
++	return cpuTicks{}, false
++}

@@ -4637,7 +4637,7 @@ expect_out "on each processor" '"asset":"musl-libgcc-x86_64,musl-libstdcxx-x86_6
 expect_out "the launcher skills are one job for every processor, each tarball under both names" \
     '{"tool":"launcher-skills","edition":"-","arch":"any","asset":"skill-termux-launcher-aarch64,skill-termux-launcher-x86_64,skill-termux-launcher-speak-aarch64,skill-termux-launcher-speak-x86_64"}'
 if command -v python3 >/dev/null 2>&1; then
-    if printf '%s' "$OUT" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if len(d["include"]) == 24 else 1)'; then pass; else fail "the matrix is JSON with twenty-four entries" "$OUT"; fi
+    if printf '%s' "$OUT" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if len(d["include"]) == 28 else 1)'; then pass; else fail "the matrix is JSON with twenty-eight entries" "$OUT"; fi
 fi
 OUT="$(bash "$BN_ROOT/scripts/bins-plan.sh" dawn,btop 2>&1)"; ST=$?
 expect_status "bins-plan.sh with a comma list" 0
@@ -4745,7 +4745,7 @@ case "$TL_ARCH" in
     x86_64)  HERDR_SHA256=1111111111111111111111111111111111111111111111111111111111111111 ;;
 esac
 EOF
-for uw_r in build-btop build-fastfetch build-kitten build-sigye; do
+for uw_r in build-btop build-fastfetch build-kitten build-sigye build-tuios; do
     cp "$repo/recipes/cross/$uw_r.sh" "$UW/recipes/cross/"
 done
 uw_herdr="$(sed -n 's/^HERDR_VERSION=\${HERDR_VERSION:-v\([^}]*\)}$/\1/p' "$UW/recipes/cross/fetch-herdr.sh")"

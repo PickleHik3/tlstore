@@ -231,7 +231,7 @@ reads the processor from what `build-asset.sh` derives (`TL_ARCH`, `TL_TRIPLE`, 
 
 ## Upstream watch
 
-herdr, btop, fastfetch, kitten, sigye and fisher follow their upstream's latest stable release
+herdr, btop, fastfetch, kitten, tuios, sigye and fisher follow their upstream's latest stable release
 with no hand on them: `.github/workflows/upstream-watch.yml` runs once a day and, for each item
 that is behind, moves its pin, builds it, and cuts a store release when at least one bump made it
 through. Which items, which upstream and which lines a bump rewrites live in one table at the top of
@@ -452,6 +452,11 @@ run by the launcher as the shell uid (2000) instead. End to end:
    prefix baked in (see `recipes/cross/README.md`). The launcher allowlists what it will run by the
    catalog digest: the row's `digest` is the identity the service checks against, so a rebuilt
    binary means a new tag, a new digest and a new catalog before it runs.
+
+A priv part can serve an ordinary item: tuios reads CPU counters from `tuios-cpu` when the shell
+uid can, and shows `n/a` when not. The engine refuses an item whose `requires` names a part with no
+row on this host, so such an item has two rows of one name, `host=launcher` (requiring the part)
+and `host=termux` (not), and `rows()` takes whichever applies.
 
 To add another one: build it static and prefix-free with a `recipes/cross/build-<name>.sh` (the
 btop script is the model — Bionic's `libc.a` through the NDK's `-static`, and mind that Bionic has

@@ -28,7 +28,9 @@ AARCH64_ONLY_EDITIONS='io.vaj.tl'
 TOOLS='
 btop         -                     btop
 tl-priv      -                     tl-priv
+tuios-cpu    -                     tuios-cpu
 kitten       -                     kitten
+tuios        -                     tuios
 sigye        -                     sigye
 herdr        -                     herdr
 terminal-browser -                 terminal-browser

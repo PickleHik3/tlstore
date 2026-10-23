@@ -4,7 +4,7 @@
 #
 #   ./build-asset.sh <tool> [edition]
 #
-#   tool      btop | tl-priv | kitten | sigye | herdr | terminal-browser | fastfetch | dawn |
+#   tool      btop | tl-priv | tuios-cpu | kitten | tuios | sigye | herdr | terminal-browser | fastfetch | dawn |
 #             musl-loader | musl-runtime | launcher-skills
 #   edition   com.termux (default) | io.vaj.tl — only for fastfetch, dawn and musl-loader, the
 #             three whose binary carries the edition's prefix (README.md, "One build per
@@ -187,6 +187,10 @@ case "$tool" in
         "$SCRIPT_DIR/build-tl-priv.sh"
         cp "$TL_OUT/tl-priv" "$TL_ASSETS/$asset"
         ;;
+    tuios-cpu)
+        "$SCRIPT_DIR/build-tuios-cpu.sh"
+        cp "$TL_OUT/tuios-cpu" "$TL_ASSETS/$asset"
+        ;;
     kitten)
         if [ "$TL_GO_LINK_NDK" = 1 ]; then
             TL_CGO_CC="$TL_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/$TL_TRIPLE$MIN_API-clang"
@@ -195,6 +199,16 @@ case "$tool" in
         fi
         "$SCRIPT_DIR/build-kitten.sh"
         cp "$TL_OUT/kitten-android-$TL_GOARCH" "$TL_ASSETS/$asset"
+        ;;
+    tuios)
+        # Go for android, like kitten: arm64 links itself, amd64 through the NDK's clang.
+        if [ "$TL_GO_LINK_NDK" = 1 ]; then
+            TL_CGO_CC="$TL_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/$TL_TRIPLE$MIN_API-clang"
+            [ -x "$TL_CGO_CC" ] || { echo "build-asset: no NDK clang at $TL_CGO_CC (set TL_NDK)" >&2; exit 1; }
+            export TL_CGO_CC
+        fi
+        "$SCRIPT_DIR/build-tuios.sh"
+        cp "$TL_OUT/tuios-android-$TL_GOARCH" "$TL_ASSETS/$asset"
         ;;
     sigye)
         "$SCRIPT_DIR/build-sigye.sh"
