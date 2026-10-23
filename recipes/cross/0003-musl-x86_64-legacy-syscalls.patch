@@ -1,0 +1,258 @@
+From: Termux Launcher <noreply@pathayam.xyz>
+Subject: [PATCH] x86_64: no legacy syscalls, in libc or through syscall()
+
+Android's x86_64 app seccomp filter lists none of the legacy syscalls that
+x86_64 Linux kept for old binaries (access, poll, pipe, dup2, unlink, mkdir,
+rename, select, fork, ...; aarch64 never had them), and a disallowed call is
+answered with SIGSYS. Claude Code and opencode (Bun) die at start-up on it:
+a constructor probes /sys/devices/system/node through syscall(SYS_access).
+
+Two parts, both x86_64 only:
+ * musl's own code forgets the legacy SYS_ names (src/internal/syscall.h), so
+   every `#ifdef SYS_xxx` takes the modern branch it already has for aarch64.
+   Hand-written: vfork.s uses clone(CLONE_VM|CLONE_VFORK|SIGCHLD) instead of
+   the vfork syscall, and faccessat with flags skips faccessat2 (ENOSYS, then
+   musl's own emulation).
+ * syscall() translates the legacy numbers programs pass in to the modern
+   call with the same meaning.
+
+diff -ur a/src/internal/syscall.h b/src/internal/syscall.h
+--- a/src/internal/syscall.h	2026-10-23 19:01:04.614281317 +0300
++++ b/src/internal/syscall.h	2026-10-23 19:01:09.320318930 +0300
+@@ -6,6 +6,43 @@
+ #include <sys/syscall.h>
+ #include "syscall_arch.h"
+ 
++#ifdef __x86_64__
++/* Android's x86_64 app seccomp filter kills a process for the legacy syscalls
++ * (the ones the *at, *2 and *_pwait calls replaced). Forget their numbers so
++ * every `#ifdef SYS_xxx` in libc falls to the modern branch, as on aarch64,
++ * which never had them. (0003-musl-x86_64-legacy-syscalls.patch) */
++#undef SYS_lstat
++#undef SYS_poll
++#undef SYS_access
++#undef SYS_pipe
++#undef SYS_select
++#undef SYS_dup2
++#undef SYS_fork
++#undef SYS_rename
++#undef SYS_mkdir
++#undef SYS_rmdir
++#undef SYS_creat
++#undef SYS_link
++#undef SYS_unlink
++#undef SYS_symlink
++#undef SYS_chmod
++#undef SYS_chown
++#undef SYS_lchown
++#undef SYS_getpgrp
++#undef SYS_utime
++#undef SYS_mknod
++#undef SYS_time
++#undef SYS_alarm
++#undef SYS_pause
++#undef SYS_epoll_create
++#undef SYS_epoll_wait
++#undef SYS_utimes
++#undef SYS_futimesat
++#undef SYS_inotify_init
++#undef SYS_signalfd
++#undef SYS_eventfd
++#endif
++
+ #ifndef SYSCALL_RLIM_INFINITY
+ #define SYSCALL_RLIM_INFINITY (~0ULL)
+ #endif
+diff -ur a/src/misc/syscall.c b/src/misc/syscall.c
+--- a/src/misc/syscall.c	2026-10-23 19:01:41.615453315 +0300
++++ b/src/misc/syscall.c	2026-10-23 19:03:22.668625229 +0300
+@@ -3,9 +3,138 @@
+ #include "syscall.h"
+ #include <stdarg.h>
+ #include <errno.h>
++#include <fcntl.h>
++#include <signal.h>
+ 
+ #undef syscall
+ 
++#ifdef __x86_64__
++/* Android's x86_64 app seccomp filter kills a process for the legacy syscalls,
++ * and Bun reaches them through syscall() (access on /sys/devices/system/node,
++ * for one). Answer each with the modern call that does the same thing; the
++ * legacy numbers are spelled out because syscall.h forgets them (0003). The
++ * result is a raw kernel return value (-errno), or -ENOSYS for a number that is
++ * not one of these, which the caller sends on to the kernel unchanged. */
++enum {
++	L_lstat = 6, L_poll = 7, L_access = 21, L_pipe = 22, L_select = 23,
++	L_dup2 = 33, L_pause = 34, L_alarm = 37, L_fork = 57, L_rename = 82,
++	L_mkdir = 83, L_rmdir = 84, L_creat = 85, L_link = 86, L_unlink = 87,
++	L_symlink = 88, L_chmod = 90, L_chown = 92, L_lchown = 94,
++	L_getpgrp = 111, L_utime = 132, L_mknod = 133, L_time = 201,
++	L_epoll_create = 213, L_epoll_wait = 232, L_utimes = 235,
++	L_inotify_init = 253, L_futimesat = 261, L_signalfd = 282,
++	L_eventfd = 284, L_faccessat2 = 439
++};
++
++static int legacy_syscall(long n, long a, long b, long c, long d, long e, long *r)
++{
++	long ts[2], ts2[4], it[4], sig[2];
++	const long *tv;
++	*r = 0;
++	switch (n) {
++	case L_access:
++		*r = __syscall(SYS_faccessat, AT_FDCWD, a, b, 0); break;
++	case L_faccessat2:
++		/* Same as faccessat for flags 0; the flags need the real thing, and
++		 * ENOSYS is what an older kernel says, so callers fall back. */
++		*r = d ? -ENOSYS : __syscall(SYS_faccessat, a, b, c, 0); break;
++	case L_lstat:
++		*r = __syscall(SYS_newfstatat, AT_FDCWD, a, b, AT_SYMLINK_NOFOLLOW); break;
++	case L_poll:
++		/* milliseconds to a timespec; negative waits forever */
++		c = (int)c;  /* an int in a long: the top half is whatever the caller left */
++		ts[0] = c / 1000; ts[1] = c % 1000 * 1000000;
++		*r = __syscall(SYS_ppoll, a, b, c >= 0 ? (long)ts : 0L, 0, _NSIG/8); break;
++	case L_pause:
++		*r = __syscall(SYS_ppoll, 0, 0, 0, 0, _NSIG/8); break;
++	case L_select:
++		/* a struct timeval in and out, like the kernel's select */
++		tv = (const long *)e;
++		if (tv) { ts[0] = tv[0]; ts[1] = tv[1] * 1000; }
++		sig[0] = 0; sig[1] = _NSIG/8;
++		*r = __syscall(SYS_pselect6, a, b, c, d, tv ? (long)ts : 0L, sig);
++		if (tv) { ((long *)e)[0] = ts[0]; ((long *)e)[1] = ts[1] / 1000; }
++		break;
++	case L_pipe:
++		*r = __syscall(SYS_pipe2, a, 0); break;
++	case L_dup2:
++		/* dup3 refuses old == new, dup2 answers it if the descriptor is open */
++		if ((int)a == (int)b) {
++			*r = __syscall(SYS_fcntl, a, F_GETFD);
++			if (*r >= 0) *r = a;
++		} else {
++			while ((*r = __syscall(SYS_dup3, a, b, 0)) == -EBUSY);
++		}
++		break;
++	case L_unlink:
++		*r = __syscall(SYS_unlinkat, AT_FDCWD, a, 0); break;
++	case L_rmdir:
++		*r = __syscall(SYS_unlinkat, AT_FDCWD, a, AT_REMOVEDIR); break;
++	case L_mkdir:
++		*r = __syscall(SYS_mkdirat, AT_FDCWD, a, b); break;
++	case L_rename:
++		*r = __syscall(SYS_renameat, AT_FDCWD, a, AT_FDCWD, b); break;
++	case L_link:
++		*r = __syscall(SYS_linkat, AT_FDCWD, a, AT_FDCWD, b, 0); break;
++	case L_symlink:
++		*r = __syscall(SYS_symlinkat, a, AT_FDCWD, b); break;
++	case L_chmod:
++		*r = __syscall(SYS_fchmodat, AT_FDCWD, a, b); break;
++	case L_chown:
++		*r = __syscall(SYS_fchownat, AT_FDCWD, a, b, c, 0); break;
++	case L_lchown:
++		*r = __syscall(SYS_fchownat, AT_FDCWD, a, b, c, AT_SYMLINK_NOFOLLOW); break;
++	case L_creat:
++		*r = __syscall(SYS_openat, AT_FDCWD, a, O_CREAT|O_WRONLY|O_TRUNC, b); break;
++	case L_mknod:
++		*r = __syscall(SYS_mknodat, AT_FDCWD, a, b, c); break;
++	case L_epoll_create:
++		/* the size is ignored but must be positive */
++		*r = (int)a <= 0 ? -EINVAL : __syscall(SYS_epoll_create1, 0); break;
++	case L_epoll_wait:
++		*r = __syscall(SYS_epoll_pwait, a, b, c, d, 0, _NSIG/8); break;
++	case L_eventfd:
++		*r = __syscall(SYS_eventfd2, a, 0); break;
++	case L_inotify_init:
++		*r = __syscall(SYS_inotify_init1, 0); break;
++	case L_signalfd:
++		*r = __syscall(SYS_signalfd4, a, b, c, 0); break;
++	case L_utimes: case L_futimesat:
++		/* two struct timeval (futimesat: after a directory descriptor) */
++		if (n == L_utimes) { e = b; b = a; a = AT_FDCWD; } else { e = c; }
++		tv = (const long *)e;
++		if (tv) {
++			ts2[0] = tv[0]; ts2[1] = tv[1] * 1000;
++			ts2[2] = tv[2]; ts2[3] = tv[3] * 1000;
++		}
++		*r = __syscall(SYS_utimensat, a, b, tv ? (long)ts2 : 0L, 0); break;
++	case L_utime:
++		/* a struct utimbuf: access time, modification time, in seconds */
++		tv = (const long *)b;
++		if (tv) { ts2[0] = tv[0]; ts2[1] = 0; ts2[2] = tv[1]; ts2[3] = 0; }
++		*r = __syscall(SYS_utimensat, AT_FDCWD, a, tv ? (long)ts2 : 0L, 0); break;
++	case L_time:
++		*r = __syscall(SYS_clock_gettime, 0 /* CLOCK_REALTIME */, ts);
++		if (*r == 0) { *r = ts[0]; if (a) *(long *)a = ts[0]; }
++		break;
++	case L_alarm:
++		/* it_interval 0, it_value a seconds; the answer is what was left,
++		 * rounded up to whole seconds */
++		it[0] = it[1] = 0; it[2] = (unsigned)a; it[3] = 0;
++		*r = __syscall(SYS_setitimer, 0, it, it);
++		if (*r == 0) *r = it[2] + (it[3] > 0);
++		break;
++	case L_getpgrp:
++		*r = __syscall(SYS_getpgid, 0); break;
++	case L_fork:
++		*r = __syscall(SYS_clone, SIGCHLD, 0); break;
++	default:
++		return 0;
++	}
++	return 1;
++}
++#endif
++
+ long syscall(long n, ...)
+ {
+ 	va_list ap;
+@@ -22,5 +151,11 @@
+ 	 * the seccomp filter they put on every app predates it. Answer as an
+ 	 * older kernel would, so callers take their fallback. */
+ 	if (n == SYS_close_range) return __syscall_ret(-ENOSYS);
++#ifdef __x86_64__
++	{
++		long r;
++		if (legacy_syscall(n, a, b, c, d, e, &r)) return __syscall_ret(r);
++	}
++#endif
+ 	return __syscall_ret(__syscall(n,a,b,c,d,e,f));
+ }
+diff -ur a/src/process/x86_64/vfork.s b/src/process/x86_64/vfork.s
+--- a/src/process/x86_64/vfork.s	2026-10-23 19:02:26.257640376 +0300
++++ b/src/process/x86_64/vfork.s	2026-10-23 19:01:12.346331487 +0300
+@@ -1,10 +1,15 @@
+ .global vfork
+ .type vfork,@function
+ vfork:
+-	pop %rdx
+-	mov $58,%eax
++	pop %r9
++	xor %esi,%esi
++	mov $0x4111,%edi   /* CLONE_VM|CLONE_VFORK|SIGCHLD; the vfork syscall is filtered on Android */
++	xor %edx,%edx
++	xor %r10d,%r10d
++	xor %r8d,%r8d
++	mov $56,%eax       /* SYS_clone */
+ 	syscall
+-	push %rdx
++	push %r9
+ 	mov %rax,%rdi
+ 	.hidden __syscall_ret
+ 	jmp __syscall_ret
+diff -ur a/src/unistd/faccessat.c b/src/unistd/faccessat.c
+--- a/src/unistd/faccessat.c	2026-10-23 19:01:04.614824120 +0300
++++ b/src/unistd/faccessat.c	2026-10-23 19:01:10.908325519 +0300
+@@ -26,7 +26,13 @@
+ int faccessat(int fd, const char *filename, int amode, int flag)
+ {
+ 	if (flag) {
++#ifdef __x86_64__
++		/* faccessat2 is killed by Android's app seccomp filter: take the
++		 * emulation below, as on a kernel without it. */
++		int ret = -ENOSYS;
++#else
+ 		int ret = __syscall(SYS_faccessat2, fd, filename, amode, flag);
++#endif
+ 		if (ret != -ENOSYS) return __syscall_ret(ret);
+ 	}
+ 
