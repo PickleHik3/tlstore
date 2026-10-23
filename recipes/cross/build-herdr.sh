@@ -176,7 +176,7 @@ chmod 755 "$stage/libexec/herdr"
 
 cat > "$stage/bin/herdr" <<'EOF'
 #!/bin/sh
-# herdr as tlstore ships it: upstream's own binary, in ../libexec.
+# herdr as tlstore ships it: built from upstream's source for Android, in ../libexec.
 SELF="$0"
 while [ -L "$SELF" ]; do
   LINK="$(readlink "$SELF")"
