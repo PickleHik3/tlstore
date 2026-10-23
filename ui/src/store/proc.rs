@@ -207,14 +207,29 @@ pub struct Output {
 
 impl Task {
     /// Starts `prog args…` in its own process group with stdout piped and non-blocking.
+    /// "Text file busy" is retried a few times: a script just written (a self-update's new
+    /// tlstore, a test's fixture) can still be open for writing in a child another thread
+    /// forked a moment earlier, until that child execs.
     pub fn spawn<S: AsRef<OsStr>>(prog: &OsStr, args: &[S], kind: TaskKind) -> io::Result<Task> {
-        let mut child = Command::new(prog)
-            .args(args)
-            .stdin(Stdio::null())
-            .stderr(Stdio::null())
-            .stdout(Stdio::piped())
-            .process_group(0)
-            .spawn()?;
+        let start = || {
+            Command::new(prog)
+                .args(args)
+                .stdin(Stdio::null())
+                .stderr(Stdio::null())
+                .stdout(Stdio::piped())
+                .process_group(0)
+                .spawn()
+        };
+        let mut tries = 0;
+        let mut child = loop {
+            match start() {
+                Err(e) if e.raw_os_error() == Some(libc::ETXTBSY) && tries < 20 => {
+                    tries += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                r => break r?,
+            }
+        };
         let out = child.stdout.take();
         if let Some(o) = &out {
             let fd = o.as_raw_fd();

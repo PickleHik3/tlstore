@@ -4381,9 +4381,9 @@ if git -C "$repo" show dev:dist/tlstore > "$OLD_TLSTORE" 2>/dev/null; then
     OUT="$(old_env install hello -y)"; ST=$?
     expect_status "it can still install an item from the new catalog" 0
     expect_file "the file landed" "$TESTHOME/.config/hello.conf"
-    # An archive row (Revision 14) is a kind it has never heard of: it lists the item, and
-    # refuses to install it, putting nothing anywhere. That is all an older engine does with
-    # one until it takes the engine the same release carries.
+    # An archive row (Revision 14): an engine from before it lists the item and refuses to
+    # install it, putting nothing anywhere, until it takes the engine the same release
+    # carries. One that knows the kind (do_archive) installs it like any other.
     mkdir -p "$FX/oldapp/bin"
     printf '#!/bin/sh\necho old app\n' > "$FX/oldapp/bin/app"
     chmod 755 "$FX/oldapp/bin/app"
@@ -4398,10 +4398,17 @@ if git -C "$repo" show dev:dist/tlstore > "$OLD_TLSTORE" 2>/dev/null; then
     expect_status "its list still works with an archive row in it" 0
     expect_out "and shows the item" "oldapp"
     OUT="$(old_env install oldapp -y)"; ST=$?
-    if [ "$ST" != 0 ]; then pass; else fail "it refuses to install an archive" "$OUT"; fi
-    expect_no_file "and puts no directory down" "$TESTHOME/.local/lib/oldapp"
-    expect_no_file "nor a wrapper" "$TESTHOME/.local/bin/oldapp"
-    # A skill row (Revision 18) the same: listed, refused, nothing written.
+    if grep -q '^do_archive()' "$OLD_TLSTORE"; then
+        expect_status "it installs an archive, a kind it knows" 0
+        expect_file "and puts the directory down" "$TESTHOME/.local/lib/oldapp/bin/app"
+        expect_file "and its wrapper" "$TESTHOME/.local/bin/oldapp"
+    else
+        if [ "$ST" != 0 ]; then pass; else fail "it refuses to install an archive" "$OUT"; fi
+        expect_no_file "and puts no directory down" "$TESTHOME/.local/lib/oldapp"
+        expect_no_file "nor a wrapper" "$TESTHOME/.local/bin/oldapp"
+    fi
+    # A skill row (Revision 18) the same: an engine from before it lists it, refuses it and
+    # writes nothing; one that knows the kind (do_skill) installs it and links it.
     mkdir -p "$FX/oldsk/oldsk"
     printf 'old skill\n' > "$FX/oldsk/oldsk/SKILL.md"
     tar czf "$FX/oldsk.tgz" -C "$FX/oldsk" oldsk
@@ -4414,9 +4421,15 @@ if git -C "$repo" show dev:dist/tlstore > "$OLD_TLSTORE" 2>/dev/null; then
     expect_status "its list still works with a skill row in it" 0
     expect_out "and shows the item" "oldsk"
     OUT="$(old_env install oldsk -y)"; ST=$?
-    if [ "$ST" != 0 ]; then pass; else fail "it refuses to install a skill" "$OUT"; fi
-    expect_no_file "and puts no directory down" "$TESTHOME/.agents/skills/oldsk"
-    expect_no_file "nor a link" "$TESTHOME/.claude/skills/oldsk"
+    if grep -q '^do_skill()' "$OLD_TLSTORE"; then
+        expect_status "it installs a skill, a kind it knows" 0
+        expect_file "and puts the folder down" "$TESTHOME/.agents/skills/oldsk/SKILL.md"
+        expect_file "and links it" "$TESTHOME/.claude/skills/oldsk/SKILL.md"
+    else
+        if [ "$ST" != 0 ]; then pass; else fail "it refuses to install a skill" "$OUT"; fi
+        expect_no_file "and puts no directory down" "$TESTHOME/.agents/skills/oldsk"
+        expect_no_file "nor a link" "$TESTHOME/.claude/skills/oldsk"
+    fi
     rm -rf "$ROOT"
 else
     skip "dev-branch compatibility check" "no dev branch reachable from this worktree"

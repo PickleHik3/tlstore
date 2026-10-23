@@ -12,10 +12,6 @@ SCRIPTNAME=termux-clipboard-get
 die() { echo "$SCRIPTNAME: $*" >&2; exit 1; }
 command -v launcherctl >/dev/null 2>&1 ||
     die "launcherctl not found; this command needs Termux Launcher (open the app once so it installs launcherctl)"
-lctl() {
-    if LCTL_OUT=$(launcherctl "$@" 2>&1); then return 0; fi
-    die "launcherctl $1 failed${LCTL_OUT:+: $LCTL_OUT}"
-}
 
 show_usage() {
     echo "Usage: $SCRIPTNAME"
@@ -33,12 +29,18 @@ shift $((OPTIND - 1))
 
 if [ $# != 0 ]; then echo "$SCRIPTNAME: too many arguments" >&2; exit 1; fi
 
-lctl clipboard paste </dev/null
+# The reply goes through a file, never a shell variable: dash's $(…) mangles some UTF-8 bytes
+# when no UTF-8 locale is set (ü, C3 BC, comes back C3 81 BC).
+reply=$(mktemp "${TMPDIR:-/tmp}/$SCRIPTNAME.XXXXXX") || die "could not make a temporary file"
+trap 'rm -f "$reply"' EXIT
+if ! launcherctl clipboard paste </dev/null >"$reply" 2>&1; then
+    die "launcherctl clipboard failed: $(cat "$reply")"
+fi
 
 # {"ok":true,"text":"…"} → the text. The awk program undoes the JSON string escapes and writes the
 # result in the form printf %b reads back (\0ooo for every non-ASCII byte, \\ for a backslash),
 # so no byte is left to the shell's or awk's idea of a character.
-decoded=$(printf '%s' "$LCTL_OUT" | LC_ALL=C awk '
+decoded=$(LC_ALL=C awk '
 function hx(h,   i, n, c) {
     n = 0
     for (i = 1; i <= length(h); i++) {
@@ -56,7 +58,13 @@ function utf8(cp) {
     if (cp < 65536) return oct(224 + int(cp / 4096)) oct(128 + int(cp / 64) % 64) oct(128 + cp % 64)
     return oct(240 + int(cp / 262144)) oct(128 + int(cp / 4096) % 64) oct(128 + int(cp / 64) % 64) oct(128 + cp % 64)
 }
-BEGIN { RS = "\001" }
+BEGIN {
+    RS = "\001"
+    # Every byte from 128 up, by value: those go out as \0ooo too, never raw, because dash
+    # mangles some multibyte text held in a variable (it reads bytes 0x81-0x88 as its own
+    # quoting marks), and $decoded is a variable.
+    for (i = 128; i < 256; i++) byte[sprintf("%c", i)] = i
+}
 {
     s = $0
     if (!match(s, /"text"[ \t]*:[ \t]*"/)) exit
@@ -66,7 +74,7 @@ BEGIN { RS = "\001" }
     while (p <= n) {
         c = substr(s, p, 1)
         if (c == "\"") break
-        if (c != "\\") { out = out c; p++; continue }
+        if (c != "\\") { out = out ((c in byte) ? oct(byte[c]) : c); p++; continue }
         d = substr(s, p + 1, 1)
         p += 2
         if (d == "n") out = out "\\n"
@@ -90,5 +98,5 @@ BEGIN { RS = "\001" }
         else out = out d
     }
     printf "%s", out
-}')
+}' "$reply")
 printf '%b' "$decoded"
