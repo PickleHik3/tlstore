@@ -113,10 +113,10 @@ jobs:
             libxinerama-dev libxcursor-dev libxkbcommon-x11-dev libx11-xcb-dev libwayland-dev \
             wayland-protocols libdbus-1-dev libfontconfig-dev
 
-      # kitten needs the NDK only on x86_64, where its link goes through the NDK's clang. herdr,
+      # kitten needs the NDK only on x86_64, where its link goes through the NDK's clang.
       # musl-runtime and launcher-skills are fetched, not built.
       - name: NDK
-        if: matrix.tool != 'musl-runtime' && matrix.tool != 'herdr' && matrix.tool != 'launcher-skills' && (matrix.tool != 'kitten' || matrix.arch == 'x86_64')
+        if: matrix.tool != 'musl-runtime' && matrix.tool != 'launcher-skills' && (matrix.tool != 'kitten' || matrix.arch == 'x86_64')
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" >/dev/null
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
@@ -128,9 +128,10 @@ jobs:
           go-version: stable
           cache: false
 
-      # sigye and terminal-browser (its pixel.node and agent-browser) are Rust, built with the NDK.
+      # sigye, herdr and terminal-browser (its pixel.node and agent-browser) are Rust, built with the
+      # NDK. herdr's recipe downloads its own Zig.
       - name: Rust target
-        if: matrix.tool == 'sigye' || matrix.tool == 'terminal-browser'
+        if: matrix.tool == 'sigye' || matrix.tool == 'herdr' || matrix.tool == 'terminal-browser'
         run: |
           rustup update stable
           rustup target add ${{ matrix.arch }}-linux-android

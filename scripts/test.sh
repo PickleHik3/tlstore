@@ -4729,8 +4729,23 @@ echo "== upstream-watch.sh"
 SHELL_LABEL=upstream-watch
 UW="$(mktemp -d)"
 mkdir -p "$UW/scripts" "$UW/recipes/cross" "$UW/dist" "$UW/bin" "$UW/fx/assets"
-cp "$repo/scripts/upstream-watch.sh" "$UW/scripts/"
-for uw_r in fetch-herdr build-btop build-fastfetch build-kitten build-sigye; do
+# herdr is built from a pinned commit now (a commit-style row), so the asset style, still
+# supported for an upstream's own release binary, is covered by a fixture: the copy's herdr row is
+# the old asset one, over a fixture recipe with an asset recipe's pin lines. The commit style is
+# covered below, against the real build-herdr.sh.
+sed 's#^herdr .*#herdr      herdrdev/herdr           asset=herdr-linux-{arch}  recipes/cross/fetch-herdr.sh      HERDR      herdr#' \
+    "$repo/scripts/upstream-watch.sh" > "$UW/scripts/upstream-watch.sh"
+grep -q 'fetch-herdr.sh' "$UW/scripts/upstream-watch.sh" || fail "the fixture row replaced herdr's"
+cat > "$UW/recipes/cross/fetch-herdr.sh" <<'EOF'
+#!/bin/bash
+# a fixture: an asset-style recipe's pin lines
+HERDR_VERSION=${HERDR_VERSION:-v0.9.5}
+case "$TL_ARCH" in
+    aarch64) HERDR_SHA256=0000000000000000000000000000000000000000000000000000000000000000 ;;
+    x86_64)  HERDR_SHA256=1111111111111111111111111111111111111111111111111111111111111111 ;;
+esac
+EOF
+for uw_r in build-btop build-fastfetch build-kitten build-sigye; do
     cp "$repo/recipes/cross/$uw_r.sh" "$UW/recipes/cross/"
 done
 uw_herdr="$(sed -n 's/^HERDR_VERSION=\${HERDR_VERSION:-v\([^}]*\)}$/\1/p' "$UW/recipes/cross/fetch-herdr.sh")"
@@ -4823,6 +4838,36 @@ if [ "$(uw_col herdr 7)" = yes ]; then pass; else fail "and a release is owed: n
 uw --bump herdr 99.0.0
 expect_out "a second bump to the same tag has nothing to do" "already at 99.0.0"
 if [ "$(uw_ver herdr)" = "99.0.0+tl.0" ]; then pass; else fail "and leaves the row alone" "$(uw_ver herdr)"; fi
+rm -rf "$UW"
+
+# The commit style, with the real herdr recipe: a bump moves the commit (with its # v<tag> comment)
+# and the version, and the row to <version>+tl.0. git ls-remote answers from a stub.
+UW="$(mktemp -d)"
+mkdir -p "$UW/scripts" "$UW/recipes/cross" "$UW/dist" "$UW/bin" "$UW/fx"
+cp "$repo/scripts/upstream-watch.sh" "$UW/scripts/"
+cp "$repo/recipes/cross/build-herdr.sh" "$UW/recipes/cross/"
+uw_herdr="$(sed -n 's/^HERDR_VERSION="\([^"]*\)".*/\1/p' "$UW/recipes/cross/build-herdr.sh")"
+cat > "$UW/bin/gh" <<'EOF'
+#!/bin/sh
+# gh api repos/<owner>/<repo>/releases/latest --jq .tag_name
+r="${2#repos/}"; r="${r%/releases/latest}"
+awk -v r="$r" '$1 == r { print $2; f = 1 } END { exit !f }' "$UW_FX/latest"
+EOF
+cat > "$UW/bin/git" <<'EOF'
+#!/bin/sh
+# git ls-remote <url> <refs...>: one peeled commit for the tag
+printf '%s\trefs/tags/v99.0.0^{}\n' 0123456789abcdef0123456789abcdef01234567
+EOF
+chmod 755 "$UW/bin/gh" "$UW/bin/git"
+printf 'herdrdev/herdr v99.0.0\n' > "$UW/fx/latest"
+printf 'herdr\tarchive\t%s+tl.3\t*\tbinaries:herdr@bins-1\t-\t-\t-\tTools\t-\n' "$uw_herdr" > "$UW/scripts/items.tsv"
+uw --check --tsv
+if [ "$(uw_col herdr 5)" = behind ] && [ "$(uw_col herdr 2)" = "$uw_herdr" ]; then pass; else fail "herdr (commit style) reads its version from the recipe and is behind" "$(uw_col herdr 0)"; fi
+uw --bump herdr
+expect_status "--bump herdr, commit style" 0
+if grep -qx 'HERDR_COMMIT="0123456789abcdef0123456789abcdef01234567"   # v99.0.0' "$UW/recipes/cross/build-herdr.sh" &&
+    grep -qx 'HERDR_VERSION="99.0.0"' "$UW/recipes/cross/build-herdr.sh"; then pass; else fail "the commit and version pins move"; fi
+if [ "$(uw_ver herdr)" = "99.0.0+tl.0" ]; then pass; else fail "and the row goes to 99.0.0+tl.0" "$(uw_ver herdr)"; fi
 rm -rf "$UW"
 
 echo
