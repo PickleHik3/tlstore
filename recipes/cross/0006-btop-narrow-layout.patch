@@ -1,6 +1,6 @@
 --- a/src/btop_config.cpp
 +++ b/src/btop_config.cpp
-@@ -251,10 +251,22 @@ namespace Config {
+@@ -272,10 +272,22 @@ namespace Config {
  
  	std::unordered_map<std::string_view, string> strings = {
  		{"color_theme", "Default"},
@@ -25,7 +25,7 @@
  		{"graph_symbol_mem", "default"},
 --- a/src/btop_draw.cpp
 +++ b/src/btop_draw.cpp
-@@ -305,8 +305,11 @@ namespace Draw {
+@@ -332,8 +332,11 @@ namespace Draw {
  
  	bool update_clock(bool force) {
  		const auto& clock_format = Config::getS("clock_format");
@@ -39,7 +39,7 @@
  			return false;
  		}
  
-@@ -518,6 +521,9 @@ namespace Draw {
+@@ -545,6 +548,9 @@ namespace Draw {
  namespace Cpu {
  	int width_p = 100, height_p = 32;
  	int min_width = 60, min_height = 8;
@@ -49,7 +49,7 @@
  	int x = 1, y = 1, width = 20, height;
  	int b_columns, b_column_size;
  	int b_x, b_y, b_width, b_height;
-@@ -606,8 +612,9 @@ namespace Cpu {
+@@ -637,8 +643,9 @@ namespace Cpu {
  			Input::mouse_mappings["-"] = {button_y, x + width - (int)update.size() - 7, 1, 2};
  			Input::mouse_mappings["+"] = {button_y, x + width - 5, 1, 2};
  
@@ -61,7 +61,7 @@
  				fmt::format_to(std::back_inserter(out), "{}{}{}{}{}", Mv::to(button_y, x + 28), title_left, Theme::c("title"), Cpu::container_engine.value(), title_right);
  			}
  
-@@ -731,8 +738,8 @@ namespace Cpu {
+@@ -762,8 +769,8 @@ namespace Cpu {
  			}
  		}
  
@@ -72,7 +72,7 @@
  			static int old_percent{};   // defaults to = 0
  			static long old_seconds{};  // defaults to = 0
  			static float old_watts{};	// defaults to = 0
-@@ -770,7 +777,8 @@ namespace Cpu {
+@@ -801,7 +808,8 @@ namespace Cpu {
  			}
  		}
  		else if (bat_pos > 0) {
@@ -82,7 +82,7 @@
  			bat_pos = bat_len = 0;
  		}
  
-@@ -1191,6 +1199,9 @@ namespace Gpu {
+@@ -1222,6 +1230,9 @@ namespace Gpu {
  namespace Mem {
  	int width_p = 45, height_p = 40;
  	int min_width = 36, min_height = 10;
@@ -92,7 +92,7 @@
  	int x = 1, y, width = 20, height;
  	int mem_width, disks_width, divider, item_height, mem_size, mem_meter, graph_height, disk_meter;
  	int disks_io_h = 0;
-@@ -1457,6 +1468,8 @@ namespace Mem {
+@@ -1488,6 +1499,8 @@ namespace Mem {
  namespace Net {
  	int width_p = 45, height_p = 28;
  	int min_width = 36, min_height = 6;
@@ -101,7 +101,7 @@
  	int x = 1, y, width = 20, height;
  	int b_x, b_y, b_width, b_height, d_graph_height, u_graph_height;
  	bool shown = true, redraw = true;
-@@ -1572,6 +1585,8 @@ namespace Net {
+@@ -1603,6 +1616,8 @@ namespace Net {
  namespace Proc {
  	int width_p = 55, height_p = 68;
  	int min_width = 44, min_height = 16;
@@ -110,7 +110,7 @@
  	int x, y, width = 20, height;
  	int start, selected, select_max;
  	bool shown = true, redraw = true;
-@@ -2239,6 +2254,48 @@ namespace Draw {
+@@ -2270,6 +2285,48 @@ namespace Draw {
  		Net::shown = boxes.contains("net");
  		Proc::shown = boxes.contains("proc");
  
@@ -159,7 +159,7 @@
  		//* Calculate and draw cpu box outlines
  		if (Cpu::shown) {
  			using namespace Cpu;
-@@ -2250,6 +2307,13 @@ namespace Draw {
+@@ -2281,6 +2338,13 @@ namespace Draw {
  				: 0;
  		#endif
              const bool show_temp = (Config::getB("check_temp") and got_sensors);
@@ -173,7 +173,7 @@
  			width = round((double)Term::width * width_p / 100);
  		#ifdef GPU_SUPPORT
  			if (Gpu::shown != 0 and not (Mem::shown or Net::shown or Proc::shown)) {
-@@ -2263,6 +2327,7 @@ namespace Draw {
+@@ -2294,6 +2358,7 @@ namespace Draw {
  		#endif
  			x = 1;
  			y = cpu_bottom ? Term::height - height + 1 : 1;
@@ -181,7 +181,7 @@
  
  		#ifdef GPU_SUPPORT
  			b_columns = max(2, (int)ceil((double)(Shared::coreCount + 1) / (height - gpus_extra_height - 5)));
-@@ -2370,6 +2435,13 @@ namespace Draw {
+@@ -2401,6 +2466,13 @@ namespace Draw {
  			auto swap_disk = Config::getB("swap_disk");
  			auto mem_graphs = Config::getB("mem_graphs");
  
@@ -195,7 +195,7 @@
  			width = round((double)Term::width * (Proc::shown ? width_p : 100) / 100);
  		#ifdef GPU_SUPPORT
  			height = floor(static_cast<double>(Term::height) * (100 - Net::height_p * Net::shown*4 / ((Gpu::shown != 0 and Cpu::shown) + 4)) / 100) - Cpu::height - Gpu::total_height;
-@@ -2387,6 +2459,7 @@ namespace Draw {
+@@ -2418,6 +2490,7 @@ namespace Draw {
  			else
  				y = cpu_bottom ? 1 : Cpu::height + 1;
  		#endif
@@ -203,7 +203,7 @@
  
  			if (show_disks) {
  				mem_width = ceil((double)(width - 3) / 2);
-@@ -2434,6 +2507,13 @@ namespace Draw {
+@@ -2465,6 +2538,13 @@ namespace Draw {
  		//* Calculate and draw net box outlines
  		if (Net::shown) {
  			using namespace Net;
@@ -217,7 +217,7 @@
  			width = round((double)Term::width * (Proc::shown ? width_p : 100) / 100);
  		#ifdef GPU_SUPPORT
  			height = Term::height - Cpu::height - Gpu::total_height - Mem::height;
-@@ -2449,6 +2529,7 @@ namespace Draw {
+@@ -2480,6 +2560,7 @@ namespace Draw {
  			#endif
  			else
  				y = Term::height - height + 1 - (cpu_bottom ? Cpu::height : 0);
@@ -225,7 +225,7 @@
  
  			b_width = (width > 45) ? 27 : 19;
  			b_height = (height > 10) ? 9 : height - 2;
-@@ -2468,6 +2549,13 @@ namespace Draw {
+@@ -2499,6 +2580,13 @@ namespace Draw {
  		//* Calculate and draw proc box outlines
  		if (Proc::shown) {
  			using namespace Proc;
@@ -239,7 +239,7 @@
  			width = Term::width - (Mem::shown ? Mem::width : (Net::shown ? Net::width : 0));
  		#ifdef GPU_SUPPORT
  			height = Term::height - Cpu::height - Gpu::total_height;
-@@ -2480,6 +2568,14 @@ namespace Draw {
+@@ -2511,6 +2599,14 @@ namespace Draw {
  		#else
  			y = (cpu_bottom and Cpu::shown) ? 1 : Cpu::height + 1;
  		#endif
@@ -257,9 +257,9 @@
 --- a/src/btop_input.cpp
 +++ b/src/btop_input.cpp
 @@ -272,7 +272,19 @@ namespace Input {
+ 					}
  					else Config::current_preset = (key == "p") ? first_preset : Config::preset_list.size() - 1;
  					if (Config::current_preset == old_preset) return;
- 					atomic_wait(Runner::active);
 -					if (not Config::apply_preset(Config::preset_list.at(Config::current_preset.value()))) {
 +					//? Step past presets the terminal cannot hold (a phone at its normal zoom holds
 +					//? three boxes, not four); the size error is for when none of them fits
@@ -290,7 +290,7 @@
  						Config::set("proc_last_selected", Config::getI("proc_selected"));
 --- a/src/btop_shared.hpp
 +++ b/src/btop_shared.hpp
-@@ -201,6 +201,7 @@ namespace Gpu {
+@@ -208,6 +208,7 @@ namespace Gpu {
  namespace Cpu {
  	extern string box;
  	extern int x, y, width, height, min_width, min_height;
@@ -298,7 +298,7 @@
  	extern bool shown, redraw, got_sensors, cpu_temp_only, has_battery, supports_watts;
  	extern string cpuName, cpuHz;
  	extern vector<string> available_fields;
-@@ -258,6 +259,7 @@ namespace Cpu {
+@@ -265,6 +266,7 @@ namespace Cpu {
  namespace Mem {
  	extern string box;
  	extern int x, y, width, height, min_width, min_height;
@@ -306,7 +306,7 @@
  	extern bool has_swap, shown, redraw;
  	const array mem_names { "used"s, "available"s, "cached"s, "free"s };
  	const array swap_names { "swap_used"s, "swap_free"s };
-@@ -305,6 +307,7 @@ namespace Mem {
+@@ -312,6 +314,7 @@ namespace Mem {
  namespace Net {
  	extern string box;
  	extern int x, y, width, height, min_width, min_height;
@@ -314,7 +314,7 @@
  	extern bool shown, redraw;
  	extern string selected_iface;
  	extern vector<string> interfaces;
-@@ -357,6 +360,7 @@ namespace Proc {
+@@ -364,6 +367,7 @@ namespace Proc {
  
  	extern string box;
  	extern int x, y, width, height, min_width, min_height;
@@ -382,7 +382,7 @@
  	#endif
 --- a/src/btop_tools.hpp
 +++ b/src/btop_tools.hpp
-@@ -146,6 +146,10 @@ namespace Term {
+@@ -149,6 +149,10 @@ namespace Term {
  	//* Returns true if terminal has been resized and updates width and height
  	bool refresh(bool only_check=false);
  

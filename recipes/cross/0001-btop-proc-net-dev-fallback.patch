@@ -1,6 +1,6 @@
 --- a/src/linux/btop_collect.cpp
 +++ b/src/linux/btop_collect.cpp
-@@ -27,6 +27,7 @@
+@@ -27,6 +27,7 @@ tab-size = 4
  #include <numeric>
  #include <optional>
  #include <ranges>
@@ -8,7 +8,7 @@
  #include <string_view>
  #include <unordered_map>
  #include <unordered_set>
-@@ -2673,6 +2674,26 @@
+@@ -2888,6 +2889,26 @@ namespace Net {
  	bool rescale{true};
  	uint64_t timestamp{};
  
@@ -35,7 +35,7 @@
  	auto collect(bool no_update) -> net_info& {
  		if (Runner::stopping) return empty_net;
  		auto& net = current_net;
-@@ -2741,6 +2762,10 @@
+@@ -2956,6 +2977,10 @@ namespace Net {
  			}
  
  			//? Get total received and transmitted bytes + device address if no ip was found
@@ -46,7 +46,7 @@
  			for (const auto& iface : interfaces) {
  				auto& netif = net.at(iface);
  				if (netif.ipv4.empty() and netif.ipv6.empty())
-@@ -2752,9 +2777,20 @@
+@@ -2967,9 +2992,20 @@ namespace Net {
  					auto& bandwidth = netif.bandwidth.at(dir);
  
  					uint64_t val{};
