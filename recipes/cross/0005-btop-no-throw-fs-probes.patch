@@ -1,6 +1,6 @@
 --- a/src/btop_tools.cpp
 +++ b/src/btop_tools.cpp
-@@ -562,7 +562,8 @@ namespace Tools {
+@@ -622,7 +622,8 @@ namespace Tools {
  	}
  
  	string readfile(const std::filesystem::path& path, const string& fallback) {
@@ -32,7 +32,7 @@
  using std::future;
  using std::async;
  using std::pair;
-@@ -348,7 +361,7 @@ namespace Shared {
+@@ -371,7 +384,7 @@ namespace Shared {
  
  		for (int i = 0; i < Shared::coreCount; ++i) {
  			Cpu::core_freq.push_back("/sys/devices/system/cpu/cpufreq/policy" + to_string(i) + "/scaling_cur_freq");
@@ -41,7 +41,7 @@
  				Cpu::core_freq.pop_back();
  			}
  		}
-@@ -445,7 +458,7 @@ namespace Cpu {
+@@ -469,7 +482,7 @@ namespace Cpu {
  				cpuinfo.ignore(1);
  				getline(cpuinfo, name);
  			}
@@ -50,7 +50,7 @@
  				for (const auto& d : fs::directory_iterator("/sys/devices")) {
  					if (string(d.path().filename()).starts_with("arm")) {
  						name = d.path().filename();
-@@ -471,7 +484,7 @@ namespace Cpu {
+@@ -495,7 +508,7 @@ namespace Cpu {
  		vector<fs::path> search_paths;
  		try {
  			//? Setup up paths to search for sensors
@@ -59,7 +59,7 @@
  				for (const auto& dir : fs::directory_iterator(fs::path("/sys/class/hwmon"))) {
  					fs::path add_path = fs::canonical(dir.path());
  					if (v_contains(search_paths, add_path) or v_contains(search_paths, add_path / "device")) continue;
-@@ -498,7 +511,7 @@ namespace Cpu {
+@@ -522,7 +535,7 @@ namespace Cpu {
  					}
  				}
  			}
@@ -68,7 +68,7 @@
  				for (auto& d : fs::directory_iterator(fs::path("/sys/devices/platform/coretemp.0/hwmon"))) {
  					fs::path add_path = fs::canonical(d.path());
  
-@@ -545,18 +558,18 @@ namespace Cpu {
+@@ -569,18 +582,18 @@ namespace Cpu {
  				}
  			}
  			//? If no good candidate for cpu temp has been found scan /sys/class/thermal
@@ -91,7 +91,7 @@
  						const string trip_type = readfile(basepath / fmt::format("trip_point_{}_type", ii));
  						if (not is_in(trip_type, "high", "critical")) continue;
  						auto& val = (trip_type == "high" ? high : crit);
-@@ -817,7 +830,7 @@ namespace Cpu {
+@@ -841,7 +854,7 @@ namespace Cpu {
  		//? Get paths to needed files and check for valid values on first run
  		if (batteries.empty() and has_battery) {
  			try {
@@ -100,7 +100,7 @@
  					for (const auto& d : fs::directory_iterator("/sys/class/power_supply")) {
  						//? Only consider online power supplies of type Battery or UPS
  						//? see kernel docs for details on the file structure and contents
-@@ -826,8 +839,8 @@ namespace Cpu {
+@@ -850,8 +863,8 @@ namespace Cpu {
  						fs::path bat_dir;
  						try {
  							if (not d.is_directory()
@@ -111,7 +111,7 @@
  								or stoi(readfile(d.path() / "present")) != 1)
  								continue;
  							string dev_type = readfile(d.path() / "type");
-@@ -841,22 +854,22 @@ namespace Cpu {
+@@ -865,22 +878,22 @@ namespace Cpu {
  							continue;
  						}
  
@@ -141,7 +141,7 @@
  							 new_bat.current_now = bat_dir / "current_now";
  							 new_bat.voltage_now = bat_dir / "voltage_now";
  						}
-@@ -864,8 +877,8 @@ namespace Cpu {
+@@ -888,8 +901,8 @@ namespace Cpu {
  							new_bat.use_power = false;
  						}
  
@@ -152,7 +152,7 @@
  
  						batteries[bat_dir.filename()] = new_bat;
  						Config::available_batteries.push_back(bat_dir.filename());
-@@ -954,7 +967,7 @@ namespace Cpu {
+@@ -978,7 +991,7 @@ namespace Cpu {
  				}
  			}
  
@@ -161,7 +161,7 @@
  				try {
  					seconds = stoll(readfile(b.base_dir / "time_to_empty", "0")) * 60;
  				}
-@@ -2215,7 +2228,8 @@ namespace Mem {
+@@ -2430,7 +2443,8 @@ namespace Mem {
  			try {
  				auto& disks_filter = Config::getS("disks_filter");
  				bool filter_exclude = false;
@@ -171,7 +171,7 @@
  				auto only_physical = Config::getB("only_physical");
  				auto zfs_hide_datasets = Config::getB("zfs_hide_datasets");
  				auto& disks = mem.disks;
-@@ -2273,7 +2287,7 @@ namespace Mem {
+@@ -2488,7 +2502,7 @@ namespace Mem {
  				}
  
  				//? Get mounts from /etc/mtab or /proc/self/mounts
@@ -180,7 +180,7 @@
  				if (diskread.good()) {
  					vector<string> found;
  					found.reserve(last_found.size());
-@@ -2324,9 +2338,9 @@ namespace Mem {
+@@ -2539,9 +2553,9 @@ namespace Mem {
  								int c = 0;
  								while (devname.size() >= 2) {
  									const auto stat = fmt::format("/sys/block/{}/stat", devname);
@@ -192,7 +192,7 @@
  											disks.at(mountpoint).stat = std::move(mount_stat);
  										else
  											disks.at(mountpoint).stat = std::move(stat);
-@@ -2977,7 +2991,7 @@ namespace Proc {
+@@ -3192,7 +3206,7 @@ namespace Proc {
  
  		//? Try to get RSS mem from proc/[pid]/smaps
  		detailed.memory.clear();
@@ -201,7 +201,7 @@
  			d_read.open(pid_path / "smaps");
  			uint64_t rss = 0;
  			try {
-@@ -3012,7 +3026,7 @@ namespace Proc {
+@@ -3227,7 +3241,7 @@ namespace Proc {
  		while (cmp_greater(detailed.mem_bytes.size(), width)) detailed.mem_bytes.pop_front();
  
  		//? Get bytes read and written from proc/[pid]/io

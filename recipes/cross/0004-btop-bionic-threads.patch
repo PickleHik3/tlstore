@@ -1,6 +1,6 @@
 --- a/src/btop.cpp
 +++ b/src/btop.cpp
-@@ -208,6 +208,17 @@
+@@ -207,6 +207,17 @@ void term_resize(bool force) {
  	Input::interrupt();
  }
  
@@ -18,9 +18,9 @@
  //* Exit handler; stops threads, restores terminal and saves config changes
  void clean_quit(int sig) {
  	if (Global::quitting) return;
-@@ -219,6 +230,11 @@
+@@ -217,6 +228,11 @@ void clean_quit(int sig) {
+ 		if (pthread_join(Runner::runner_id, nullptr) != 0) {
  			Logger::warning("Failed to join _runner thread on exit!");
- 			pthread_cancel(Runner::runner_id);
  		}
 +	#elif defined __ANDROID__
 +		//? Bionic has no pthread_cancel either: a runner that did not finish in time is left behind.
@@ -30,22 +30,3 @@
  	#else
  		constexpr struct timespec ts { .tv_sec = 5, .tv_nsec = 0 };
  		if (pthread_timedjoin_np(Runner::runner_id, nullptr, &ts) != 0) {
-@@ -742,6 +758,10 @@
- 			Logger::error("Stall in Runner thread, restarting!");
- 			set_active(false);
- 			// exit(1);
-+		#ifdef __ANDROID__
-+			//? Bionic cannot cancel a thread. The stalled runner is abandoned where it is — the
-+			//? pthread_create below gives runner_id to its replacement and nothing joins the old one.
-+		#else
- 			pthread_cancel(Runner::runner_id);
- 
- 			// Wait for the thread to actually terminate before creating a new one
-@@ -750,6 +770,7 @@
- 			if (join_result != 0) {
- 				Logger::warning("Failed to join cancelled thread: {}", strerror(join_result));
- 			}
-+		#endif
- 
- 			if (pthread_create(&Runner::runner_id, nullptr, &Runner::_runner, nullptr) != 0) {
- 				Global::exit_error_msg = "Failed to re-create _runner thread!";

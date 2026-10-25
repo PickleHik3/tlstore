@@ -1,6 +1,6 @@
 --- a/src/btop_config.cpp
 +++ b/src/btop_config.cpp
-@@ -77,7 +77,7 @@ namespace Config {
+@@ -95,7 +95,7 @@ namespace Config {
  								"#* Example: \"cpu:0:default,mem:0:tty,proc:1:default cpu:0:braille,proc:0:tty\""},
  
  		{"vim_keys",			"#* Set to True to enable \"h,j,k,l,g,G\" keys for directional control in lists.\n"
@@ -11,7 +11,7 @@
  		{"rounded_corners",		"#* Rounded corners on boxes, is ignored if TTY mode is ON."},
 --- a/src/btop_draw.cpp
 +++ b/src/btop_draw.cpp
-@@ -1683,7 +1683,6 @@ namespace Proc {
+@@ -1714,7 +1714,6 @@ namespace Proc {
  		auto& graph_symbol = (tty_mode ? "tty" : Config::getS("graph_symbol_proc"));
  		auto& graph_bg = Symbols::graph_symbols.at((graph_symbol == "default" ? Config::getS("graph_symbol") + "_up" : graph_symbol + "_up")).at(6);
  		auto mem_bytes = Config::getB("proc_mem_bytes");
@@ -19,7 +19,7 @@
  		auto show_graphs = Config::getB("proc_cpu_graphs");
  		const auto pause_proc_list = Config::getB("pause_proc_list");
  		auto follow_process = Config::getB("follow_process");
-@@ -1812,23 +1811,7 @@ namespace Proc {
+@@ -1843,23 +1842,7 @@ namespace Proc {
  				const string t_color = (not alive or selected > 0 ? Theme::c("inactive_fg") : Theme::c("title"));
  				const string hi_color = (not alive or selected > 0 ? t_color : Theme::c("hi_fg"));
  				int mouse_x = d_x + 2;
@@ -44,7 +44,7 @@
  				if (width > 77) {
  				    fmt::format_to(std::back_inserter(out), "{}{}{}{}{}{}{}{}",
  				    	title_left, follow_process ? Fx::b : "",
-@@ -1924,22 +1907,6 @@ namespace Proc {
+@@ -1955,22 +1938,6 @@ namespace Proc {
  				+ title_left_down + Fx::b + t_color + "info " + hi_color + Symbols::enter + Fx::ub + title_right_down;
  				if (selected > 0) Input::mouse_mappings["info_enter"] = {y + height - 1, mouse_x, 1, 6};
  				mouse_x += 8;
@@ -77,9 +77,9 @@
  			//? Global input actions
  			if (not filtering) {
  				bool keep_going = false;
-@@ -499,24 +498,6 @@ namespace Input {
- 						no_update = false;
- 					}
+@@ -501,24 +500,6 @@ namespace Input {
+ 					else
+ 						keep_going = true;
  				}
 -				else if (is_in(key, "t", kill_key) and (Config::getB("show_detailed") or Config::getI("selected_pid") > 0)) {
 -					atomic_wait(Runner::active);
@@ -112,7 +112,7 @@
  
  #include <array>
  #include <cmath>
-@@ -55,79 +54,6 @@ namespace Menu {
+@@ -58,79 +57,6 @@ namespace Menu {
     bool redraw{true};
     int currentMenu = -1;
     msgBox messageBox;
@@ -192,7 +192,7 @@
    std::unordered_map<string, Input::Mouse_loc> mouse_mappings;
  
     const array<array<string, 3>, 3> menu_normal = {
-@@ -208,10 +134,6 @@ namespace Menu {
+@@ -211,10 +137,6 @@ namespace Menu {
  		{"E", "Collapse/expand all processes in tree view."},
  		{"%", "Toggles memory display mode in processes box."},
  		{"Selected +, -", "Expand/collapse the selected process in tree view."},
@@ -203,7 +203,7 @@
  		{"", " "},
  		{"", "For bug reporting and project updates, visit:"},
  		{"", "https://github.com/aristocratos/btop"},
-@@ -259,8 +181,8 @@ namespace Menu {
+@@ -262,8 +184,8 @@ namespace Menu {
  				"Set to True to enable \"h,j,k,l\" keys for",
  				"directional control in lists.",
  				"",
@@ -214,7 +214,7 @@
  				"is accessible while holding shift."},
  			{"disable_mouse",
  				"Disable all mouse events."},
-@@ -981,122 +903,6 @@ namespace Menu {
+@@ -998,122 +920,6 @@ namespace Menu {
  		Switch
  	};
  
@@ -337,7 +337,7 @@
  	static int sizeError(const string& key) {
  		if (redraw) {
  			vector<string> cont_vec {
-@@ -1119,86 +925,6 @@ namespace Menu {
+@@ -1136,86 +942,6 @@ namespace Menu {
  		return NoChange;
  	}
  
@@ -424,7 +424,7 @@
  	static int mainMenu(const string& key) {
  		enum MenuItems { Options, Help, Quit };
  		static int y{};
-@@ -1725,111 +1451,11 @@ static int optionsMenu(const string& key) {
+@@ -1793,111 +1519,11 @@ static int optionsMenu(const string& key) {
  		return (redraw ? Changed : retval);
  	}
  
@@ -536,7 +536,7 @@
  		ref(mainMenu),
  	};
  	bitset<8> menuMask;
-@@ -1851,7 +1477,7 @@ static int optionsMenu(const string& key) {
+@@ -1919,7 +1545,7 @@ static int optionsMenu(const string& key) {
  		if (currentMenu < 0 or not menuMask.test(currentMenu)) {
  			Menu::active = true;
  			redraw = true;
@@ -545,7 +545,7 @@
  			and (Term::width < 80 or Term::height < 24))
  			or (Term::width < 50 or Term::height < 20)) {
  				menuMask.reset();
-@@ -1887,9 +1513,8 @@ static int optionsMenu(const string& key) {
+@@ -1955,9 +1581,8 @@ static int optionsMenu(const string& key) {
  		}
  	}
  

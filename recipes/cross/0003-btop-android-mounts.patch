@@ -1,6 +1,6 @@
 --- a/src/linux/btop_collect.cpp
 +++ b/src/linux/btop_collect.cpp
-@@ -2286,6 +2286,13 @@
+@@ -2501,6 +2501,13 @@ namespace Mem {
  						// A mountpoint can ascii escape codes, which will not work with `statvfs`.
  						mountpoint = convert_ascii_escapes(mountpoint);
  
@@ -14,7 +14,7 @@
  						if (v_contains(ignore_list, mountpoint) or v_contains(found, mountpoint)) continue;
  
  						//? Match filter if not empty
-@@ -2419,6 +2426,11 @@
+@@ -2634,6 +2641,11 @@ namespace Mem {
  				#else
  					if (disks.contains("/")) mem.disks_order.push_back("/");
  				#endif
@@ -26,7 +26,7 @@
  				if (swap_disk and has_swap) {
  					mem.disks_order.push_back("swap");
  					if (not disks.contains("swap")) disks["swap"] = {"", "swap", "swap"};
-@@ -2431,6 +2443,8 @@
+@@ -2646,6 +2658,8 @@ namespace Mem {
  				for (const auto& name : last_found)
  					#ifdef SNAPPED
  						if (not is_in(name, "/mnt", "swap")) mem.disks_order.push_back(name);
