@@ -1,0 +1,29 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PickleHik3 <noreply@example.invalid>
+Date: Mon, 26 Oct 2026 12:00:00 +0000
+Subject: [PATCH 32/32] Torch manager: do not post the state it already has
+
+A tap on the torch quick setting posted /v1/torch twice. The reply moves the manager's
+brightness, settings.c's on_torch_brightness_changed() sets the (hidden) torch scale to match, and
+the scale's value-changed handler on_torch_scale_value_changed() calls
+phosh_torch_manager_set_scaled_brightness() with the state just reached, which posted it again.
+set_scaled_brightness now returns when the wanted state is the current one.
+---
+ src/torch-manager-tl.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+--- a/src/torch-manager-tl.c
++++ b/src/torch-manager-tl.c
+@@ -323,6 +323,12 @@
+   if (!self->present)
+     return;
+ 
++  /* The settings panel's (hidden) brightness scale calls this whenever the state it follows
++   * changes, which posted the state the launcher had just answered a second time. The torch is
++   * on or off here, so a wanted state equal to the current one is nothing to post. */
++  if ((frac > 0.0) == !!self->brightness)
++    return;
++
+   set_enabled (self, frac > 0.0);
+ }
+ 
