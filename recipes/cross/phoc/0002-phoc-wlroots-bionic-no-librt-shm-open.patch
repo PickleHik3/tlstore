@@ -1,0 +1,109 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PickleHik3 <noreply@users.noreply.github.com>
+Date: Mon, 26 Oct 2026 11:13:49 +0300
+Subject: [PATCH 2/2] wlroots: build on Bionic (no librt, no shm_open)
+
+Two patches for the wlroots subproject, applied by its wrap: librt is optional (Bionic's libc has
+clock_gettime and friends), and util/shm.c uses memfd_create on Android, which has no shm_open.
+---
+ .../wlroots/tl/0001-bionic-no-librt.patch     | 14 +++++
+ .../wlroots/tl/0002-bionic-no-shm-open.patch  | 53 +++++++++++++++++++
+ subprojects/wlroots.wrap                      |  4 +-
+ 3 files changed, 70 insertions(+), 1 deletion(-)
+ create mode 100644 subprojects/packagefiles/wlroots/tl/0001-bionic-no-librt.patch
+ create mode 100644 subprojects/packagefiles/wlroots/tl/0002-bionic-no-shm-open.patch
+
+diff --git a/subprojects/packagefiles/wlroots/tl/0001-bionic-no-librt.patch b/subprojects/packagefiles/wlroots/tl/0001-bionic-no-librt.patch
+new file mode 100644
+index 0000000..602277d
+--- /dev/null
++++ b/subprojects/packagefiles/wlroots/tl/0001-bionic-no-librt.patch
+@@ -0,0 +1,14 @@
++Termux Launcher: bionic has no librt (clock_gettime, timers and shm_open are in libc), so
++the library is optional.
++
++--- a/meson.build
+++++ b/meson.build
++@@ -121,7 +121,7 @@
++ 	default_options: ['werror=false'],
++ )
++ math = cc.find_library('m')
++-rt = cc.find_library('rt')
+++rt = cc.find_library('rt', required: false)
++ 
++ wlr_files = []
++ wlr_deps = [
+diff --git a/subprojects/packagefiles/wlroots/tl/0002-bionic-no-shm-open.patch b/subprojects/packagefiles/wlroots/tl/0002-bionic-no-shm-open.patch
+new file mode 100644
+index 0000000..a45b244
+--- /dev/null
++++ b/subprojects/packagefiles/wlroots/tl/0002-bionic-no-shm-open.patch
+@@ -0,0 +1,53 @@
++Termux Launcher: bionic has no shm_open(); use memfd_create on Android.
++
++--- a/util/shm.c
+++++ b/util/shm.c
++@@ -9,6 +9,31 @@
++ #include "util/shm.h"
++ 
++ #define RANDNAME_PATTERN "/wlroots-XXXXXX"
+++
+++#ifdef __ANDROID__
+++// Bionic has no shm_open(): an anonymous memfd stands in, and its read-only twin is the same file
+++// opened again through /proc/self/fd.
+++#include <stdio.h>
+++#include <sys/syscall.h>
+++
+++static int excl_shm_open(char *name) {
+++	(void)name;
+++	return syscall(SYS_memfd_create, "wlroots", 1U /* MFD_CLOEXEC */);
+++}
+++
+++static int shm_open_ro(const char *name, int rw_fd) {
+++	(void)name;
+++	char path[64];
+++	snprintf(path, sizeof(path), "/proc/self/fd/%d", rw_fd);
+++	return open(path, O_RDONLY | O_CLOEXEC);
+++}
+++
+++#define shm_unlink(name) ((void)(name))
+++#else
+++static int shm_open_ro(const char *name, int rw_fd) {
+++	(void)rw_fd;
+++	return shm_open(name, O_RDONLY, 0);
+++}
++ 
++ static void randname(char *buf) {
++ 	struct timespec ts;
++@@ -35,6 +60,7 @@
++ 
++ 	return -1;
++ }
+++#endif
++ 
++ int allocate_shm_file(size_t size) {
++ 	char name[] = RANDNAME_PATTERN;
++@@ -64,7 +90,7 @@
++ 	}
++ 
++ 	// CLOEXEC is guaranteed to be set by shm_open
++-	int ro_fd = shm_open(name, O_RDONLY, 0);
+++	int ro_fd = shm_open_ro(name, rw_fd);
++ 	if (ro_fd < 0) {
++ 		shm_unlink(name);
++ 		close(rw_fd);
+diff --git a/subprojects/wlroots.wrap b/subprojects/wlroots.wrap
+index 16be50c..8192c1b 100644
+--- a/subprojects/wlroots.wrap
++++ b/subprojects/wlroots.wrap
+@@ -10,4 +10,6 @@ diff_files =
+   wlroots/text-input-v2/0002-text-input-Add-version-2-events.patch,
+   wlroots/text-input-v2/0003-text-input-v3-Add-version-2-requests.patch,
+   wlroots/text-input-v2/0004-text-input-v3-Bump-protocol-version-to-2.patch,
+-  wlroots/0001-Revert-layer-shell-error-on-0-dimension-without-anch.patch
++  wlroots/0001-Revert-layer-shell-error-on-0-dimension-without-anch.patch,
++  wlroots/tl/0001-bionic-no-librt.patch,
++  wlroots/tl/0002-bionic-no-shm-open.patch
+-- 
+2.56.0
+

@@ -4637,7 +4637,7 @@ expect_out "on each processor" '"asset":"musl-libgcc-x86_64,musl-libstdcxx-x86_6
 expect_out "the launcher skills are one job for every processor, each tarball under both names" \
     '{"tool":"launcher-skills","edition":"-","arch":"any","asset":"skill-termux-launcher-aarch64,skill-termux-launcher-x86_64,skill-termux-launcher-speak-aarch64,skill-termux-launcher-speak-x86_64"}'
 if command -v python3 >/dev/null 2>&1; then
-    if printf '%s' "$OUT" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if len(d["include"]) == 28 else 1)'; then pass; else fail "the matrix is JSON with twenty-eight entries" "$OUT"; fi
+    if printf '%s' "$OUT" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if len(d["include"]) == 30 else 1)'; then pass; else fail "the matrix is JSON with thirty entries" "$OUT"; fi
 fi
 OUT="$(bash "$BN_ROOT/scripts/bins-plan.sh" dawn,btop 2>&1)"; ST=$?
 expect_status "bins-plan.sh with a comma list" 0

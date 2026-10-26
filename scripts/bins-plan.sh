@@ -34,6 +34,7 @@ tuios        -                     tuios
 sigye        -                     sigye
 herdr        -                     herdr
 terminal-browser -                 terminal-browser
+phosh        -                     phosh
 fastfetch    com.termux,io.vaj.tl  -
 dawn         com.termux,io.vaj.tl  -
 musl-loader  com.termux,io.vaj.tl  -

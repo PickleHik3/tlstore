@@ -3,8 +3,10 @@
 # phosh-mobile-settings' libraries are added by the M1 tickets. termux-sysroot.sh does not
 # resolve Depends, so every library a listed one links against is named here too.
 # Names checked against both Packages indexes (aarch64 and x86_64) on 2026-10-26.
-# Not in Termux under any name: xcb-util-errors (phoc's X11 backend uses it; M1 builds it from
-# source or drops the use). "wayland", "wayland-protocols" and "pixman" are not Termux names;
+# Not in Termux under any name: xcb-util-errors (wlroots' X11 backend uses it only for readable
+# error names; build-phosh.sh turns it off with -Dwlroots:xcb-errors=disabled), libinput, libudev
+# and libseat in the main repo (phoc's meson wants libinput and libudev; recipes/cross/phoc/0001
+# drops them, the X11 backend needs neither). "wayland", "wayland-protocols" and "pixman" are not Termux names;
 # they are libwayland, libwayland-protocols and libpixman.
 
 # Wayland
@@ -47,3 +49,50 @@ zlib
 # Bionic gaps (glob and friends) that Termux's libraries link against
 libandroid-support
 libandroid-glob
+
+# phoc's own dependencies: gnome-desktop-3.0 and gsettings-desktop-schemas, and what their .pc
+# files and libraries pull in (gtk3 and its stack). Closure of Depends as of 2026-10-26.
+gnome-desktop3
+gsettings-desktop-schemas
+gtk3
+gdk-pixbuf
+libcairo
+pango
+harfbuzz
+fribidi
+fontconfig
+freetype
+libpng
+libjpeg-turbo
+libtiff
+at-spi2-core
+libepoxy                # x11-repo
+libxcomposite           # x11-repo
+libxcursor              # x11-repo
+libxdamage              # x11-repo
+libxext                 # x11-repo
+libxfixes               # x11-repo
+libxft                  # x11-repo
+libxi                   # x11-repo
+libxinerama             # x11-repo
+libxrandr               # x11-repo
+libxrender              # x11-repo
+libxtst                 # x11-repo
+libxxf86vm              # x11-repo
+libxshmfence            # x11-repo
+iso-codes
+libgraphite
+libbz2
+brotli
+libxml2
+libsqlite
+liblzma
+zstd
+libc++
+openssl
+libandroid-execinfo
+libandroid-posix-semaphore
+libandroid-selinux
+libandroid-shmem
+dbus
+json-glib

@@ -20,6 +20,7 @@ NDK plus a sysroot assembled with `dpkg-deb -x`.
 | `build-btop.sh` | patched btop, fully static, for the launcher's Shizuku lane | NDK + GNU make |
 | `build-tl-priv.sh` | `tl-priv`, the lane's client (`tl-priv/tl-priv.c`), fully static | NDK |
 | `build-herdr.sh` | herdr, built from source for bionic (Rust, plus Zig 0.16.0 for libghostty-vt, which the script downloads and verifies itself), as a `.tar.gz` app tree behind a launcher script that turns its terminal notifications on in Termux Launcher; `0001-herdr-android.patch` | rustup (`<arch>-linux-android`), NDK, git, curl, xz, GNU tar, gzip |
+| `build-phosh.sh` | the native phosh desktop as a `.tar.gz` archive tree (`bin/`, `share/`), built against the Termux sysroot of `phosh-deps.txt`. M0 builds only phoc 0.58.0 with its bundled wlroots 0.20.2 (X11 backend, pixman renderer, no libinput, udev or session); one function per upstream tree, each with its own patch directory (`phoc/`; `phosh/` and `phosh-mobile-settings/` come with their milestones); `TL_PHOSH_TREES` picks the trees | meson, ninja, pkg-config, wayland-scanner, glib's host tools, gettext, NDK, curl, git, GNU tar, gzip |
 | `fetch-launcher-skills.sh` | the launcher's agent skills, one `.tar.gz` each, packed by the launcher's own `scripts/pack-agent-skills.sh` at a pinned commit (not built; the same on every processor) | git, GNU tar, gzip |
 | `build-terminal-browser.sh` | terminal-browser as a `.tar.gz` app tree, from our fork: its JavaScript built as upstream releases it, `pixel.node` and `agent-browser` built for Android, Termux's `electron42` in place of upstream's Electron | rustup `<arch>-linux-android` + NDK, Node 22 + pnpm 10.13.1, GNU tar |
 
@@ -347,3 +348,13 @@ failing that, Termux's x11-repo (`TL_TERMUX_X11_REPO`, `TL_TERMUX_X11_DIST`). `T
 ./phosh-cross-file.sh [out]` writes the meson cross file (NDK clang, API 26, pkg-config on the
 sysroot through `sys_root`). `TL_ARCH=<arch> ./phosh-smoke.sh` does both and links
 `phosh-smoke/` against wayland-client and pixman; it needs meson, ninja and pkg-config on the host.
+
+`build-asset.sh phosh` runs the whole chain (sysroot, cross file, `build-phosh.sh`) and leaves
+`phosh-<arch>`, a `.tar.gz`. phoc's meson wants libinput and libudev, which Termux does not have,
+and the X11 backend uses neither: `phoc/0001` stands in for them (`src/compat/`, answering "no such
+device"), and also supplies `libintl.h` (glib's `gi18n.h`), which neither Bionic nor Termux ships.
+`phoc/0002` carries two fixes for the bundled wlroots (no `librt`, no `shm_open` on Bionic) as
+patch files its wrap applies. xcb-util-errors is not built: `-Dwlroots:xcb-errors=disabled`, it
+only names X11 errors. On a host whose glib tools are missing where its `.pc` files say (Arch
+without `glib2-devel`), `TL_NATIVE_FILE=<meson native file>` points meson's build-machine
+`pkg_config_path` at a copy of the `.pc` files that names the tools in the sysroot instead.
