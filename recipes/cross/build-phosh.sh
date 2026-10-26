@@ -27,6 +27,10 @@
 #         scale")
 #   0005  wlroots' Vulkan renderer renders into shm buffers (docs/PHOSH.md, "phoc on the X11
 #         display", Rendering), carried as a wlroots patch file
+#   0006  the keymap's shm file is a sealed memfd on Android (a wlroots patch file; no /proc
+#         re-open, which SELinux denies), and phoc survives a keymap that failed to allocate
+# and, from the recipe, not a patch: org.gnome.mutter.keybindings (phoc/*.gschema.xml) and the
+# archive's compiled share/glib-2.0/schemas/gschemas.compiled.
 #
 # What is built in:
 #   - wlroots 0.20.2, the subproject phoc's wlroots.wrap names, linked statically: backends=x11
@@ -86,7 +90,7 @@ TL_SYSROOT=${TL_SYSROOT:-}
 }
 NDK_BIN="$TL_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
 [ -d "$NDK_BIN" ] || { echo "error: NDK not found at $TL_NDK (set TL_NDK)" >&2; exit 1; }
-for tool in meson ninja pkg-config git curl patch tar gzip wayland-scanner msgfmt; do
+for tool in meson ninja pkg-config git curl patch tar gzip wayland-scanner msgfmt glib-compile-schemas; do
     command -v "$tool" >/dev/null 2>&1 || { echo "error: $tool is not on PATH" >&2; exit 1; }
 done
 command -v glslang >/dev/null 2>&1 || command -v glslangValidator >/dev/null 2>&1 || {
@@ -172,6 +176,15 @@ build_phoc() {
 
     echo "Installing phoc into the stage..."
     DESTDIR="$stage" meson install -C "$build" --no-rebuild --strip >/dev/null
+
+    # phoc opens org.gnome.mutter.keybindings, which no Termux package ships; the schemas it opens
+    # besides (org.gnome.desktop.*) come from Termux's gsettings-desktop-schemas. The archive
+    # carries its own compiled set (phoc's schema and the mutter one), self-contained.
+    local schemas="$stage/share/glib-2.0/schemas"
+    mkdir -p "$schemas"
+    cp "$SCRIPT_DIR/phoc/org.gnome.mutter.keybindings.gschema.xml" "$schemas/"
+    rm -f "$schemas/gschemas.compiled"
+    glib-compile-schemas --strict "$schemas"
 }
 
 build_phosh() { echo "error: the phosh tree is built from M1 on" >&2; exit 1; }
