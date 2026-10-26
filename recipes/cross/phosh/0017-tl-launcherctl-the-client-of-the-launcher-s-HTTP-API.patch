@@ -1,0 +1,837 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PickleHik3 <noreply@example.invalid>
+Date: Mon, 26 Oct 2026 12:00:00 +0000
+Subject: [PATCH 17/23] tl-launcherctl: the client of the launcher's HTTP API,
+ and -Dlauncherctl
+
+New feature option launcherctl (default auto). It is on when networkmanager and modemmanager are
+both off, which is this build, and an error when it is enabled with either of them on: the
+backends that follow replace the UPower, NetworkManager, ModemManager and iio-sensor-proxy ones
+(the rotation manager's) and the torch manager's, and a build with launcherctl does not look
+for upower-glib. It defines PHOSH_HAVE_LAUNCHERCTL and needs json-glib.
+
+src/tl-launcherctl.[ch] is the one client the backends share (libsoup 3). The endpoint is read
+from ~/.launcherctl/endpoint and the token from ~/.launcherctl/token on every connection and
+every POST, and sent as a bearer token. ONE GET /v1/watch stream (server-sent events) is held
+open; the launcher sends one event per topic when it opens, which is the state of each, and one
+for each change, so no GET is made and nothing polls. Without the two files the client is
+unavailable and does nothing more (no timer, no connection attempt). A stream that breaks or
+stays silent for 45 s (the launcher keeps it alive every 15 s) is opened again after 2 s, 4 s,
+8 s ... 60 s; an event resets that.
+
+API (src/tl-launcherctl.h; also for the notify manager, which POSTs /v1/notify):
+
+  TlLauncherctl *tl_launcherctl_get_default (void);  /* starts the stream on the first call */
+  gboolean       tl_launcherctl_get_available (self);  /* the stream is open; notify::available */
+  JsonObject    *tl_launcherctl_get_last (self, "battery"|"network"|"rotation");  /* or NULL */
+  void           tl_launcherctl_post_async (self, "/v1/torch", "{\"on\":true}", cancellable,
+                                            callback, user_data);
+  JsonObject    *tl_launcherctl_post_finish (self, res, &error);  /* the reply's JSON object */
+  signal "event" (detail = topic, arg JsonObject*): connect to "event::battery" and the like.
+  JsonObject    *tl_json_get_object (object, "member");  /* quiet accessor, inline */
+
+A POST finishes with an error when there is no endpoint or the launcher answers anything but 2xx,
+so a notify manager closes a notification with
+  tl_launcherctl_post_async (client, "/v1/notify", "{\"close\":\"<id>\"}", ...).
+---
+ meson.build          |  19 +-
+ meson.options        |   4 +
+ src/meson.build      |   6 +
+ src/tl-launcherctl.c | 641 +++++++++++++++++++++++++++++++++++++++++++
+ src/tl-launcherctl.h |  49 ++++
+ 5 files changed, 718 insertions(+), 1 deletion(-)
+ create mode 100644 src/tl-launcherctl.c
+ create mode 100644 src/tl-launcherctl.h
+
+diff --git a/meson.build b/meson.build
+index 8bb8eff..ced28ac 100644
+--- a/meson.build
++++ b/meson.build
+@@ -152,6 +152,13 @@ have_osk = get_option('osk')
+ have_polkit = get_option('polkit')
+ have_vpn = get_option('vpn')
+ 
++# The launcherctl backends stand in for the NetworkManager and ModemManager ones; with either of
++# those on, auto leaves them out and enabled is an error.
++have_launcherctl = get_option('launcherctl').require(
++  not have_networkmanager and not have_modemmanager,
++  error_message: '-Dlauncherctl needs -Dnetworkmanager=false and -Dmodemmanager=false',
++).allowed()
++
+ # VPN and the hotspot setting are NetworkManager's.
+ if not have_networkmanager
+   have_vpn = false
+@@ -261,7 +268,15 @@ network_agent_dep = not_found_dep
+ if have_networkmanager
+   network_agent_dep = dependency('libsecret-1')
+ endif
+-upower_glib_dep = dependency('upower-glib', version: '>=1.90')
++# UPower is the battery manager's; with launcherctl it reads the launcher instead.
++upower_glib_dep = not_found_dep
++if not have_launcherctl
++  upower_glib_dep = dependency('upower-glib', version: '>=1.90')
++endif
++json_glib_dep = not_found_dep
++if have_launcherctl
++  json_glib_dep = dependency('json-glib-1.0', version: '>= 1.6')
++endif
+ wayland_client_dep = dependency('wayland-client', version: '>=1.14')
+ wayland_protos_dep = dependency('wayland-protocols', version: '>=1.12')
+ 
+@@ -294,6 +309,7 @@ config_h.set10('PHOSH_HAVE_CALLS', have_calls)
+ config_h.set10('PHOSH_HAVE_EDS', have_eds)
+ config_h.set10('PHOSH_HAVE_GUDEV', have_gudev)
+ config_h.set10('PHOSH_HAVE_HOTSPOT', have_hotspot)
++config_h.set10('PHOSH_HAVE_LAUNCHERCTL', have_launcherctl)
+ config_h.set10('PHOSH_HAVE_LOCATION', have_location)
+ config_h.set10('PHOSH_HAVE_LOCKSCREEN', have_lockscreen)
+ config_h.set10('PHOSH_HAVE_LOGIND', have_logind)
+@@ -375,6 +391,7 @@ summary(
+     'NetworkManager (libnm)': have_networkmanager,
+     'ModemManager (mm-glib)': have_modemmanager,
+     'libgudev': have_gudev,
++    'launcherctl (battery, network, rotation, torch)': have_launcherctl,
+   },
+   bool_yn: true,
+   section: 'Build',
+diff --git a/meson.options b/meson.options
+index 56d3ae4..f533e91 100644
+--- a/meson.options
++++ b/meson.options
+@@ -114,6 +114,10 @@ option('modemmanager',
+        type: 'boolean', value: true,
+        description: 'Build the ModemManager (mm-glib) WWAN backend')
+ 
++option('launcherctl',
++       type: 'feature', value: 'auto',
++       description: 'Take battery, Wi-Fi, mobile, rotation and torch from the launcher (tl-launcherctl, its HTTP API) instead of UPower, NetworkManager, ModemManager and iio-sensor-proxy. auto: on when networkmanager and modemmanager are off, which it needs')
++
+ option('gudev',
+        type: 'boolean', value: true,
+        description: 'Build against libgudev: udev monitoring, sysfs torch and backlight discovery')
+diff --git a/src/meson.build b/src/meson.build
+index ad71797..16c4387 100644
+--- a/src/meson.build
++++ b/src/meson.build
+@@ -482,6 +482,11 @@ if have_gudev
+   phosh_tool_sources += files('backlight-sysfs.c', 'udev-manager.c')
+ endif
+ 
++# The client of the launcher's API; the backends that use it come with their own commits.
++if have_launcherctl
++  phosh_tool_sources += files('tl-launcherctl.c')
++endif
++
+ # Headers are bundled as they're not shipped by gnome-bluetooth
+ # https://gitlab.gnome.org/GNOME/gnome-bluetooth/-/merge_requests/200
+ gnome_bluetooth_headers_dep = declare_dependency(
+@@ -514,6 +519,7 @@ phosh_deps = [
+   gtk_wayland_dep,
+   libcall_ui_dep,
+   gudev_dep,
++  json_glib_dep,
+   libfeedback_dep,
+   libgvc_dep,
+   libhandy_dep,
+diff --git a/src/tl-launcherctl.c b/src/tl-launcherctl.c
+new file mode 100644
+index 0000000..ae74d63
+--- /dev/null
++++ b/src/tl-launcherctl.c
+@@ -0,0 +1,641 @@
++/*
++ * Copyright (C) 2025 Termux Launcher
++ *
++ * SPDX-License-Identifier: GPL-3.0-or-later
++ */
++
++#define G_LOG_DOMAIN "tl-launcherctl"
++
++#include "phosh-config.h"
++
++#include "tl-launcherctl.h"
++
++#include <libsoup/soup.h>
++#include <string.h>
++
++#define WATCH_PATH       "/v1/watch"
++#define WATCHDOG_SECONDS 45   /* the launcher sends a keepalive every 15 s */
++#define BACKOFF_MIN      2
++#define BACKOFF_MAX      60
++
++/**
++ * TlLauncherctl:
++ *
++ * The client of the launcher's launcherctl HTTP API
++ *
++ * One object per process ([func@TlLauncherctl.get_default]). It reads the endpoint
++ * (`~/.launcherctl/endpoint`) and the token (`~/.launcherctl/token`), keeps ONE
++ * `GET /v1/watch` stream (server-sent events) open and turns each event into a signal. The
++ * stream opens with one event per topic (`battery`, `network`, `rotation`), which is the state
++ * of each at the time, and sends one more whenever it changes, so nothing is polled and no GET
++ * of those routes is made.
++ *
++ * Without an endpoint or token file the client is unavailable and does nothing else: no
++ * connection attempt, no timer. When the stream breaks it is opened again after 2 s, then 4 s,
++ * 8 s and so on up to 60 s, until an event arrives (which starts the backoff over). The files
++ * are read again at every attempt.
++ *
++ * Public API:
++ *
++ * - tl_launcherctl_get_default(): the client, started on the first call
++ * - [property@TlLauncherctl:available]: the stream is open (notify::available)
++ * - [signal@TlLauncherctl::event] with detail the topic, e.g. `event::battery`, and a
++ *   `JsonObject` as argument: the same JSON `GET /v1/<topic>` answers (transfer none, valid
++ *   during the emission)
++ * - tl_launcherctl_get_last(): the last event of a topic, for a manager created late
++ * - tl_launcherctl_post_async() and tl_launcherctl_post_finish(): `POST <path>` with a JSON
++ *   body, answering the JSON object of the reply, or an error (also when the client has no
++ *   endpoint, or the launcher answers anything but 2xx)
++ */
++
++enum {
++  PROP_0,
++  PROP_AVAILABLE,
++  PROP_LAST_PROP
++};
++static GParamSpec *props[PROP_LAST_PROP];
++
++enum {
++  SIGNAL_EVENT,
++  N_SIGNALS
++};
++static guint signals[N_SIGNALS];
++
++struct _TlLauncherctl {
++  GObject          parent;
++
++  SoupSession     *watch_session;
++  SoupSession     *post_session;
++
++  /* The stream */
++  SoupMessage     *watch_msg;
++  GCancellable    *cancel;
++  GDataInputStream *lines;
++  guint            watchdog_id;
++  guint            reconnect_id;
++  guint            backoff;
++  gboolean         warned;
++
++  /* The event being read */
++  char            *event;
++  GString         *data;
++
++  gboolean         available;
++  GHashTable      *last;           /* topic -> JsonObject */
++};
++G_DEFINE_TYPE (TlLauncherctl, tl_launcherctl, G_TYPE_OBJECT)
++
++static void start_stream (TlLauncherctl *self);
++
++
++static char *
++read_file_stripped (const char *name)
++{
++  g_autofree char *path = g_build_filename (g_get_home_dir (), ".launcherctl", name, NULL);
++  g_autofree char *contents = NULL;
++
++  if (!g_file_get_contents (path, &contents, NULL, NULL))
++    return NULL;
++
++  g_strstrip (contents);
++  if (contents[0] == '\0')
++    return NULL;
++
++  return g_steal_pointer (&contents);
++}
++
++
++/* The endpoint without a trailing slash, and the token. %FALSE when either is missing. */
++static gboolean
++read_credentials (char **endpoint, char **token)
++{
++  g_autofree char *ep = read_file_stripped ("endpoint");
++  g_autofree char *tok = read_file_stripped ("token");
++  gsize len;
++
++  if (!ep || !tok)
++    return FALSE;
++
++  len = strlen (ep);
++  while (len > 0 && ep[len - 1] == '/')
++    ep[--len] = '\0';
++
++  *endpoint = g_steal_pointer (&ep);
++  *token = g_steal_pointer (&tok);
++  return TRUE;
++}
++
++
++static SoupMessage *
++new_message (const char *method, const char *endpoint, const char *token, const char *path)
++{
++  g_autofree char *uri = g_strconcat (endpoint, path, NULL);
++  g_autofree char *bearer = g_strconcat ("Bearer ", token, NULL);
++  SoupMessage *msg = soup_message_new (method, uri);
++
++  if (msg)
++    soup_message_headers_replace (soup_message_get_request_headers (msg), "Authorization", bearer);
++
++  return msg;
++}
++
++
++static void
++set_available (TlLauncherctl *self, gboolean available)
++{
++  if (self->available == available)
++    return;
++
++  self->available = available;
++  g_debug ("Available: %d", available);
++  g_object_notify_by_pspec (G_OBJECT (self), props[PROP_AVAILABLE]);
++}
++
++
++static void
++teardown_stream (TlLauncherctl *self)
++{
++  g_clear_handle_id (&self->watchdog_id, g_source_remove);
++
++  if (self->cancel) {
++    g_cancellable_cancel (self->cancel);
++    g_clear_object (&self->cancel);
++  }
++  g_clear_object (&self->lines);
++  g_clear_object (&self->watch_msg);
++
++  g_clear_pointer (&self->event, g_free);
++  if (self->data)
++    g_string_set_size (self->data, 0);
++}
++
++
++static gboolean
++on_reconnect (gpointer data)
++{
++  TlLauncherctl *self = TL_LAUNCHERCTL (data);
++
++  self->reconnect_id = 0;
++  start_stream (self);
++  return G_SOURCE_REMOVE;
++}
++
++
++static void
++schedule_reconnect (TlLauncherctl *self)
++{
++  teardown_stream (self);
++  set_available (self, FALSE);
++
++  if (self->reconnect_id)
++    return;
++
++  self->backoff = self->backoff ? MIN (self->backoff * 2, BACKOFF_MAX) : BACKOFF_MIN;
++  g_debug ("Opening the stream again in %us", self->backoff);
++  self->reconnect_id = g_timeout_add_seconds (self->backoff, on_reconnect, self);
++}
++
++
++static gboolean
++on_watchdog (gpointer data)
++{
++  TlLauncherctl *self = TL_LAUNCHERCTL (data);
++
++  self->watchdog_id = 0;
++  g_message ("No data on the watch stream for %ds, opening it again", WATCHDOG_SECONDS);
++  schedule_reconnect (self);
++  return G_SOURCE_REMOVE;
++}
++
++
++static void
++arm_watchdog (TlLauncherctl *self)
++{
++  g_clear_handle_id (&self->watchdog_id, g_source_remove);
++  self->watchdog_id = g_timeout_add_seconds (WATCHDOG_SECONDS, on_watchdog, self);
++}
++
++
++static void
++dispatch_event (TlLauncherctl *self)
++{
++  g_autoptr (JsonParser) parser = json_parser_new ();
++  g_autoptr (GError) err = NULL;
++  g_autofree char *topic = g_steal_pointer (&self->event);
++  JsonNode *root;
++  JsonObject *object;
++
++  if (!topic || self->data->len == 0) {
++    g_string_set_size (self->data, 0);
++    return;
++  }
++
++  if (!json_parser_load_from_data (parser, self->data->str, self->data->len, &err)) {
++    g_warning ("Bad JSON in a '%s' event: %s", topic, err->message);
++    g_string_set_size (self->data, 0);
++    return;
++  }
++  g_string_set_size (self->data, 0);
++
++  root = json_parser_get_root (parser);
++  if (!root || !JSON_NODE_HOLDS_OBJECT (root)) {
++    g_warning ("A '%s' event is not a JSON object", topic);
++    return;
++  }
++
++  object = json_node_dup_object (root);
++  g_hash_table_replace (self->last, g_strdup (topic), object);
++  /* An event is the sign of a healthy stream */
++  self->backoff = 0;
++  g_debug ("Event %s", topic);
++  g_signal_emit (self, signals[SIGNAL_EVENT], g_quark_from_string (topic), object);
++}
++
++
++static void
++handle_line (TlLauncherctl *self, const char *line)
++{
++  const char *value;
++
++  if (line[0] == '\0') {
++    dispatch_event (self);
++    return;
++  }
++
++  if (line[0] == ':')
++    return;           /* a comment: the keepalive */
++
++  value = strchr (line, ':');
++  if (!value)
++    return;
++
++  /* The field name, and the value without the one space SSE allows after the colon */
++  value++;
++  if (value[0] == ' ')
++    value++;
++
++  if (g_str_has_prefix (line, "event:")) {
++    g_free (self->event);
++    self->event = g_strdup (value);
++  } else if (g_str_has_prefix (line, "data:")) {
++    if (self->data->len > 0)
++      g_string_append_c (self->data, '\n');
++    g_string_append (self->data, value);
++  }
++}
++
++
++static void read_next_line (TlLauncherctl *self);
++
++
++static void
++on_line_read (GObject *source, GAsyncResult *res, gpointer data)
++{
++  TlLauncherctl *self = TL_LAUNCHERCTL (data);
++  g_autoptr (GError) err = NULL;
++  g_autofree char *line = NULL;
++
++  line = g_data_input_stream_read_line_finish_utf8 (G_DATA_INPUT_STREAM (source), res, NULL, &err);
++  if (!line) {
++    /* Cancelled: this stream was torn down and another may be open already */
++    if (g_error_matches (err, G_IO_ERROR, G_IO_ERROR_CANCELLED))
++      return;
++    if (err)
++      g_message ("The watch stream failed: %s", err->message);
++    else
++      g_message ("The watch stream ended");
++    schedule_reconnect (self);
++    return;
++  }
++
++  arm_watchdog (self);
++  handle_line (self, line);
++
++  /* A handler of the signal may have torn the stream down */
++  if (self->lines == G_DATA_INPUT_STREAM (source))
++    read_next_line (self);
++}
++
++
++static void
++read_next_line (TlLauncherctl *self)
++{
++  g_data_input_stream_read_line_async (self->lines, G_PRIORITY_DEFAULT, self->cancel,
++                                       on_line_read, self);
++}
++
++
++static void
++on_stream_sent (GObject *source, GAsyncResult *res, gpointer data)
++{
++  TlLauncherctl *self = TL_LAUNCHERCTL (data);
++  g_autoptr (GError) err = NULL;
++  g_autoptr (GInputStream) stream = NULL;
++  SoupStatus status;
++
++  stream = soup_session_send_finish (SOUP_SESSION (source), res, &err);
++  if (!stream) {
++    if (g_error_matches (err, G_IO_ERROR, G_IO_ERROR_CANCELLED))
++      return;
++    g_message ("Cannot open the watch stream: %s", err->message);
++    schedule_reconnect (self);
++    return;
++  }
++
++  status = soup_message_get_status (self->watch_msg);
++  if (status != SOUP_STATUS_OK) {
++    g_message ("The watch stream answered %u", (guint) status);
++    schedule_reconnect (self);
++    return;
++  }
++
++  self->lines = g_data_input_stream_new (stream);
++  g_data_input_stream_set_newline_type (self->lines, G_DATA_STREAM_NEWLINE_TYPE_ANY);
++  arm_watchdog (self);
++  set_available (self, TRUE);
++  read_next_line (self);
++}
++
++
++static void
++start_stream (TlLauncherctl *self)
++{
++  g_autofree char *endpoint = NULL;
++  g_autofree char *token = NULL;
++
++  teardown_stream (self);
++
++  if (!read_credentials (&endpoint, &token)) {
++    /* No launcher to talk to. Nothing is retried: this is a phosh without a launcher around. */
++    if (!self->warned)
++      g_message ("No launcherctl endpoint or token in ~/.launcherctl, no battery, network, "
++                 "rotation or torch");
++    self->warned = TRUE;
++    set_available (self, FALSE);
++    return;
++  }
++
++  self->watch_msg = new_message (SOUP_METHOD_GET, endpoint, token, WATCH_PATH);
++  if (!self->watch_msg) {
++    g_message ("'%s' is not a usable launcherctl endpoint", endpoint);
++    set_available (self, FALSE);
++    return;
++  }
++  soup_message_headers_replace (soup_message_get_request_headers (self->watch_msg),
++                                "Accept", "text/event-stream");
++
++  self->cancel = g_cancellable_new ();
++  soup_session_send_async (self->watch_session, self->watch_msg, G_PRIORITY_DEFAULT,
++                           self->cancel, on_stream_sent, self);
++}
++
++
++static void
++tl_launcherctl_get_property (GObject *object, guint property_id, GValue *value, GParamSpec *pspec)
++{
++  TlLauncherctl *self = TL_LAUNCHERCTL (object);
++
++  switch (property_id) {
++  case PROP_AVAILABLE:
++    g_value_set_boolean (value, self->available);
++    break;
++  default:
++    G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
++    break;
++  }
++}
++
++
++static void
++tl_launcherctl_dispose (GObject *object)
++{
++  TlLauncherctl *self = TL_LAUNCHERCTL (object);
++
++  g_clear_handle_id (&self->reconnect_id, g_source_remove);
++  teardown_stream (self);
++  g_clear_object (&self->watch_session);
++  g_clear_object (&self->post_session);
++
++  G_OBJECT_CLASS (tl_launcherctl_parent_class)->dispose (object);
++}
++
++
++static void
++tl_launcherctl_finalize (GObject *object)
++{
++  TlLauncherctl *self = TL_LAUNCHERCTL (object);
++
++  g_clear_pointer (&self->last, g_hash_table_unref);
++  if (self->data)
++    g_string_free (self->data, TRUE);
++
++  G_OBJECT_CLASS (tl_launcherctl_parent_class)->finalize (object);
++}
++
++
++static void
++tl_launcherctl_class_init (TlLauncherctlClass *klass)
++{
++  GObjectClass *object_class = G_OBJECT_CLASS (klass);
++
++  object_class->get_property = tl_launcherctl_get_property;
++  object_class->dispose = tl_launcherctl_dispose;
++  object_class->finalize = tl_launcherctl_finalize;
++
++  /**
++   * TlLauncherctl:available:
++   *
++   * Whether the watch stream is open
++   */
++  props[PROP_AVAILABLE] =
++    g_param_spec_boolean ("available", "", "",
++                          FALSE,
++                          G_PARAM_READABLE | G_PARAM_EXPLICIT_NOTIFY | G_PARAM_STATIC_STRINGS);
++  g_object_class_install_properties (object_class, PROP_LAST_PROP, props);
++
++  /**
++   * TlLauncherctl::event:
++   * @self: The client
++   * @data: the event's JSON object, as `GET /v1/<topic>` answers it
++   *
++   * Emitted for each event of the watch stream, with the topic as detail:
++   * `battery`, `network` or `rotation`.
++   */
++  signals[SIGNAL_EVENT] = g_signal_new ("event",
++                                        G_TYPE_FROM_CLASS (klass),
++                                        G_SIGNAL_RUN_LAST | G_SIGNAL_DETAILED,
++                                        0, NULL, NULL, NULL,
++                                        G_TYPE_NONE, 1,
++                                        JSON_TYPE_OBJECT);
++}
++
++
++static void
++tl_launcherctl_init (TlLauncherctl *self)
++{
++  /* No timeouts of the session: the stream is idle for 15 s at a time, and the watchdog
++   * is ours. No proxy: the endpoint is on this device. */
++  self->watch_session = soup_session_new_with_options ("timeout", 0, "idle-timeout", 0,
++                                                       "proxy-resolver", NULL, NULL);
++  self->post_session = soup_session_new_with_options ("timeout", 20, "idle-timeout", 0,
++                                                      "proxy-resolver", NULL, NULL);
++  self->data = g_string_new (NULL);
++  self->last = g_hash_table_new_full (g_str_hash, g_str_equal, g_free,
++                                      (GDestroyNotify) json_object_unref);
++}
++
++
++/**
++ * tl_launcherctl_get_default:
++ *
++ * The client of this process. The first call opens the watch stream.
++ *
++ * Returns: (transfer none): the client
++ */
++TlLauncherctl *
++tl_launcherctl_get_default (void)
++{
++  static TlLauncherctl *instance;
++
++  if (!instance) {
++    instance = g_object_new (TL_TYPE_LAUNCHERCTL, NULL);
++    g_object_add_weak_pointer (G_OBJECT (instance), (gpointer *) &instance);
++    start_stream (instance);
++  }
++
++  return instance;
++}
++
++
++gboolean
++tl_launcherctl_get_available (TlLauncherctl *self)
++{
++  g_return_val_if_fail (TL_IS_LAUNCHERCTL (self), FALSE);
++
++  return self->available;
++}
++
++
++/**
++ * tl_launcherctl_get_last:
++ * @self: The client
++ * @topic: `battery`, `network` or `rotation`
++ *
++ * Returns: (transfer none) (nullable): the last event of the topic, or %NULL when there was none
++ */
++JsonObject *
++tl_launcherctl_get_last (TlLauncherctl *self, const char *topic)
++{
++  g_return_val_if_fail (TL_IS_LAUNCHERCTL (self), NULL);
++  g_return_val_if_fail (topic, NULL);
++
++  return g_hash_table_lookup (self->last, topic);
++}
++
++
++static void
++on_post_done (GObject *source, GAsyncResult *res, gpointer data)
++{
++  g_autoptr (GTask) task = G_TASK (data);
++  SoupMessage *msg = g_task_get_task_data (task);
++  g_autoptr (GError) err = NULL;
++  g_autoptr (GBytes) bytes = NULL;
++  g_autoptr (JsonParser) parser = json_parser_new ();
++  JsonNode *root;
++  SoupStatus status;
++
++  bytes = soup_session_send_and_read_finish (SOUP_SESSION (source), res, &err);
++  if (!bytes) {
++    g_task_return_error (task, g_steal_pointer (&err));
++    return;
++  }
++
++  status = soup_message_get_status (msg);
++  if (status < 200 || status > 299) {
++    g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
++                             "launcherctl answered %u for %s", (guint) status,
++                             g_uri_get_path (soup_message_get_uri (msg)));
++    return;
++  }
++
++  /* An answer that is not an object is an answer without members */
++  if (g_bytes_get_size (bytes) > 0 &&
++      json_parser_load_from_data (parser, g_bytes_get_data (bytes, NULL),
++                                  g_bytes_get_size (bytes), NULL) &&
++      (root = json_parser_get_root (parser)) && JSON_NODE_HOLDS_OBJECT (root)) {
++    g_task_return_pointer (task, json_node_dup_object (root), (GDestroyNotify) json_object_unref);
++  } else {
++    g_task_return_pointer (task, json_object_new (), (GDestroyNotify) json_object_unref);
++  }
++}
++
++
++/**
++ * tl_launcherctl_post_async:
++ * @self: The client
++ * @path: the route, e.g. `/v1/torch`
++ * @body: (nullable): the JSON body, e.g. `{"on":true}`
++ * @cancellable: (nullable): a cancellable
++ * @callback: the callback
++ * @user_data: its data
++ *
++ * Sends `POST <path>` with the bearer token. Finish with tl_launcherctl_post_finish().
++ */
++void
++tl_launcherctl_post_async (TlLauncherctl      *self,
++                           const char         *path,
++                           const char         *body,
++                           GCancellable       *cancellable,
++                           GAsyncReadyCallback callback,
++                           gpointer            user_data)
++{
++  g_autoptr (GTask) task = NULL;
++  g_autofree char *endpoint = NULL;
++  g_autofree char *token = NULL;
++  g_autoptr (SoupMessage) msg = NULL;
++  g_autoptr (GBytes) bytes = NULL;
++
++  g_return_if_fail (TL_IS_LAUNCHERCTL (self));
++  g_return_if_fail (path && path[0] == '/');
++
++  task = g_task_new (self, cancellable, callback, user_data);
++  g_task_set_source_tag (task, tl_launcherctl_post_async);
++
++  if (!read_credentials (&endpoint, &token)) {
++    g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_NOT_FOUND,
++                             "No launcherctl endpoint or token in ~/.launcherctl");
++    return;
++  }
++
++  msg = new_message (SOUP_METHOD_POST, endpoint, token, path);
++  if (!msg) {
++    g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
++                             "'%s%s' is not a usable URI", endpoint, path);
++    return;
++  }
++
++  bytes = g_bytes_new (body ? body : "{}", strlen (body ? body : "{}"));
++  soup_message_set_request_body_from_bytes (msg, "application/json", bytes);
++
++  g_task_set_task_data (task, g_object_ref (msg), g_object_unref);
++  soup_session_send_and_read_async (self->post_session, msg, G_PRIORITY_DEFAULT, cancellable,
++                                    on_post_done, g_steal_pointer (&task));
++}
++
++
++/**
++ * tl_launcherctl_post_finish:
++ * @self: The client
++ * @res: the result
++ * @error: (nullable): the error
++ *
++ * Returns: (transfer full): the JSON object of the reply, or %NULL with @error set
++ */
++JsonObject *
++tl_launcherctl_post_finish (TlLauncherctl *self, GAsyncResult *res, GError **error)
++{
++  g_return_val_if_fail (TL_IS_LAUNCHERCTL (self), NULL);
++  g_return_val_if_fail (g_task_is_valid (res, self), NULL);
++
++  return g_task_propagate_pointer (G_TASK (res), error);
++}
+diff --git a/src/tl-launcherctl.h b/src/tl-launcherctl.h
+new file mode 100644
+index 0000000..2862919
+--- /dev/null
++++ b/src/tl-launcherctl.h
+@@ -0,0 +1,49 @@
++/*
++ * Copyright (C) 2025 Termux Launcher
++ *
++ * SPDX-License-Identifier: GPL-3.0-or-later
++ */
++
++#pragma once
++
++#include <gio/gio.h>
++#include <glib-object.h>
++#include <json-glib/json-glib.h>
++
++G_BEGIN_DECLS
++
++#define TL_TYPE_LAUNCHERCTL (tl_launcherctl_get_type ())
++
++G_DECLARE_FINAL_TYPE (TlLauncherctl, tl_launcherctl, TL, LAUNCHERCTL, GObject)
++
++TlLauncherctl *tl_launcherctl_get_default   (void);
++gboolean       tl_launcherctl_get_available (TlLauncherctl      *self);
++JsonObject    *tl_launcherctl_get_last      (TlLauncherctl      *self,
++                                             const char         *topic);
++void           tl_launcherctl_post_async    (TlLauncherctl      *self,
++                                             const char         *path,
++                                             const char         *body,
++                                             GCancellable       *cancellable,
++                                             GAsyncReadyCallback callback,
++                                             gpointer            user_data);
++JsonObject    *tl_launcherctl_post_finish   (TlLauncherctl      *self,
++                                             GAsyncResult       *res,
++                                             GError            **error);
++
++/**
++ * tl_json_get_object:
++ * @object: (nullable): a JSON object
++ * @member: the member to look up
++ *
++ * Returns: (transfer none) (nullable): the member when it is an object, else %NULL. Unlike
++ * json_object_get_object_member() it logs nothing for a member that is missing or another type.
++ */
++static inline JsonObject *
++tl_json_get_object (JsonObject *object, const char *member)
++{
++  JsonNode *node = object ? json_object_get_member (object, member) : NULL;
++
++  return (node && JSON_NODE_HOLDS_OBJECT (node)) ? json_node_get_object (node) : NULL;
++}
++
++G_END_DECLS

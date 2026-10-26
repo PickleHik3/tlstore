@@ -1,0 +1,487 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PickleHik3 <noreply@example.invalid>
+Date: Mon, 26 Oct 2026 12:00:00 +0000
+Subject: [PATCH 20/23] Rotation manager: Android's rotation lock, from the
+ launcher
+
+With -Dlauncherctl the rotation manager (rotation-manager-tl.c) reads the watch stream's rotation
+event (orientation, lock) instead of iio-sensor-proxy and sets the lock with POST /v1/rotation
+{"lock":...} when orientation-locked is set (the rotation quick setting's click); the property
+follows the launcher's answer or the stream. It never applies a monitor transform: Android turns
+the display and phoc follows the X server's size. The mode is SENSOR while the stream is open and
+OFF without it, when the manager has no monitor either, which keeps the tile insensitive.
+New read-only property orientation. The constructor keeps its arguments, so the shell is
+unchanged; the sensor proxy still serves the proximity sensor and the ambient light sensor.
+---
+ src/meson.build           |   9 +-
+ src/rotation-manager-tl.c | 433 ++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 439 insertions(+), 3 deletions(-)
+ create mode 100644 src/rotation-manager-tl.c
+
+diff --git a/src/meson.build b/src/meson.build
+index b1b66a0..44ad349 100644
+--- a/src/meson.build
++++ b/src/meson.build
+@@ -387,7 +387,6 @@ phosh_sources = files(
+   'portal-access-manager.c',
+   'portal-request.c',
+   'rotateinfo.c',
+-  'rotation-manager.c',
+   'run-command-dialog.c',
+   'run-command-manager.c',
+   'screen-saver-manager.c',
+@@ -486,9 +485,13 @@ endif
+ 
+ # The client of the launcher's API; the backends that use it come with their own commits.
+ if have_launcherctl
+-  phosh_tool_sources += files('battery-manager-tl.c', 'tl-launcherctl.c')
++  phosh_tool_sources += files(
++    'battery-manager-tl.c',
++    'rotation-manager-tl.c',
++    'tl-launcherctl.c',
++  )
+ else
+-  phosh_tool_sources += files('battery-manager.c')
++  phosh_tool_sources += files('battery-manager.c', 'rotation-manager.c')
+ endif
+ 
+ # Headers are bundled as they're not shipped by gnome-bluetooth
+diff --git a/src/rotation-manager-tl.c b/src/rotation-manager-tl.c
+new file mode 100644
+index 0000000..bb85f34
+--- /dev/null
++++ b/src/rotation-manager-tl.c
+@@ -0,0 +1,433 @@
++/*
++ * Copyright (C) 2021 Purism SPC
++ *               2025 Termux Launcher
++ *
++ * SPDX-License-Identifier: GPL-3.0-or-later
++ * Author: Guido Günther <agx@sigxcpu.org>
++ */
++
++#define G_LOG_DOMAIN "phosh-rotation-manager"
++
++#include "phosh-config.h"
++#include "phosh-enums.h"
++#include "rotation-manager.h"
++#include "shell-priv.h"
++#include "tl-launcherctl.h"
++
++/**
++ * PhoshRotationManager:
++ *
++ * The Rotation Manager
++ *
++ * This is the rotation manager of a build with `-Dlauncherctl`. Android rotates the display and
++ * the X server that phoc follows (so the monitor changes size, and phosh is never asked to apply
++ * a transform), and Android has the rotation lock. The manager shows both, from the `rotation`
++ * events of the launcher's watch stream (`orientation`, `lock`), and sets the lock with
++ * `POST /v1/rotation` when [property@PhoshRotationManager:orientation-locked] is set; the lock
++ * follows what the launcher reports afterwards.
++ *
++ * Without a launcher the mode is %PHOSH_ROTATION_MANAGER_MODE_OFF and there is no monitor to
++ * rotate, which keeps the rotation quick setting insensitive. With one the mode is
++ * %PHOSH_ROTATION_MANAGER_MODE_SENSOR and cannot be set: there is no sensor to claim and no
++ * mode to choose.
++ */
++
++enum {
++  PROP_0,
++  PROP_LOCKSCREEN_MANAGER,
++  PROP_ORIENTATION_LOCKED,
++  PROP_ORIENTATION,
++  PROP_MONITOR,
++  PROP_MODE,
++  PROP_TRANSFORM,
++  LAST_PROP,
++};
++static GParamSpec *props[LAST_PROP];
++
++typedef struct _PhoshRotationManager {
++  GObject                  parent;
++
++  TlLauncherctl           *client;
++  GCancellable            *cancel;
++  PhoshLockscreenManager  *lockscreen_manager;
++  PhoshMonitor            *monitor;
++
++  gboolean                 have_state;      /* a rotation event of an open stream */
++  gboolean                 orientation_locked;
++  char                    *orientation;
++} PhoshRotationManager;
++
++G_DEFINE_TYPE (PhoshRotationManager, phosh_rotation_manager, G_TYPE_OBJECT);
++
++
++static void
++update (PhoshRotationManager *self)
++{
++  JsonObject *rotation = NULL;
++  gboolean have_state, locked;
++  const char *orientation = NULL;
++  PhoshRotationManagerMode old_mode = phosh_rotation_manager_get_mode (self);
++  PhoshMonitor *old_monitor = phosh_rotation_manager_get_monitor (self);
++
++  if (tl_launcherctl_get_available (self->client))
++    rotation = tl_launcherctl_get_last (self->client, "rotation");
++
++  have_state = rotation && json_object_get_boolean_member_with_default (rotation, "ok", TRUE);
++  locked = TRUE;
++  if (have_state) {
++    locked = json_object_get_boolean_member_with_default (rotation, "lock", TRUE);
++    orientation = json_object_get_string_member_with_default (rotation, "orientation", NULL);
++  }
++
++  g_object_freeze_notify (G_OBJECT (self));
++
++  self->have_state = have_state;
++
++  if (self->orientation_locked != locked) {
++    self->orientation_locked = locked;
++    g_object_notify_by_pspec (G_OBJECT (self), props[PROP_ORIENTATION_LOCKED]);
++  }
++
++  if (g_strcmp0 (self->orientation, orientation)) {
++    g_free (self->orientation);
++    self->orientation = g_strdup (orientation);
++    g_object_notify_by_pspec (G_OBJECT (self), props[PROP_ORIENTATION]);
++  }
++
++  if (old_mode != phosh_rotation_manager_get_mode (self))
++    g_object_notify_by_pspec (G_OBJECT (self), props[PROP_MODE]);
++  if (old_monitor != phosh_rotation_manager_get_monitor (self))
++    g_object_notify_by_pspec (G_OBJECT (self), props[PROP_MONITOR]);
++
++  g_object_thaw_notify (G_OBJECT (self));
++}
++
++
++static void
++on_rotation_event (PhoshRotationManager *self, JsonObject *data, TlLauncherctl *client)
++{
++  update (self);
++}
++
++
++static void
++on_available_changed (PhoshRotationManager *self, GParamSpec *pspec, TlLauncherctl *client)
++{
++  update (self);
++}
++
++
++static void
++phosh_rotation_manager_set_property (GObject      *object,
++                                     guint         property_id,
++                                     const GValue *value,
++                                     GParamSpec   *pspec)
++{
++  PhoshRotationManager *self = PHOSH_ROTATION_MANAGER (object);
++
++  switch (property_id) {
++  case PROP_LOCKSCREEN_MANAGER:
++    /* construct only */
++    self->lockscreen_manager = g_value_dup_object (value);
++    break;
++  case PROP_MONITOR:
++    phosh_rotation_manager_set_monitor (self, g_value_get_object (value));
++    break;
++  case PROP_ORIENTATION_LOCKED:
++    phosh_rotation_manager_set_orientation_locked (self, g_value_get_boolean (value));
++    break;
++  case PROP_MODE:
++    phosh_rotation_manager_set_mode (self, g_value_get_enum (value));
++    break;
++  default:
++    G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
++    break;
++  }
++}
++
++
++static void
++phosh_rotation_manager_get_property (GObject    *object,
++                                     guint       property_id,
++                                     GValue     *value,
++                                     GParamSpec *pspec)
++{
++  PhoshRotationManager *self = PHOSH_ROTATION_MANAGER (object);
++
++  switch (property_id) {
++  case PROP_LOCKSCREEN_MANAGER:
++    g_value_set_object (value, self->lockscreen_manager);
++    break;
++  case PROP_ORIENTATION_LOCKED:
++    g_value_set_boolean (value, self->orientation_locked);
++    break;
++  case PROP_ORIENTATION:
++    g_value_set_string (value, self->orientation);
++    break;
++  case PROP_MODE:
++    g_value_set_enum (value, phosh_rotation_manager_get_mode (self));
++    break;
++  case PROP_MONITOR:
++    g_value_set_object (value, phosh_rotation_manager_get_monitor (self));
++    break;
++  case PROP_TRANSFORM:
++    g_value_set_enum (value, phosh_rotation_manager_get_transform (self));
++    break;
++  default:
++    G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
++    break;
++  }
++}
++
++
++static void
++phosh_rotation_manager_constructed (GObject *object)
++{
++  PhoshRotationManager *self = PHOSH_ROTATION_MANAGER (object);
++
++  G_OBJECT_CLASS (phosh_rotation_manager_parent_class)->constructed (object);
++
++  self->client = g_object_ref (tl_launcherctl_get_default ());
++  g_signal_connect_object (self->client, "event::rotation",
++                           G_CALLBACK (on_rotation_event), self, G_CONNECT_SWAPPED);
++  g_signal_connect_object (self->client, "notify::available",
++                           G_CALLBACK (on_available_changed), self, G_CONNECT_SWAPPED);
++  update (self);
++}
++
++
++static void
++phosh_rotation_manager_dispose (GObject *object)
++{
++  PhoshRotationManager *self = PHOSH_ROTATION_MANAGER (object);
++
++  g_cancellable_cancel (self->cancel);
++  g_clear_object (&self->cancel);
++  g_clear_object (&self->client);
++  g_clear_object (&self->lockscreen_manager);
++  g_clear_object (&self->monitor);
++  g_clear_pointer (&self->orientation, g_free);
++
++  G_OBJECT_CLASS (phosh_rotation_manager_parent_class)->dispose (object);
++}
++
++
++static void
++phosh_rotation_manager_class_init (PhoshRotationManagerClass *klass)
++{
++  GObjectClass *object_class = (GObjectClass *)klass;
++
++  object_class->constructed = phosh_rotation_manager_constructed;
++  object_class->dispose = phosh_rotation_manager_dispose;
++
++  object_class->set_property = phosh_rotation_manager_set_property;
++  object_class->get_property = phosh_rotation_manager_get_property;
++
++  props[PROP_LOCKSCREEN_MANAGER] =
++    g_param_spec_object ("lockscreen-manager", "", "",
++                         PHOSH_TYPE_LOCKSCREEN_MANAGER,
++                         G_PARAM_CONSTRUCT_ONLY | G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
++
++  props[PROP_MONITOR] =
++    g_param_spec_object ("monitor", "", "",
++                         PHOSH_TYPE_MONITOR,
++                         G_PARAM_READWRITE | G_PARAM_EXPLICIT_NOTIFY | G_PARAM_STATIC_STRINGS);
++
++  props[PROP_ORIENTATION_LOCKED] =
++    g_param_spec_boolean ("orientation-locked", "", "",
++                          TRUE,
++                          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
++
++  /**
++   * PhoshRotationManager:orientation:
++   *
++   * The orientation the launcher reports (`portrait`, `landscape`), or %NULL
++   */
++  props[PROP_ORIENTATION] =
++    g_param_spec_string ("orientation", "", "",
++                         NULL,
++                         G_PARAM_READABLE | G_PARAM_STATIC_STRINGS);
++
++  props[PROP_MODE] =
++    g_param_spec_enum ("mode", "", "",
++                       PHOSH_TYPE_ROTATION_MANAGER_MODE,
++                       PHOSH_ROTATION_MANAGER_MODE_OFF,
++                       G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
++
++  props[PROP_TRANSFORM] =
++    g_param_spec_enum ("transform", "", "",
++                       PHOSH_TYPE_MONITOR_TRANSFORM,
++                       PHOSH_MONITOR_TRANSFORM_NORMAL,
++                       G_PARAM_READABLE | G_PARAM_EXPLICIT_NOTIFY | G_PARAM_STATIC_STRINGS);
++
++  g_object_class_install_properties (object_class, LAST_PROP, props);
++}
++
++
++static void
++phosh_rotation_manager_init (PhoshRotationManager *self)
++{
++  self->cancel = g_cancellable_new ();
++  self->orientation_locked = TRUE;
++}
++
++
++/* @sensor_proxy_manager is not used: there is no sensor, Android turns the display */
++PhoshRotationManager *
++phosh_rotation_manager_new (PhoshSensorProxyManager *sensor_proxy_manager,
++                            PhoshLockscreenManager  *lockscreen_manager,
++                            PhoshMonitor            *monitor)
++{
++  return g_object_new (PHOSH_TYPE_ROTATION_MANAGER,
++                       "lockscreen-manager", lockscreen_manager,
++                       "monitor", monitor,
++                       NULL);
++}
++
++
++static void
++on_lock_posted (GObject *source, GAsyncResult *res, gpointer data)
++{
++  TlLauncherctl *client = TL_LAUNCHERCTL (source);
++  PhoshRotationManager *self;
++  g_autoptr (GError) err = NULL;
++  g_autoptr (JsonObject) reply = tl_launcherctl_post_finish (client, res, &err);
++
++  if (!reply) {
++    if (!g_error_matches (err, G_IO_ERROR, G_IO_ERROR_CANCELLED))
++      g_warning ("Failed to set the rotation lock: %s", err->message);
++    return;
++  }
++
++  /* The stream says the same; this is for when it is behind or closed */
++  self = PHOSH_ROTATION_MANAGER (data);
++  if (json_object_has_member (reply, "lock")) {
++    gboolean locked = json_object_get_boolean_member_with_default (reply, "lock", TRUE);
++
++    if (locked != self->orientation_locked) {
++      self->orientation_locked = locked;
++      g_object_notify_by_pspec (G_OBJECT (self), props[PROP_ORIENTATION_LOCKED]);
++    }
++  }
++}
++
++
++/**
++ * phosh_rotation_manager_set_orientation_locked:
++ * @self: The #PhoshRotationManager
++ * @locked: Whether to lock the orientation
++ *
++ * Asks the launcher to set Android's rotation lock. The property changes when the launcher
++ * answers (or says so on the watch stream), not before.
++ */
++void
++phosh_rotation_manager_set_orientation_locked (PhoshRotationManager *self, gboolean locked)
++{
++  g_autofree char *body = NULL;
++
++  g_return_if_fail (PHOSH_IS_ROTATION_MANAGER (self));
++
++  if (!self->have_state) {
++    g_debug ("No launcher, not setting the rotation lock");
++    return;
++  }
++
++  if (locked == self->orientation_locked)
++    return;
++
++  body = g_strdup_printf ("{\"lock\":%s}", locked ? "true" : "false");
++  tl_launcherctl_post_async (self->client, "/v1/rotation", body, self->cancel,
++                             on_lock_posted, self);
++}
++
++
++gboolean
++phosh_rotation_manager_get_orientation_locked (PhoshRotationManager *self)
++{
++  g_return_val_if_fail (PHOSH_IS_ROTATION_MANAGER (self), TRUE);
++
++  return self->orientation_locked;
++}
++
++
++PhoshRotationManagerMode
++phosh_rotation_manager_get_mode (PhoshRotationManager *self)
++{
++  g_return_val_if_fail (PHOSH_IS_ROTATION_MANAGER (self), PHOSH_ROTATION_MANAGER_MODE_OFF);
++
++  return self->have_state ? PHOSH_ROTATION_MANAGER_MODE_SENSOR : PHOSH_ROTATION_MANAGER_MODE_OFF;
++}
++
++
++/**
++ * phosh_rotation_manager_set_mode:
++ * @self: The #PhoshRotationManager
++ * @mode: The #PhoshRotationManagerMode to set
++ *
++ * The mode is not the shell's to choose here: it is SENSOR while there is a launcher and OFF
++ * without one.
++ *
++ * Returns: %TRUE if the manager is in @mode already, otherwise %FALSE
++ */
++gboolean
++phosh_rotation_manager_set_mode (PhoshRotationManager *self, PhoshRotationManagerMode mode)
++{
++  g_return_val_if_fail (PHOSH_IS_ROTATION_MANAGER (self), FALSE);
++
++  return mode == phosh_rotation_manager_get_mode (self);
++}
++
++
++void
++phosh_rotation_manager_set_transform (PhoshRotationManager   *self,
++                                      PhoshMonitorTransform  transform)
++{
++  g_return_if_fail (PHOSH_IS_ROTATION_MANAGER (self));
++
++  g_debug ("Android rotates the display, not applying transform %d", transform);
++}
++
++
++PhoshMonitorTransform
++phosh_rotation_manager_get_transform (PhoshRotationManager *self)
++{
++  g_return_val_if_fail (PHOSH_IS_ROTATION_MANAGER (self), PHOSH_MONITOR_TRANSFORM_NORMAL);
++
++  return self->monitor ? self->monitor->transform : PHOSH_MONITOR_TRANSFORM_NORMAL;
++}
++
++
++/**
++ * phosh_rotation_manager_get_monitor:
++ * @self: The PhoshRotationManager
++ *
++ * Get the monitor this manager acts on: none without a launcher.
++ *
++ * Returns:(transfer none): The current monitor
++ */
++PhoshMonitor *
++phosh_rotation_manager_get_monitor (PhoshRotationManager *self)
++{
++  g_return_val_if_fail (PHOSH_IS_ROTATION_MANAGER (self), NULL);
++
++  return self->have_state ? self->monitor : NULL;
++}
++
++
++void
++phosh_rotation_manager_set_monitor (PhoshRotationManager *self, PhoshMonitor *monitor)
++{
++  g_return_if_fail (PHOSH_IS_ROTATION_MANAGER (self));
++  g_return_if_fail (PHOSH_IS_MONITOR (monitor) || monitor == NULL);
++
++  g_debug ("Using monitor %p", monitor);
++
++  if (self->monitor == monitor)
++    return;
++
++  g_clear_object (&self->monitor);
++  if (monitor)
++    self->monitor = g_object_ref (monitor);
++
++  g_object_notify_by_pspec (G_OBJECT (self), props[PROP_MONITOR]);
++}
