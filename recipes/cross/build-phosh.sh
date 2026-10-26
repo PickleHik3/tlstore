@@ -29,6 +29,10 @@
 #         display", Rendering), carried as a wlroots patch file
 #   0006  the keymap's shm file is a sealed memfd on Android (a wlroots patch file; no /proc
 #         re-open, which SELinux denies), and phoc survives a keymap that failed to allocate
+#   0007  Xwayland on Android (a wlroots patch file): the X11 sockets and lock files in
+#         $TERMUX_PREFIX/tmp, where Termux's libxcb looks (Android has no /tmp), Xwayland's device
+#         path compiled in (not the sysroot's copy pkg-config answers), and a display whose
+#         socket answers (the launcher's own, :0) is never taken over
 # and, from the recipe, not a patch: org.gnome.mutter.keybindings (phoc/*.gschema.xml) and the
 # archive's compiled share/glib-2.0/schemas/gschemas.compiled.
 #
@@ -70,14 +74,18 @@
 #   - wlroots 0.20.2, the subproject phoc's wlroots.wrap names, linked statically: backends=x11
 #     only (no DRM, libinput, session), renderers=vulkan (the Vulkan renderer, and pixman, which
 #     wlroots always has; no GLES2), no allocators (no gbm, no udmabuf; the shm allocator is
-#     always built), no libliftoff, color management or Xwayland, and xcb-errors off (Termux has
-#     no xcb-util-errors; it only gives the X11 backend readable error names). The Vulkan
+#     always built), no libliftoff or color management, and xcb-errors off (Termux has no
+#     xcb-util-errors; it only gives the X11 backend and the X window manager readable error
+#     names). Xwayland is on (docs/PHOSH.md story 18, X11-only apps inside phosh): wlroots starts
+#     Termux's $TERMUX_PREFIX/bin/Xwayland (the xwayland part) when the first X client connects,
+#     and links libxcb's composite, res and xfixes and xcb-util-wm's ewmh and icccm. The Vulkan
 #     renderer links libvulkan.so (Termux's vulkan-loader-generic, with mesa-vulkan-icd-freedreno
 #     for the GPU: a hidden part of the archive's package) and compiles its shaders with the
 #     host's glslang (glslang-tools in CI). At start phoc tries Vulkan on the GPU and falls back
 #     to pixman, logging the choice; WLR_RENDERER=pixman|vulkan forces one;
 #   - gmobile v0.6.0_beta1 and gvdb, meson subprojects too, static;
-#   - phoc's own xwayland option off: M0 runs Wayland clients only;
+#   - phoc's own xwayland option on, with wlroots': phoc sets DISPLAY for phosh and the apps it
+#     starts to the Xwayland display (the first free one after the launcher's :0);
 #   - for phosh: gmobile (static), libgvc (static, over Termux's libpulse), feedbackd's libfeedback
 #     (a shared library, because its meson says so: lib/libfeedback-0.0.so in the archive, found
 #     through the binary's $ORIGIN/../lib), and everything else from the Termux sysroot (gtk3,
@@ -242,10 +250,10 @@ build_phoc() {
     meson setup "$build" "$SOURCE_DIR" --cross-file "$cross_file" "${native[@]}" \
         --prefix=/ --buildtype=release --wrap-mode=default \
         -Dtests=false -Dgtk_doc=false -Dman=false \
-        -Dxwayland=disabled \
+        -Dxwayland=enabled \
         -Dwlroots:default_library=static -Dgmobile:default_library=static \
         -Dwlroots:backends=x11 -Dwlroots:renderers=vulkan -Dwlroots:allocators= \
-        -Dwlroots:session=disabled -Dwlroots:xcb-errors=disabled -Dwlroots:xwayland=disabled \
+        -Dwlroots:session=disabled -Dwlroots:xcb-errors=disabled -Dwlroots:xwayland=enabled \
         -Dwlroots:color-management=disabled -Dwlroots:libliftoff=disabled \
         -Dwlroots:examples=false
     check_pin "$SOURCE_DIR/subprojects/wlroots-0.20.x" "$WLROOTS_COMMIT" "wlroots"
@@ -431,6 +439,20 @@ check_phoc() {
     }
     if "$readelf" -d "$stage/bin/phoc" | grep NEEDED | grep -E 'libinput|libudev|libseat|libgbm|libEGL|libGLES'; then
         echo "error: phoc links a library the X11-only build must not need" >&2
+        exit 1
+    fi
+    # Xwayland is in, with the device's paths (phoc patch 0007): the binary Termux installs, the
+    # sockets where Termux's libxcb looks, and no path of the build machine's sysroot.
+    grep -qa "$TERMUX_PREFIX/bin/Xwayland" "$stage/bin/phoc" || {
+        echo "error: phoc has no Xwayland, or not $TERMUX_PREFIX/bin/Xwayland" >&2
+        exit 1
+    }
+    grep -qa "$TERMUX_PREFIX/tmp/.X11-unix" "$stage/bin/phoc" || {
+        echo "error: phoc's Xwayland sockets are not in $TERMUX_PREFIX/tmp/.X11-unix" >&2
+        exit 1
+    }
+    if grep -qa "$TL_SYSROOT$TERMUX_PREFIX/bin/Xwayland" "$stage/bin/phoc"; then
+        echo "error: phoc has the build sysroot's Xwayland path compiled in" >&2
         exit 1
     fi
     # meson install drops the build and sysroot directories from RUNPATH; only the device prefix stays.
