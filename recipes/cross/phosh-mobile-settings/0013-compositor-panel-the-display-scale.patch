@@ -1,0 +1,177 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PickleHik3 <noreply@example.invalid>
+Date: Mon, 26 Oct 2026 13:00:00 +0000
+Subject: [PATCH 13/14] compositor panel: the display scale
+
+The panel gets a Display scale row: Automatic, 1x, 1.5x, 2x, 2.5x, 3x or 4x. It is a new
+gsettings key of mobi.phosh.MobileSettings, display-scale (a double, 0.0 is automatic, 1.0 to
+10.0 is the scale), because every other panel keeps its state in gsettings, and the session
+script that starts phoc turns the key into PHOSH_SCALE, which phoc reads when it starts
+(recipes/cross/phoc/0004): a change applies the next time the display starts. A scale in
+phoc.ini wins over both, as it does over PHOSH_SCALE.
+---
+
+--- a/data/mobi.phosh.MobileSettings.gschema.xml
++++ b/data/mobi.phosh.MobileSettings.gschema.xml
+@@ -10,6 +10,21 @@
+         instead.
+       </description>
+     </key>
++    <key name="display-scale" type="d">
++      <default>0.0</default>
++      <range min="0.0" max="10.0"/>
++      <summary>The scale of the display</summary>
++      <description>
++        The scale the compositor gives the display, 1.0 to 10.0, or 0.0 to
++        leave it to the compositor, which divides the width of the display by
++        360, rounded down and at least 1. phoc reads its scale from the
++        PHOSH_SCALE environment variable when it starts, so the script that
++        starts the session sets PHOSH_SCALE from this key when it is not 0.0,
++        and a change applies the next time the display starts. A scale in
++        phoc.ini wins over this one.
++      </description>
++    </key>
++
+     <key name="enable-conf-tweaks" type="b">
+       <default>false</default>
+       <summary>Whether to parse and display Configurable Tweaks</summary>
+--- a/src/ms-compositor-panel.c
++++ b/src/ms-compositor-panel.c
+@@ -15,15 +15,30 @@
+ #include "ms-scale-to-fit-row.h"
+ #include "ms-util.h"
+ 
++#include <math.h>
++
+ /* Verbatim from compositor */
+ #define COMPOSITOR_SCHEMA_ID "sm.puri.phoc"
+ #define COMPOSITOR_KEY_SCALE_TO_FIT "scale-to-fit"
+ 
++/*
++ * The display scale is our own key, in mobi.phosh.MobileSettings: 0.0 is automatic, otherwise
++ * the scale phoc gives the display. phoc reads PHOSH_SCALE when it starts (and phoc.ini's
++ * output scale wins over it), so the session script that starts phoc turns this key into
++ * PHOSH_SCALE; a change applies the next time the display starts.
++ */
++#define DISPLAY_SCALE_KEY "display-scale"
++
++/* The entries of the combo row in ms-compositor-panel.ui, in order */
++static const double display_scales[] = { 0.0, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0 };
++
+ struct _MsCompositorPanel {
+   MsPanel           parent;
+ 
+   GSettings        *settings;
++  GSettings        *ms_settings;
+   GtkWidget        *scale_to_fit_switch;
++  AdwComboRow      *display_scale_row;
+ 
+   GtkListBox        *running_apps_listbox;
+   GListStore        *running_apps_rows;
+@@ -33,6 +48,38 @@
+ G_DEFINE_TYPE (MsCompositorPanel, ms_compositor_panel, MS_TYPE_PANEL)
+ 
+ 
++static gboolean
++display_scale_get_mapping (GValue *value, GVariant *variant, gpointer user_data)
++{
++  double scale = g_variant_get_double (variant);
++  guint nearest = 0;
++
++  /* A scale that is not in the list (set with gsettings) shows as the nearest entry */
++  if (scale > 0.0) {
++    nearest = 1;
++    for (guint i = 2; i < G_N_ELEMENTS (display_scales); i++) {
++      if (fabs (display_scales[i] - scale) < fabs (display_scales[nearest] - scale))
++        nearest = i;
++    }
++  }
++
++  g_value_set_uint (value, nearest);
++  return TRUE;
++}
++
++
++static GVariant *
++display_scale_set_mapping (const GValue *value, const GVariantType *expected_type, gpointer user_data)
++{
++  guint selected = g_value_get_uint (value);
++
++  if (selected >= G_N_ELEMENTS (display_scales))
++    return NULL;
++
++  return g_variant_new_double (display_scales[selected]);
++}
++
++
+ static void
+ add_application_row (MsCompositorPanel *self, const char *app_id)
+ {
+@@ -114,6 +161,7 @@
+   g_clear_object (&self->running_apps_rows);
+   g_clear_object (&self->tracker);
+   g_clear_object (&self->settings);
++  g_clear_object (&self->ms_settings);
+ 
+   G_OBJECT_CLASS (ms_compositor_panel_parent_class)->finalize (object);
+ }
+@@ -130,6 +178,7 @@
+   gtk_widget_class_set_template_from_resource (widget_class,
+                                                "/mobi/phosh/MobileSettings/ui/ms-compositor-panel.ui");
+   gtk_widget_class_bind_template_child (widget_class, MsCompositorPanel, scale_to_fit_switch);
++  gtk_widget_class_bind_template_child (widget_class, MsCompositorPanel, display_scale_row);
+   gtk_widget_class_bind_template_child (widget_class, MsCompositorPanel, running_apps_listbox);
+ }
+ 
+@@ -154,6 +203,17 @@
+                    "active",
+                    G_SETTINGS_BIND_DEFAULT);
+ 
++  self->ms_settings = g_settings_new (MOBILE_SETTINGS_APP_ID);
++  g_settings_bind_with_mapping (self->ms_settings,
++                                DISPLAY_SCALE_KEY,
++                                self->display_scale_row,
++                                "selected",
++                                G_SETTINGS_BIND_DEFAULT,
++                                display_scale_get_mapping,
++                                display_scale_set_mapping,
++                                NULL,
++                                NULL);
++
+   app = MS_APPLICATION (g_application_get_default ());
+   g_signal_connect_swapped (app, "notify::toplevel-tracker",
+                             G_CALLBACK (on_toplevel_tracker_changed), self);
+--- a/src/ui/ms-compositor-panel.ui
++++ b/src/ui/ms-compositor-panel.ui
+@@ -8,6 +8,31 @@
+           <object class="AdwPreferencesPage">
+             <child>
+               <object class="AdwPreferencesGroup">
++                <property name="title" translatable="yes">Display scale</property>
++                <property name="description" translatable="yes">How large everything is drawn. This applies the next time the display starts.</property>
++                <child>
++                  <object class="AdwComboRow" id="display_scale_row">
++                    <property name="title" translatable="yes">Scale</property>
++                    <property name="subtitle" translatable="yes">Automatic follows the width of the display</property>
++                    <property name="model">
++                      <object class="GtkStringList">
++                        <items>
++                          <item translatable="yes">Automatic</item>
++                          <item>1×</item>
++                          <item>1.5×</item>
++                          <item>2×</item>
++                          <item>2.5×</item>
++                          <item>3×</item>
++                          <item>4×</item>
++                        </items>
++                      </object>
++                    </property>
++                  </object>
++                </child>
++              </object>
++            </child>
++            <child>
++              <object class="AdwPreferencesGroup">
+                 <property name="title" translatable="yes">Scaling down of running applications</property>
+                 <property name="description" translatable="yes">Only enable this for broken apps that don't fit the screen</property>
+                 <property name="sensitive" bind-source="scale_to_fit_switch" bind-property="active" bind-flags="sync-create|invert-boolean"/>

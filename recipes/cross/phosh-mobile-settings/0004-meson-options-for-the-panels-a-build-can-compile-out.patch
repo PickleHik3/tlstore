@@ -1,0 +1,406 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PickleHik3 <noreply@example.invalid>
+Date: Mon, 26 Oct 2026 13:00:00 +0000
+Subject: [PATCH 04/14] meson: options for the panels a build can compile out
+
+New options, all true, which is upstream's build: welcome-panel, lang-panel, alerts-panel,
+lockscreen-panel, osk-panel, convergence-panel, sensors-panel, features-panel, updates-panel
+and about-panel, and plugins and tests for the device plugins and the tests. A panel that is off
+has no dependency (accountsservice and polkit for the language panel, libcellbroadcast for the
+alerts panel, libpms for the language, OSK and OS update panels), no source files, defines
+MOBILE_SETTINGS_HAVE_<PANEL>_PANEL as 0 in mobile-settings-config.h and takes its objects out of
+the GtkBuilder file and the resource file that name them (tools/tl-ui-filter, between
+'<!-- tl-if PANEL -->' markers). libnm is needed only with gcc-panels, which it was written
+for. The overview, quick settings (top bar), compositor and feedback panels are always built.
+The markers and C guards follow, one commit per panel.
+---
+
+--- a/meson.build
++++ b/meson.build
+@@ -37,7 +37,29 @@
+ adw_ver_str = 'ADW_VERSION_@0@'.format(adw_ver.replace('.', '_'))
+ adw_ver_cmp = '>=@0@'.format(adw_ver)
+ 
+-accountsservice_dep = dependency('accountsservice', version: '>= 23.13')
++# Dependencies of the panels the tl patch set can compile out. A panel that is off has no
++# dependency: not_found_dep is a dependency that is never found and adds nothing to a build.
++not_found_dep = dependency('', required: false)
++
++have_welcome_panel = get_option('welcome-panel')
++have_lang_panel = get_option('lang-panel')
++have_alerts_panel = get_option('alerts-panel')
++have_lockscreen_panel = get_option('lockscreen-panel')
++have_osk_panel = get_option('osk-panel')
++have_convergence_panel = get_option('convergence-panel')
++have_sensors_panel = get_option('sensors-panel')
++have_features_panel = get_option('features-panel')
++have_updates_panel = get_option('updates-panel')
++have_about_panel = get_option('about-panel')
++# libpms holds what the language, OSK and OS update panels share
++have_libpms = have_lang_panel or have_osk_panel or have_updates_panel
++
++accountsservice_dep = not_found_dep
++polkit_gobject_dep = not_found_dep
++if have_lang_panel
++  accountsservice_dep = dependency('accountsservice', version: '>= 23.13')
++  polkit_gobject_dep = dependency('polkit-gobject-1', version: '>= 126')
++endif
+ glib_dep = dependency('glib-2.0', version: glib_ver_cmp)
+ gio_dep = dependency('gio-2.0', version: glib_ver_cmp)
+ gio_unix_dep = dependency('gio-unix-2.0', version: glib_ver_cmp)
+@@ -75,12 +97,15 @@
+ gtk_wayland_dep = dependency('gtk4-wayland', version: gtk_ver_cmp)
+ json_glib_dep = dependency('json-glib-1.0', version: '>= 1.6.2')
+ libfeedback_dep = dependency('libfeedback-0.0', version: '>= 0.8.0')
+-libnm_dep = dependency('libnm', version: '>= 1.52.0')
++# libnm is for the panels taken from GNOME Settings (gcc-panels) only
++libnm_dep = not_found_dep
++if get_option('gcc-panels')
++  libnm_dep = dependency('libnm', version: '>= 1.52.0')
++endif
+ libportal_dep = dependency('libportal', version: '>= 0.9.1')
+ libportal_gtk4_dep = dependency('libportal-gtk4', version: '>= 0.9.1')
+ phosh_plugins_dep = dependency('phosh-plugins', version: '>= 0.23.0')
+ phosh_settings_dep = dependency('phosh-settings', version: '>= 0.40.0')
+-polkit_gobject_dep = dependency('polkit-gobject-1', version: '>= 126')
+ wayland_client_dep = dependency('wayland-client', version: '>=1.14')
+ wayland_protos_dep = dependency('wayland-protocols', version: '>=1.12')
+ yaml_dep = dependency('yaml-0.1')
+@@ -92,12 +117,15 @@
+   default_options: ['examples=false', 'introspection=disabled', 'tests=false'],
+ )
+ 
+-libcbd_dep = dependency(
+-  'libcellbroadcast-0.0',
+-  version: '>= 0.0.2',
+-  fallback: ['libcellbroadcast', 'libcellbroadcast_static_dep'],
+-  default_options: ['daemon=false', 'introspection=disabled', 'tests=false'],
+-)
++libcbd_dep = not_found_dep
++if have_alerts_panel
++  libcbd_dep = dependency(
++    'libcellbroadcast-0.0',
++    version: '>= 0.0.2',
++    fallback: ['libcellbroadcast', 'libcellbroadcast_static_dep'],
++    default_options: ['daemon=false', 'introspection=disabled', 'tests=false'],
++  )
++endif
+ 
+ i18n = import('i18n')
+ 
+@@ -197,6 +225,18 @@
+   datadir / 'phosh-osk-stevia' / 'completers',
+ )
+ config_h.set('MOBILE_SETTINGS_HAVE_GCC_PANELS', get_option('gcc-panels'))
++# 1 when the panel is built, 0 when the tl patch set compiles it out
++config_h.set10('MOBILE_SETTINGS_HAVE_WELCOME_PANEL', have_welcome_panel)
++config_h.set10('MOBILE_SETTINGS_HAVE_LANG_PANEL', have_lang_panel)
++config_h.set10('MOBILE_SETTINGS_HAVE_ALERTS_PANEL', have_alerts_panel)
++config_h.set10('MOBILE_SETTINGS_HAVE_LOCKSCREEN_PANEL', have_lockscreen_panel)
++config_h.set10('MOBILE_SETTINGS_HAVE_OSK_PANEL', have_osk_panel)
++config_h.set10('MOBILE_SETTINGS_HAVE_CONVERGENCE_PANEL', have_convergence_panel)
++config_h.set10('MOBILE_SETTINGS_HAVE_SENSORS_PANEL', have_sensors_panel)
++config_h.set10('MOBILE_SETTINGS_HAVE_FEATURES_PANEL', have_features_panel)
++config_h.set10('MOBILE_SETTINGS_HAVE_UPDATES_PANEL', have_updates_panel)
++config_h.set10('MOBILE_SETTINGS_HAVE_ABOUT_PANEL', have_about_panel)
++config_h.set10('MOBILE_SETTINGS_HAVE_LIBPMS', have_libpms)
+ config_h.set('_PMS_EXTERN', '__attribute__((visibility("default"))) extern')
+ 
+ configure_file(output: 'mobile-settings-config.h', configuration: config_h)
+@@ -205,10 +245,17 @@
+ 
+ subdir('data')
+ subdir('protocols')
+-subdir('libpms')
++libpms_dep = not_found_dep
++if have_libpms
++  subdir('libpms')
++endif
+ subdir('src')
+-subdir('tests')
+-subdir('plugins')
++if get_option('tests')
++  subdir('tests')
++endif
++if get_option('plugins')
++  subdir('plugins')
++endif
+ subdir('po')
+ subdir('docs')
+ if get_option('examples')
+@@ -223,6 +270,18 @@
+     'Tweaks directory': get_option('tweaks-data-dir'),
+     'Use GCC panels': get_option('gcc-panels'),
+     'Use GCC po': get_option('gcc-po'),
++    'Welcome panel': have_welcome_panel,
++    'Language panel': have_lang_panel,
++    'Emergency alerts panel': have_alerts_panel,
++    'Lock screen panel': have_lockscreen_panel,
++    'On screen keyboard panel': have_osk_panel,
++    'Convergence panel': have_convergence_panel,
++    'Sensors panel': have_sensors_panel,
++    'Experimental features panel': have_features_panel,
++    'OS updates panel': have_updates_panel,
++    'About panel': have_about_panel,
++    'Device plugins': get_option('plugins'),
++    'Tests': get_option('tests'),
+   },
+   bool_yn: true,
+ )
+--- a/meson.options
++++ b/meson.options
+@@ -19,3 +19,31 @@
+ 
+ option('gcc-po', type: 'boolean', value: false,
+        description: 'Whether to include translations from GNOME Settings')
++
++# The tl patch set can compile out panels, and with them the libraries they need. All true is
++# upstream's build. The overview, topbar (quick settings), compositor and feedback panels are
++# always built.
++option('welcome-panel', type: 'boolean', value: true,
++       description: 'The welcome panel')
++option('lang-panel', type: 'boolean', value: true,
++       description: 'The language panel (accountsservice, polkit, libpms)')
++option('alerts-panel', type: 'boolean', value: true,
++       description: 'The emergency alerts panel (libcellbroadcast)')
++option('lockscreen-panel', type: 'boolean', value: true,
++       description: 'The lock screen panel')
++option('osk-panel', type: 'boolean', value: true,
++       description: 'The on screen keyboard panel (libpms)')
++option('convergence-panel', type: 'boolean', value: true,
++       description: 'The convergence panel')
++option('sensors-panel', type: 'boolean', value: true,
++       description: 'The sensors panel')
++option('features-panel', type: 'boolean', value: true,
++       description: 'The experimental features panel')
++option('updates-panel', type: 'boolean', value: true,
++       description: 'The OS updates panel (libpms)')
++option('about-panel', type: 'boolean', value: true,
++       description: 'The about panel')
++option('plugins', type: 'boolean', value: true,
++       description: 'Build the device plugins (librem5)')
++option('tests', type: 'boolean', value: true,
++       description: 'Build and run the tests')
+--- a/src/meson.build
++++ b/src/meson.build
+@@ -11,10 +11,6 @@
+ ]
+ 
+ mobile_settings_sources = [
+-  'ms-about-panel.c',
+-  'ms-about-panel.h',
+-  'ms-alerts-panel.c',
+-  'ms-alerts-panel.h',
+   'ms-application.c',
+   'ms-application.h',
+   'ms-audio-device-row.c',
+@@ -23,20 +19,12 @@
+   'ms-audio-device.h',
+   'ms-audio-devices.c',
+   'ms-audio-devices.h',
+-  'ms-cb-message-row.c',
+-  'ms-cb-message-row.h',
+   'ms-cc-panels.c',
+   'ms-cc-panels.h',
+-  'ms-completer-info.c',
+-  'ms-completer-info.h',
+   'ms-compositor-panel.c',
+   'ms-compositor-panel.h',
+-  'ms-convergence-panel.c',
+-  'ms-convergence-panel.h',
+   'ms-debug-info.c',
+   'ms-debug-info.h',
+-  'ms-features-panel.c',
+-  'ms-features-panel.h',
+   'ms-feedback-panel.c',
+   'ms-feedback-panel.h',
+   'ms-feedback-row.c',
+@@ -47,16 +35,8 @@
+   'ms-hidden-app-row.h',
+   'ms-hidden-apps-dialog.c',
+   'ms-hidden-apps-dialog.h',
+-  'ms-lang-panel.c',
+-  'ms-lang-panel.h',
+-  'ms-lockscreen-panel.c',
+-  'ms-lockscreen-panel.h',
+   'ms-main.c',
+   'ms-main.h',
+-  'ms-osk-add-shortcut-dialog.c',
+-  'ms-osk-add-shortcut-dialog.h',
+-  'ms-osk-panel.c',
+-  'ms-osk-panel.h',
+   'ms-overview-panel.c',
+   'ms-overview-panel.h',
+   'ms-panel-switcher.c',
+@@ -71,24 +51,61 @@
+   'ms-plugin-row.h',
+   'ms-scale-to-fit-row.c',
+   'ms-scale-to-fit-row.h',
+-  'ms-sensor-panel.c',
+-  'ms-sensor-panel.h',
+   'ms-sound-row.c',
+   'ms-sound-row.h',
+   'ms-topbar-panel.c',
+   'ms-topbar-panel.h',
+   'ms-toplevel-tracker.c',
+   'ms-toplevel-tracker.h',
+-  'ms-updates-panel.c',
+-  'ms-updates-panel.h',
+   'ms-util.c',
+   'ms-util.h',
+-  'ms-welcome-panel.c',
+-  'ms-welcome-panel.h',
+   'ms-window.c',
+   'ms-window.h',
+ ]
+ 
++# The panels the tl patch set can compile out: a panel that is off has no source file in the build
++# and no object in the GtkBuilder files and the resource file that name it (tools/tl-ui-filter,
++# between '<!-- tl-if PANEL -->' markers).
++tl_panels = {
++  'about-panel': [have_about_panel, ['ms-about-panel.c', 'ms-about-panel.h']],
++  'alerts-panel': [
++    have_alerts_panel,
++    ['ms-alerts-panel.c', 'ms-alerts-panel.h', 'ms-cb-message-row.c', 'ms-cb-message-row.h'],
++  ],
++  'convergence-panel': [have_convergence_panel, ['ms-convergence-panel.c', 'ms-convergence-panel.h']],
++  'features-panel': [have_features_panel, ['ms-features-panel.c', 'ms-features-panel.h']],
++  'lang-panel': [have_lang_panel, ['ms-lang-panel.c', 'ms-lang-panel.h']],
++  'lockscreen-panel': [have_lockscreen_panel, ['ms-lockscreen-panel.c', 'ms-lockscreen-panel.h']],
++  'osk-panel': [
++    have_osk_panel,
++    [
++      'ms-osk-panel.c',
++      'ms-osk-panel.h',
++      'ms-osk-add-shortcut-dialog.c',
++      'ms-osk-add-shortcut-dialog.h',
++      'ms-completer-info.c',
++      'ms-completer-info.h',
++    ],
++  ],
++  'sensors-panel': [have_sensors_panel, ['ms-sensor-panel.c', 'ms-sensor-panel.h']],
++  'updates-panel': [have_updates_panel, ['ms-updates-panel.c', 'ms-updates-panel.h']],
++  'welcome-panel': [have_welcome_panel, ['ms-welcome-panel.c', 'ms-welcome-panel.h']],
++}
++
++tl_ui_off = []
++foreach panel, info : tl_panels
++  if info[0]
++    mobile_settings_sources += info[1]
++  else
++    tl_ui_off += panel
++  endif
++endforeach
++# The placeholder pages for the panels of GNOME Settings (Wi-Fi, Bluetooth, ...) have no panel
++# behind them without gcc-panels
++if not get_option('gcc-panels')
++  tl_ui_off += 'gcc-panels'
++endif
++
+ mobile_settings_deps = [
+   accountsservice_dep,
+   adwaita_dep,
+@@ -122,9 +139,23 @@
+ 
+ gnome = import('gnome')
+ 
++tl_ui_filter = [find_program('python3'), meson.project_source_root() / 'tools' / 'tl-ui-filter']
++
++# ui/meson.build filters ui/ms-window.ui into this directory of the build tree, where the
++# resource file finds it before the source's own
++subdir('ui')
++tl_gresource_xml = custom_target(
++  'filtered-mobile-settings.gresource.xml',
++  input: 'mobile-settings.gresource.xml',
++  output: 'mobile-settings.gresource.xml',
++  command: [tl_ui_filter, '@INPUT@', '@OUTPUT@', tl_ui_off],
++)
++
+ mobile_settings_resources = gnome.compile_resources(
+   'mobile-settings-resources',
+-  'mobile-settings.gresource.xml',
++  tl_gresource_xml,
++  source_dir: [meson.current_build_dir(), meson.current_source_dir()],
++  dependencies: tl_filtered_uis,
+   extra_args: '--manual-register',
+   c_name: 'mobile_settings',
+ )
+--- a/src/ui/meson.build
++++ b/src/ui/meson.build
+@@ -0,0 +1,12 @@
++# GtkBuilder files that name objects of panels the tl patch set can compile out are passed through
++# tools/tl-ui-filter, which drops the blocks of the panels that are off. The result is in this
++# directory of the build tree, where mobile-settings.gresource.xml finds it before the source's own.
++tl_filtered_uis = []
++foreach ui : ['ms-window.ui']
++  tl_filtered_uis += custom_target(
++    'filtered-' + ui,
++    input: ui,
++    output: ui,
++    command: [tl_ui_filter, '@INPUT@', '@OUTPUT@', tl_ui_off],
++  )
++endforeach
+--- a/tools/tl-ui-filter
++++ b/tools/tl-ui-filter
+@@ -0,0 +1,61 @@
++#!/usr/bin/env python3
++#
++# Copyright (C) 2026 Termux Launcher
++#
++# SPDX-License-Identifier: GPL-3.0-or-later
++#
++# Takes the objects of features that are compiled out of a GtkBuilder file, so that the template
++# does not name a type that the build does not have.
++#
++# Usage: tl-ui-filter INPUT OUTPUT [FEATURE...]
++#
++# FEATUREs are the features that are *off*. A block starts with a line holding only
++#
++#   <!-- tl-if FEATURE -->
++#
++# and ends with a line holding only
++#
++#   <!-- tl-endif -->
++#
++# The block is kept when FEATURE is not listed and dropped when it is. The marker lines are not
++# copied. Blocks do not nest.
++
++import re
++import sys
++
++if len(sys.argv) < 3:
++    sys.exit(__doc__)
++
++src, dst = sys.argv[1:3]
++off = set(sys.argv[3:])
++
++start = re.compile(r"^\s*<!--\s*tl-if\s+([a-z0-9_-]+)\s*-->\s*$")
++end = re.compile(r"^\s*<!--\s*tl-endif\s*-->\s*$")
++
++out = []
++skipping = False
++inside = False
++
++with open(src, encoding="utf-8") as f:
++    for number, line in enumerate(f, 1):
++        m = start.match(line)
++        if m:
++            if inside:
++                sys.exit(f"{src}:{number}: tl-if inside tl-if")
++            inside = True
++            skipping = m.group(1) in off
++            continue
++        if end.match(line):
++            if not inside:
++                sys.exit(f"{src}:{number}: tl-endif without tl-if")
++            inside = False
++            skipping = False
++            continue
++        if not skipping:
++            out.append(line)
++
++if inside:
++    sys.exit(f"{src}: tl-if without tl-endif")
++
++with open(dst, "w", encoding="utf-8") as f:
++    f.writelines(out)

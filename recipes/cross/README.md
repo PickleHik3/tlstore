@@ -20,7 +20,7 @@ NDK plus a sysroot assembled with `dpkg-deb -x`.
 | `build-btop.sh` | patched btop, fully static, for the launcher's Shizuku lane | NDK + GNU make |
 | `build-tl-priv.sh` | `tl-priv`, the lane's client (`tl-priv/tl-priv.c`), fully static | NDK |
 | `build-herdr.sh` | herdr, built from source for bionic (Rust, plus Zig 0.16.0 for libghostty-vt, which the script downloads and verifies itself), as a `.tar.gz` app tree behind a launcher script that turns its terminal notifications on in Termux Launcher; `0001-herdr-android.patch` | rustup (`<arch>-linux-android`), NDK, git, curl, xz, GNU tar, gzip |
-| `build-phosh.sh` | the native phosh desktop as a `.tar.gz` archive tree (`bin/`, `share/`), built against the Termux sysroot of `phosh-deps.txt`. builds phoc 0.58.0 with its bundled wlroots 0.20.2 (X11 backend, pixman renderer, no libinput, udev or session) and, from M1, phosh 0.58.0 with the dropped features compiled out; one function per upstream tree, each with its own patch directory (`phoc/`, `phosh/`; `phosh-mobile-settings/` comes with its milestone); `TL_PHOSH_TREES` picks the trees | meson, ninja, pkg-config, wayland-scanner, glib's host tools, gettext, NDK, curl, git, GNU tar, gzip |
+| `build-phosh.sh` | the native phosh desktop as a `.tar.gz` archive tree (`bin/`, `share/`), built against the Termux sysroot of `phosh-deps.txt`. builds phoc 0.58.0 with its bundled wlroots 0.20.2 (X11 backend, pixman renderer, no libinput, udev or session) and, from M1, phosh 0.58.0 with the dropped features compiled out; one function per upstream tree, each with its own patch directory (`phoc/`, `phosh/`; `phosh-mobile-settings/`, M4); `TL_PHOSH_TREES` picks the trees | meson, ninja, pkg-config, wayland-scanner, glib's host tools, gettext, NDK, curl, git, GNU tar, gzip |
 | `fetch-launcher-skills.sh` | the launcher's agent skills, one `.tar.gz` each, packed by the launcher's own `scripts/pack-agent-skills.sh` at a pinned commit (not built; the same on every processor) | git, GNU tar, gzip |
 | `build-terminal-browser.sh` | terminal-browser as a `.tar.gz` app tree, from our fork: its JavaScript built as upstream releases it, `pixel.node` and `agent-browser` built for Android, Termux's `electron42` in place of upstream's Electron | rustup `<arch>-linux-android` + NDK, Node 22 + pnpm 10.13.1, GNU tar |
 
@@ -383,7 +383,7 @@ the sysroot's `vulkan-headers` and `vulkan-loader-generic` (already in `phosh-de
 to pixman, logging `Renderer: ...`; `WLR_RENDERER=pixman|vulkan` forces one. The patch cannot be
 exercised off a phone: the Pong (Adreno) check is owed.
 
-M1 adds phosh 0.58.0 (`TL_PHOSH_TREES` defaults to `phoc phosh`). `phosh/` is its patch set: the
+M1 adds phosh 0.58.0 (`TL_PHOSH_TREES` defaults to `phoc phosh phosh-mobile-settings` from M4). `phosh/` is its patch set: the
 wraps' revisions, the Bionic fixes (a `libintl.h` stand-in as a global argument so that the
 subprojects see it, `memfd_create` by system call, no `exp10`), and meson options that compile out
 what the launcher does not ship (`lockscreen`, `polkit`, `logind`, `osk`, `eds`, `calls`,
@@ -396,3 +396,29 @@ new tag, apply them to the old tag as commits (`git am`), `git rebase --onto <ne
 again. `data/90_tl.gschema.override` (app-filter-mode `[]`, no screensaver lock, no screen
 keyboard) is checked by the build against the sysroot's `org.gnome.desktop` schemas; compiling the
 schemas into the session's `GSETTINGS_SCHEMA_DIR` is the session-file step, not done here.
+
+M4 adds phosh-mobile-settings 0.58.0, built after phosh in the same stage. `phosh-mobile-settings/` is
+its patch set, made like phosh's: the gmobile wrap's revision, the Bionic fixes (the `libintl.h`
+stand-in, no `GLOB_PERIOD`, `libandroid-glob` and `libandroid-wordexp` from Termux), libfeedback
+found next to the binary (`$ORIGIN/../lib`), then one meson option per panel
+(`welcome-panel`, `lang-panel`, `alerts-panel`, `lockscreen-panel`, `osk-panel`, `convergence-panel`,
+`sensors-panel`, `features-panel`, `updates-panel`, `about-panel`, all on in upstream's build) and a
+commit for each that takes the panel, and the library only it needs, out: accountsservice and polkit
+(language), libcellbroadcast (alerts), libpms (language, OSK, OS updates); libnm is only for the
+GNOME Settings panels, which are off. The build turns them all off, which leaves the four panels
+the launcher keeps: overview and apps (the app filter and hidden apps), quick settings (the top bar
+page), compositor and feedback. It also builds without the device plugin and the tests. phosh's
+`phosh-plugins` and `phosh-settings` `.pc` files, headers and libfeedback are copied from the stage
+into `$TL_SYSROOT/tl-phosh-dev` for the build (the cross file's pkg-config wants every path inside the
+sysroot) and removed afterwards. Its desktop file is in `share/applications` (it starts
+`phosh-mobile-settings` from the session's `PATH`, with no D-Bus activation and no service file)
+and shows in phosh's grid when `XDG_CURRENT_DESKTOP` is `Phosh`, which the session script sets.
+The quick settings page lists phosh's quick-setting plugins, and the phosh build has none of
+them (`-Dquick-setting-plugins=false`), so it is empty until phosh builds some.
+
+The display scale is a new row in the compositor panel and a new gsettings key,
+`mobi.phosh.MobileSettings display-scale` (a double: `0.0` is automatic, `1.0` to `10.0` is the
+scale). Nothing writes `phoc.ini` and nothing sets phoc's environment from inside the app: the
+session script that starts phoc (`phosh-session`, #8) reads the key and exports `PHOSH_SCALE=<value>`
+when it is not `0.0`, which phoc reads when it starts (`phoc/0004`); a change applies the next time
+the display starts. A scale in `phoc.ini` still wins over both.

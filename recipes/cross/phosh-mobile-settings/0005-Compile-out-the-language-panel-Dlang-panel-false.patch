@@ -1,0 +1,61 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PickleHik3 <noreply@example.invalid>
+Date: Mon, 26 Oct 2026 13:00:00 +0000
+Subject: [PATCH 05/14] Compile out the language panel (-Dlang-panel=false)
+
+The language panel needs accountsservice (the user's language) and polkit (set-locale), which
+Termux does not have.
+---
+
+--- a/src/mobile-settings.gresource.xml
++++ b/src/mobile-settings.gresource.xml
+@@ -12,7 +12,9 @@
+     <file>ui/ms-feedback-panel.ui</file>
+     <file>ui/ms-feedback-row.ui</file>
+     <file>ui/ms-hidden-app-row.ui</file>
++    <!-- tl-if lang-panel -->
+     <file>ui/ms-lang-panel.ui</file>
++    <!-- tl-endif -->
+     <file>ui/ms-lockscreen-panel.ui</file>
+     <file>ui/ms-osk-add-shortcut-dialog.ui</file>
+     <file>ui/ms-osk-panel.ui</file>
+--- a/src/ms-main.c
++++ b/src/ms-main.c
+@@ -18,7 +18,9 @@
+ #include "ms-convergence-panel.h"
+ #include "ms-features-panel.h"
+ #include "ms-feedback-panel.h"
++#if MOBILE_SETTINGS_HAVE_LANG_PANEL
+ #include "ms-lang-panel.h"
++#endif
+ #include "ms-lockscreen-panel.h"
+ #include "ms-osk-panel.h"
+ #include "ms-overview-panel.h"
+@@ -38,7 +40,9 @@
+   g_type_ensure (MS_TYPE_CONVERGENCE_PANEL);
+   g_type_ensure (MS_TYPE_FEATURES_PANEL);
+   g_type_ensure (MS_TYPE_FEEDBACK_PANEL);
++#if MOBILE_SETTINGS_HAVE_LANG_PANEL
+   g_type_ensure (MS_TYPE_LANG_PANEL);
++#endif
+   g_type_ensure (MS_TYPE_LOCKSCREEN_PANEL);
+   g_type_ensure (MS_TYPE_OSK_PANEL);
+   g_type_ensure (MS_TYPE_OVERVIEW_PANEL);
+--- a/src/ui/ms-window.ui
++++ b/src/ui/ms-window.ui
+@@ -313,6 +313,7 @@
+                       </object>
+                     </child>
+ 
++                    <!-- tl-if lang-panel -->
+                     <child>
+                       <object class="AdwViewStackPage">
+                         <property name="title" translatable="yes">Language</property>
+@@ -332,6 +333,7 @@
+                         </property>
+                       </object>
+                     </child>
++                    <!-- tl-endif -->
+ 
+                     <child>
+                       <object class="AdwViewStackPage">

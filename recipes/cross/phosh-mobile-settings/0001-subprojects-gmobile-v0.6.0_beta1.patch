@@ -1,0 +1,19 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PickleHik3 <noreply@example.invalid>
+Date: Mon, 26 Oct 2026 13:00:00 +0000
+Subject: [PATCH 01/14] subprojects: gmobile v0.6.0_beta1
+
+The wrap in the tag names gmobile v0.4.0, the oldest version phosh-mobile-settings accepts.
+This build uses what phoc and phosh are built against, gmobile v0.6.0_beta1 (the same commit
+as recipes/cross/phosh/0001), static, as a meson subproject: Termux has no gmobile.
+---
+
+--- a/subprojects/gmobile.wrap
++++ b/subprojects/gmobile.wrap
+@@ -1,5 +1,5 @@
+ [wrap-git]
+ directory=gmobile
+ url=https://gitlab.gnome.org/World/Phosh/gmobile.git
+-revision=v0.4.0
++revision=v0.6.0_beta1
+ depth=1

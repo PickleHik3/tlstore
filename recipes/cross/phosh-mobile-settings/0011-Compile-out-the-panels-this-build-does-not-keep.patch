@@ -1,0 +1,205 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PickleHik3 <noreply@example.invalid>
+Date: Mon, 26 Oct 2026 13:00:00 +0000
+Subject: [PATCH 11/14] Compile out the welcome, convergence, sensors, features and about panels
+
+These panels need no library Termux lacks, but they are not among the four this build keeps
+(overview, quick settings, compositor, feedback), and a settings app of four pages has no use for
+a welcome page.
+---
+
+--- a/src/mobile-settings.gresource.xml
++++ b/src/mobile-settings.gresource.xml
+@@ -2,7 +2,9 @@
+ <gresources>
+   <gresource prefix="/mobi/phosh/MobileSettings">
+     <file>style.css</file>
++    <!-- tl-if about-panel -->
+     <file>ui/ms-about-panel.ui</file>
++    <!-- tl-endif -->
+     <!-- tl-if alerts-panel -->
+     <file>ui/ms-alerts-panel.ui</file>
+     <!-- tl-endif -->
+@@ -11,8 +13,12 @@
+     <file>ui/ms-cb-message-row.ui</file>
+     <!-- tl-endif -->
+     <file>ui/ms-compositor-panel.ui</file>
++    <!-- tl-if convergence-panel -->
+     <file>ui/ms-convergence-panel.ui</file>
++    <!-- tl-endif -->
++    <!-- tl-if features-panel -->
+     <file>ui/ms-features-panel.ui</file>
++    <!-- tl-endif -->
+     <file>ui/ms-feedback-panel.ui</file>
+     <file>ui/ms-feedback-row.ui</file>
+     <file>ui/ms-hidden-app-row.ui</file>
+@@ -32,14 +38,18 @@
+     <file>ui/ms-panel-switcher.ui</file>
+     <file>ui/ms-plugin-row.ui</file>
+     <file>ui/ms-scale-to-fit-row.ui</file>
++    <!-- tl-if sensors-panel -->
+     <file>ui/ms-sensor-panel.ui</file>
++    <!-- tl-endif -->
+     <file>ui/ms-sound-row.ui</file>
+     <file>ui/ms-topbar-panel.ui</file>
+     <file>ui/ms-hidden-apps-dialog.ui</file>
+     <!-- tl-if updates-panel -->
+     <file>ui/ms-updates-panel.ui</file>
+     <!-- tl-endif -->
++    <!-- tl-if welcome-panel -->
+     <file>ui/ms-welcome-panel.ui</file>
++    <!-- tl-endif -->
+     <file>ui/ms-window.ui</file>
+     <file alias="shortcuts-dialog.ui">ui/shortcuts-dialog.ui</file>
+     <file alias="metainfo.xml">../data/mobi.phosh.MobileSettings.metainfo.xml.in</file>
+--- a/src/ms-main.c
++++ b/src/ms-main.c
+@@ -12,13 +12,19 @@
+ 
+ #include "mobile-settings-config.h"
+ #include "mobile-settings-resources.h"
++#if MOBILE_SETTINGS_HAVE_ABOUT_PANEL
+ #include "ms-about-panel.h"
++#endif
+ #if MOBILE_SETTINGS_HAVE_ALERTS_PANEL
+ #include "ms-alerts-panel.h"
+ #endif
+ #include "ms-compositor-panel.h"
++#if MOBILE_SETTINGS_HAVE_CONVERGENCE_PANEL
+ #include "ms-convergence-panel.h"
++#endif
++#if MOBILE_SETTINGS_HAVE_FEATURES_PANEL
+ #include "ms-features-panel.h"
++#endif
+ #include "ms-feedback-panel.h"
+ #if MOBILE_SETTINGS_HAVE_LANG_PANEL
+ #include "ms-lang-panel.h"
+@@ -30,25 +36,35 @@
+ #include "ms-osk-panel.h"
+ #endif
+ #include "ms-overview-panel.h"
++#if MOBILE_SETTINGS_HAVE_SENSORS_PANEL
+ #include "ms-sensor-panel.h"
++#endif
+ #include "ms-topbar-panel.h"
+ #if MOBILE_SETTINGS_HAVE_UPDATES_PANEL
+ #include "ms-updates-panel.h"
+ #endif
++#if MOBILE_SETTINGS_HAVE_WELCOME_PANEL
+ #include "ms-welcome-panel.h"
++#endif
+ 
+ #include <glib/gi18n.h>
+ 
+ static void
+ ms_init_types (void)
+ {
++#if MOBILE_SETTINGS_HAVE_ABOUT_PANEL
+   g_type_ensure (MS_TYPE_ABOUT_PANEL);
++#endif
+ #if MOBILE_SETTINGS_HAVE_ALERTS_PANEL
+   g_type_ensure (MS_TYPE_ALERTS_PANEL);
+ #endif
+   g_type_ensure (MS_TYPE_COMPOSITOR_PANEL);
++#if MOBILE_SETTINGS_HAVE_CONVERGENCE_PANEL
+   g_type_ensure (MS_TYPE_CONVERGENCE_PANEL);
++#endif
++#if MOBILE_SETTINGS_HAVE_FEATURES_PANEL
+   g_type_ensure (MS_TYPE_FEATURES_PANEL);
++#endif
+   g_type_ensure (MS_TYPE_FEEDBACK_PANEL);
+ #if MOBILE_SETTINGS_HAVE_LANG_PANEL
+   g_type_ensure (MS_TYPE_LANG_PANEL);
+@@ -60,12 +76,16 @@
+   g_type_ensure (MS_TYPE_OSK_PANEL);
+ #endif
+   g_type_ensure (MS_TYPE_OVERVIEW_PANEL);
++#if MOBILE_SETTINGS_HAVE_SENSORS_PANEL
+   g_type_ensure (MS_TYPE_SENSOR_PANEL);
++#endif
+   g_type_ensure (MS_TYPE_TOPBAR_PANEL);
+ #if MOBILE_SETTINGS_HAVE_UPDATES_PANEL
+   g_type_ensure (MS_TYPE_UPDATES_PANEL);
+ #endif
++#if MOBILE_SETTINGS_HAVE_WELCOME_PANEL
+   g_type_ensure (MS_TYPE_WELCOME_PANEL);
++#endif
+ }
+ 
+ /**
+--- a/src/ui/ms-window.ui
++++ b/src/ui/ms-window.ui
+@@ -95,6 +95,7 @@
+                     <property name="vhomogeneous">False</property>
+                     <signal name="notify::visible-child" handler="show_content_cb" after="yes" swapped="yes"/>
+ 
++                    <!-- tl-if welcome-panel -->
+                     <child>
+                       <object class="AdwViewStackPage">
+                         <property name="title" translatable="yes">Welcome</property>
+@@ -105,6 +106,7 @@
+                         </property>
+                       </object>
+                     </child>
++                    <!-- tl-endif -->
+ 
+                     <child>
+                       <object class="AdwViewStackPage">
+@@ -214,6 +216,7 @@
+                     </child>
+                     <!-- tl-endif -->
+ 
++                    <!-- tl-if convergence-panel -->
+                     <child>
+                       <object class="AdwViewStackPage">
+                         <property name="title" translatable="yes">Convergence</property>
+@@ -231,6 +234,7 @@
+                         </property>
+                       </object>
+                     </child>
++                    <!-- tl-endif -->
+ 
+                     <!-- tl-if osk-panel -->
+                     <child>
+@@ -279,6 +283,7 @@
+                     </child>
+                     <!-- tl-endif -->
+ 
++                    <!-- tl-if sensors-panel -->
+                     <child>
+                       <object class="AdwViewStackPage">
+                         <property name="title" translatable="yes">Sensors</property>
+@@ -297,7 +302,9 @@
+                         </property>
+                       </object>
+                     </child>
++                    <!-- tl-endif -->
+ 
++                    <!-- tl-if features-panel -->
+                     <child>
+                       <object class="AdwViewStackPage">
+                         <property name="title" translatable="yes">Experimental features</property>
+@@ -318,6 +325,7 @@
+                         </property>
+                       </object>
+                     </child>
++                    <!-- tl-endif -->
+ 
+                     <!-- tl-if lang-panel -->
+                     <child>
+@@ -387,6 +395,7 @@
+                     </child>
+                     <!-- tl-endif -->
+ 
++                    <!-- tl-if about-panel -->
+                     <child>
+                       <object class="AdwViewStackPage">
+                         <property name="title" translatable="yes">About</property>
+@@ -405,6 +414,7 @@
+                         </property>
+                       </object>
+                     </child>
++                    <!-- tl-endif -->
+ 
+                     <child>
+                       <object class="AdwViewStackPage">

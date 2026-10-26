@@ -9,11 +9,11 @@
 #   phoc                    recipes/cross/phoc/                   built (M0)
 #   gmobile, libfeedback    meson subprojects of phoc and phosh, pinned below, not trees of their own
 #   phosh                   recipes/cross/phosh/                  built (M1)
-#   phosh-mobile-settings   recipes/cross/phosh-mobile-settings/  M4
+#   phosh-mobile-settings   recipes/cross/phosh-mobile-settings/  built (M4)
 #   tl-feedbackd            (this repository's own small daemon)  M3
 #
-# TL_PHOSH_TREES names the trees to build, in order (default: phoc phosh). A tree that is not
-# written yet stops the build instead of being skipped.
+# TL_PHOSH_TREES names the trees to build, in order (default: phoc phosh phosh-mobile-settings).
+# A tree that is not written yet stops the build instead of being skipped.
 #
 # M0 builds unpatched-in-spirit phoc 0.58.0: the tag as upstream tags it, plus the numbered patches
 # in recipes/cross/phoc/ that make it compile and link against Bionic and Termux's sysroot, and
@@ -116,6 +116,13 @@ GMOBILE_COMMIT="dcc1c4ebf13e985300f8a448530b29e82acad527"       # v0.6.0_beta1, 
 LIBFEEDBACK_COMMIT="f14642cb0408af9b6bf963eff3bc61eff6b0a1b2"   # feedbackd v0.8.1
 GVC_COMMIT="d2442f455844e5292cb4a74ffc66ecc8d7595a9f"           # libgnome-volume-control, as phosh's wrap
 
+# M4: phosh-mobile-settings 0.58.0, the settings app (patches in recipes/cross/phosh-mobile-settings/;
+# the build is described above build_phosh_mobile_settings).
+PMS_VERSION="0.58.0"
+PMS_URL="https://gitlab.gnome.org/World/Phosh/phosh-mobile-settings/-/archive/v$PMS_VERSION/phosh-mobile-settings-v$PMS_VERSION.tar.gz"
+PMS_SHA256=cc7966be26f0d3ef7e090051a9be5de9d5d8c5f2c382da673491904173a5ee9e
+PMS_COMMIT="38168614f14a3ce69c34dc89e72354783a97fa3b"   # v0.58.0, the commit the tag peels to
+
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
 TL_ARCH=${TL_ARCH:-aarch64}
@@ -128,7 +135,7 @@ TL_NDK=${TL_NDK:-${ANDROID_NDK_HOME:-"${ANDROID_HOME:-$HOME/Android/Sdk}/ndk/$ND
 TL_OUT=${TL_OUT:-"$PWD/out"}
 TL_BUILD_DIR=${TL_BUILD_DIR:-"$PWD/build-phosh"}
 TERMUX_PREFIX=${TERMUX_PREFIX:-/data/data/com.termux/files/usr}
-TL_PHOSH_TREES=${TL_PHOSH_TREES:-phoc phosh}
+TL_PHOSH_TREES=${TL_PHOSH_TREES:-phoc phosh phosh-mobile-settings}
 TL_SYSROOT=${TL_SYSROOT:-}
 [ -d "$TL_SYSROOT$TERMUX_PREFIX/lib/pkgconfig" ] || {
     echo "error: no Termux sysroot at '$TL_SYSROOT$TERMUX_PREFIX' (TL_SYSROOT; build it with termux-sysroot.sh -f phosh-deps.txt)" >&2
@@ -298,7 +305,68 @@ build_phosh() {
     rm -rf "$stage/lib/systemd" "$stage/share/gnome-session" "$stage/share/wayland-sessions" \
         "$stage/bin/phosh-session"
 }
-build_phosh_mobile_settings() { echo "error: phosh-mobile-settings is built from M4 on" >&2; exit 1; }
+# phosh-mobile-settings (M4): the four panels this build keeps are the overview (app filter, hidden
+# apps), the compositor (display scale), the top bar (quick settings layout) and feedback; every
+# other panel is compiled out by the options below, so there is no library to stub:
+#   -Dlang-panel=false        accountsservice and polkit (and libpms)
+#   -Dalerts-panel=false      libcellbroadcast
+#   -Dlockscreen-panel=false  phosh has no lock screen
+#   -Dosk-panel=false         phosh has no on-screen keyboard manager (libpms)
+#   -Dupdates-panel=false     systemd-sysupdate (libpms)
+#   -Dwelcome-panel, -Dconvergence-panel, -Dsensors-panel, -Dfeatures-panel, -Dabout-panel=false
+# libnm is needed only by the panels taken from GNOME Settings (-Dgcc-panels, off), and the device
+# plugin (librem5, libsensors) and the tests are off. It is built after phosh, in the same stage:
+# it needs phosh's installed headers and .pc files (phosh-plugins, phosh-settings) and its
+# libfeedback, which the stage still has before the app tree below drops include/ and
+# lib/pkgconfig. They are copied to $TL_SYSROOT/tl-phosh-dev, with .pc files in the sysroot's
+# pkgconfig directory, because the cross file's pkg-config takes every path to be inside the sysroot;
+# both go away after the build. The compositor panel's display scale is the gsettings key
+# mobi.phosh.MobileSettings display-scale, which the session script turns into PHOSH_SCALE for phoc
+# (recipes/cross/phosh-mobile-settings/0013).
+PMS_PANELS_OFF=(
+    welcome lang alerts lockscreen osk convergence sensors features updates about
+)
+
+build_phosh_mobile_settings() {
+    fetch_tree phosh-mobile-settings "$PMS_URL" "$PMS_SHA256" "$PMS_VERSION" "$PMS_COMMIT"
+    local build="$TL_BUILD_DIR/phosh-mobile-settings/build-$TL_ARCH" native=() opts=() panel
+    local prefix="$TL_SYSROOT$TERMUX_PREFIX" dev="$TL_SYSROOT/tl-phosh-dev" pc
+    [ -z "${TL_NATIVE_FILE:-}" ] || native=(--native-file "$TL_NATIVE_FILE")
+    for panel in "${PMS_PANELS_OFF[@]}"; do opts+=("-D$panel-panel=false"); done
+
+    # phosh's headers, .pc files and libfeedback, from the stage phosh was installed into
+    [ -f "$stage/lib/libfeedback-0.0.so" ] && [ -d "$stage/include/phosh" ] || {
+        echo "error: phosh-mobile-settings is built after phosh (TL_PHOSH_TREES), in the same stage" >&2
+        exit 1
+    }
+    rm -rf "$dev"
+    mkdir -p "$dev/include" "$dev/lib"
+    cp -a "$stage/include/phosh" "$stage/include/libfeedback-0.0" "$dev/include/"
+    cp -a "$stage"/lib/libfeedback-0.0.so* "$dev/lib/"
+    for pc in phosh-plugins phosh-settings libfeedback-0.0; do
+        sed -e 's#^prefix=/$#prefix=/tl-phosh-dev#' "$stage/lib/pkgconfig/$pc.pc" \
+            > "$prefix/lib/pkgconfig/$pc.pc"
+    done
+
+    echo "Configuring phosh-mobile-settings $PMS_VERSION for $TL_ARCH..."
+    rm -rf "$build"
+    meson setup "$build" "$SOURCE_DIR" --cross-file "$cross_file" "${native[@]}" \
+        --prefix=/ --buildtype=release --wrap-mode=default \
+        -Dtests=false -Dplugins=false -Dintrospection=false -Dexamples=false -Dman=false \
+        "${opts[@]}" \
+        -Dgmobile:default_library=static
+    check_pin "$SOURCE_DIR/subprojects/gmobile" "$GMOBILE_COMMIT" "gmobile (for phosh-mobile-settings)"
+    check_pin "$SOURCE_DIR/subprojects/gvc" "$GVC_COMMIT" "libgvc (for phosh-mobile-settings)"
+
+    echo "Building phosh-mobile-settings..."
+    ninja -C "$build" -j"$jobs"
+
+    echo "Installing phosh-mobile-settings into the stage..."
+    DESTDIR="$stage" meson install -C "$build" --no-rebuild --strip >/dev/null
+
+    rm -rf "$dev"
+    for pc in phosh-plugins phosh-settings libfeedback-0.0; do rm -f "$prefix/lib/pkgconfig/$pc.pc"; done
+}
 build_tl_feedbackd() { echo "error: tl-feedbackd is built from M3 on" >&2; exit 1; }
 
 rm -rf "$stage"
@@ -399,10 +467,72 @@ check_phosh_schemas() {
     fi
 }
 
+check_phosh_mobile_settings() {
+    local bin="$stage/bin/phosh-mobile-settings" panel type desktop="$stage/share/applications/mobi.phosh.MobileSettings.desktop"
+    local dir="$TL_BUILD_DIR/pms-schema-check" got
+    [ -x "$bin" ] || { echo "error: no bin/phosh-mobile-settings in the stage" >&2; exit 1; }
+    # No library of a panel that is compiled out, and none of the ones Termux does not have.
+    if "$readelf" -d "$bin" | grep NEEDED | grep -E 'libaccountsservice|libpolkit|libnm|libcellbroadcast|libpms|libgudev|libsystemd|libgmobile'; then
+        echo "error: phosh-mobile-settings links a library of a panel that is compiled out" >&2
+        exit 1
+    fi
+    "$readelf" -d "$bin" | grep NEEDED | grep -q libfeedback || {
+        echo "error: phosh-mobile-settings does not link libfeedback" >&2
+        exit 1
+    }
+    if "$readelf" -d "$bin" | grep -E 'RUNPATH|RPATH' | grep -q "$TL_BUILD_DIR\|$TL_SYSROOT"; then
+        echo "error: phosh-mobile-settings' RUNPATH names a build directory" >&2
+        exit 1
+    fi
+    "$readelf" -d "$bin" | grep -E 'RUNPATH' | grep -q '\$ORIGIN/../lib' || {
+        echo "error: phosh-mobile-settings does not look for libfeedback in ../lib" >&2
+        exit 1
+    }
+    # The four panels are in the binary, and the ones that are off are not (the type names are in
+    # the GType registration, and the GtkBuilder files in the resource are filtered the same way).
+    for type in MsOverviewPanel MsCompositorPanel MsTopbarPanel MsFeedbackPanel; do
+        grep -qa "$type" "$bin" || { echo "error: phosh-mobile-settings has no $type" >&2; exit 1; }
+    done
+    for type in MsLangPanel MsAlertsPanel MsLockscreenPanel MsOskPanel MsUpdatesPanel MsWelcomePanel \
+                MsConvergencePanel MsSensorPanel MsFeaturesPanel MsAboutPanel; do
+        if grep -qa "$type" "$bin"; then
+            echo "error: phosh-mobile-settings still has $type, which is compiled out" >&2
+            exit 1
+        fi
+    done
+    # Its desktop file is in the archive, so that phosh's grid lists it, and it starts the binary
+    # directly (the D-Bus service file is not installed).
+    [ -f "$desktop" ] || { echo "error: no share/applications/mobi.phosh.MobileSettings.desktop in the stage" >&2; exit 1; }
+    grep -q '^Exec=phosh-mobile-settings$' "$desktop" && grep -q '^DBusActivatable=false$' "$desktop" || {
+        echo "error: the desktop file of phosh-mobile-settings is not the one the patches write" >&2
+        exit 1
+    }
+    [ ! -e "$stage/share/dbus-1/services/mobi.phosh.MobileSettings.service" ] || {
+        echo "error: phosh-mobile-settings installs a D-Bus service file with a path of the build" >&2
+        exit 1
+    }
+    # (desktop-file-validate rejects OnlyShowIn=Phosh, which freedesktop.org has not registered)
+    grep -q '^OnlyShowIn=Phosh;$' "$desktop" || {
+        echo "error: the desktop file of phosh-mobile-settings is not shown in Phosh" >&2
+        exit 1
+    }
+    # Its schema compiles on its own, and display-scale (what the compositor panel writes and the
+    # session script turns into PHOSH_SCALE) is 0.0, automatic, by default.
+    rm -rf "$dir"
+    mkdir -p "$dir"
+    cp "$stage/share/glib-2.0/schemas/mobi.phosh.MobileSettings.gschema.xml" "$dir/"
+    glib-compile-schemas --strict "$dir" || { echo "error: the schema of phosh-mobile-settings does not compile" >&2; exit 1; }
+    if command -v gsettings >/dev/null 2>&1; then
+        got=$(GSETTINGS_SCHEMA_DIR="$dir" GSETTINGS_BACKEND=memory gsettings get mobi.phosh.MobileSettings display-scale)
+        [ "$got" = "0.0" ] || { echo "error: display-scale is '$got', not 0.0" >&2; exit 1; }
+    fi
+}
+
 for tree in $TL_PHOSH_TREES; do
     case "$tree" in
         phoc) check_phoc ;;
         phosh) check_phosh ;;
+        phosh-mobile-settings) check_phosh_mobile_settings ;;
     esac
 done
 
