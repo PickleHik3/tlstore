@@ -61,7 +61,7 @@ if [ "$(cat "$TL_TEST_DIR/.built" 2>/dev/null || true)" != "$patch_key" ]; then
     done
     # The options build-phosh.sh gives the phone's build, on the host's own toolchain.
     meson setup "$TL_TEST_DIR/build" "$source_dir" \
-        --prefix="$prefix" --buildtype=debug --wrap-mode=default \
+        --prefix="$prefix" --buildtype=release --wrap-mode=default \
         -Dtests=false -Dgtk_doc=false -Dman=false -Dxwayland=disabled \
         -Dwlroots:default_library=static -Dgmobile:default_library=static \
         -Dwlroots:backends=x11 -Dwlroots:renderers= -Dwlroots:allocators= \
