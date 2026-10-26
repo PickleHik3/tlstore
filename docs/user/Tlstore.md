@@ -352,6 +352,14 @@ process (the shell user may look, not touch), so those keys are gone from btop's
 counters come from `/proc/net/dev`, since Android keeps the usual `/sys` files from the shell user.
 It is a launcher item, not offered in plain Termux.
 
+## Phosh
+
+`tlstore install phosh` installs [Phosh](https://gitlab.gnome.org/World/Phosh/phosh), the GNOME
+phone shell, as a desktop on the launcher's display: tap **Phosh** under **Desktops** and your
+Termux apps open as its windows. It brings about 87 MB of Termux packages (535 MB on disk) with
+it, and has no lock screen or on-screen keyboard. It is a launcher item, not offered in plain
+Termux. [The Phosh page](phosh.md) has install, scale, stop and troubleshooting.
+
 ## Writing
 
 `tlstore install dawn` installs [dawn](https://github.com/andrewmd5/dawn), a writing pad that runs
