@@ -4,7 +4,7 @@
 # ~/.local/bin/phosh-session execs it, and the launcher's Desktops entry runs it too.
 #
 #   phosh-session          run the session on the launcher's display (phoc runs as a child)
-#   phosh-session stop     end it: phoc goes, and phosh and its children with it
+#   phosh-session stop     end it: phoc, phosh and tl-feedbackd go (nothing else of the launcher's)
 #
 # The display is the launcher's: its Desktops entry opens the Display window and starts the server
 # before it runs this, and nothing from a shell can open that window. Run from a terminal with no
@@ -18,20 +18,19 @@ PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
 tmp="${TERMUX_TMP_PREFIX:-$PREFIX/tmp}"
 
 if [ "${1:-}" = stop ]; then
-    pkill -x phoc 2>/dev/null || true
-    pkill -x tl-feedbackd 2>/dev/null || true
-    # The launcher's own session: its Desktops entry records the shell it runs us in.
-    if [ -r "$tmp/termux-x11-session.pid" ]; then
-        pid=$(cat "$tmp/termux-x11-session.pid" 2>/dev/null || true)
-        case "$pid" in
-            ''|*[!0-9]*) ;;
-            *)
-                kill -TERM "$pid" 2>/dev/null || true
-                sleep 1
-                kill -KILL "$pid" 2>/dev/null || true
-                ;;
-        esac
-    fi
+    # phosh's own processes only. The session that runs this script ends by itself once phoc is
+    # gone; the launcher's display and its other desktops are left alone.
+    pids=$(pgrep -x 'phoc|phosh|tl-feedbackd' 2>/dev/null || true)
+    [ -n "$pids" ] || exit 0
+    # shellcheck disable=SC2086 # one word per pid
+    kill -TERM $pids 2>/dev/null || true
+    sleep 1
+    for pid in $pids; do
+        # Only one that is still there a second after its TERM.
+        if kill -0 "$pid" 2>/dev/null; then
+            kill -KILL "$pid" 2>/dev/null || true
+        fi
+    done
     exit 0
 fi
 
@@ -70,12 +69,17 @@ if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] && [ -S "$sockets/termux-launcher-bus"
     export DBUS_SESSION_BUS_ADDRESS
 fi
 
-# The archive's schemas, compiled again here: the compiled file in the archive goes stale as trees
-# are added to it, and the archive's directory may not be writable to the session. A copy of the
-# sources in a directory of ours, compiled there, is always current.
+# The archive's schemas with its overrides, compiled here together with the system's
+# org.gnome.desktop.* schemas: the overrides (90_tl's screensaver lock and screen keyboard, phosh's
+# own desktop defaults) name those, and glib-compile-schemas drops an override of a schema it does
+# not have. The archive's directory may not be writable to the session, so this is a directory of
+# ours, compiled at every start; it comes first in the schema path, so its copies of the desktop
+# schemas, with the overrides, are the ones read. If it does not compile, the archive's own
+# compiled set (its schemas and overrides only) is used.
 schemas="${XDG_STATE_HOME:-$HOME/.local/state}/phosh/schemas"
 mkdir -p "$schemas"
 rm -f "$schemas"/*.xml "$schemas"/*.override "$schemas/gschemas.compiled"
+cp "$PREFIX"/share/glib-2.0/schemas/org.gnome.desktop*.xml "$schemas/" 2>/dev/null || true
 cp "$app"/share/glib-2.0/schemas/*.xml "$app"/share/glib-2.0/schemas/*.override "$schemas/" 2>/dev/null || true
 if glib-compile-schemas "$schemas" 2>/dev/null; then
     GSETTINGS_SCHEMA_DIR="$schemas"
@@ -99,7 +103,6 @@ export DISPLAY XDG_RUNTIME_DIR XDG_DATA_DIRS GSETTINGS_SCHEMA_DIR XDG_CURRENT_DE
 # (a double, 0.0 = automatic, which phoc works out itself).
 if [ -z "${PHOSH_SCALE:-}" ]; then
     scale=$(gsettings get mobi.phosh.MobileSettings display-scale 2>/dev/null || true)
-    scale=${scale#uint32 }
     case "$scale" in
         ''|0|0.0|0.00) ;;
         *[!0-9.]*) ;;
@@ -107,6 +110,18 @@ if [ -z "${PHOSH_SCALE:-}" ]; then
     esac
 fi
 [ -z "${PHOSH_SCALE:-}" ] || export PHOSH_SCALE
+
+# A TERM (the launcher's stop), INT or HUP is passed on to phoc. The trap is set before anything
+# is started, so a signal that comes early ends the session instead of orphaning tl-feedbackd.
+pid=
+fbd=
+stopping=
+# shellcheck disable=SC2329 # run by the trap
+on_signal() {
+    stopping=1
+    [ -z "$pid" ] || kill "$pid" 2>/dev/null || true
+}
+trap on_signal TERM INT HUP
 
 # tl-feedbackd (#13): answers org.sigxcpu.Feedback on the session bus, so phosh's and the apps'
 # feedback events (libfeedback) become launcherctl vibrate calls. Started before phoc; if one is
@@ -117,17 +132,22 @@ if [ -x "$app/bin/tl-feedbackd" ]; then
     fbd=$!
 fi
 
-# phoc runs as a child so that a connection failure can be told apart and explained; a TERM (the
-# launcher's stop) is passed on to it.
+if [ -n "$stopping" ]; then
+    [ -z "$fbd" ] || kill "$fbd" 2>/dev/null || true
+    exit 143
+fi
+
+# phoc runs as a child so that a connection failure can be told apart and explained.
 log="${XDG_STATE_HOME:-$HOME/.local/state}/phosh/phoc.log"
 phoc -E phosh 2>"$log" &
 pid=$!
-trap 'kill "$pid" 2>/dev/null' TERM INT HUP
+# A signal that came between the start and the line above had no pid to pass on.
+[ -z "$stopping" ] || kill "$pid" 2>/dev/null || true
 rc=0
 wait "$pid" || rc=$?
 # A signal interrupts the first wait; wait again for the child to be gone.
 while kill -0 "$pid" 2>/dev/null; do wait "$pid" || rc=$?; done
-[ -z "${fbd:-}" ] || kill "$fbd" 2>/dev/null || true
+[ -z "$fbd" ] || kill "$fbd" 2>/dev/null || true
 cat "$log" >&2
 if [ "$rc" -ne 0 ] && grep -q 'xcb connection' "$log" 2>/dev/null; then
     echo "phosh-session: open Display in the launcher first, or tap Phosh under Desktops" >&2
