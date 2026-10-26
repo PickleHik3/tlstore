@@ -280,9 +280,12 @@ build_phosh() {
     [ -f "$TL_TEST_DIR/.installed-phosh" ] && return 0
     local opts=() feature
     for feature in "${PHOSH_FEATURES_OFF[@]}"; do opts+=("-D$feature=false"); done
+    # The phone's options plus -Dtl-debug=true: the TlState and TlTile methods on DebugControl that
+    # lib.sh's tl_get and tl_tile call (recipes/cross/phosh/0023, behind the option since 0033;
+    # build-phosh.sh leaves it off, so a phone's phosh does not have them).
     meson setup "$TL_TEST_DIR/phosh-build" "$TL_TEST_DIR/phosh-src" \
         --prefix="$prefix" --libexecdir=bin --buildtype=release --wrap-mode=default \
-        -Dtests=false -Dtools=false -Dgtk_doc=false -Dman=false \
+        -Dtests=false -Dtools=false -Dgtk_doc=false -Dman=false -Dtl-debug=true \
         "${opts[@]}" \
         -Dsearchd=false -Dlockscreen-plugins=false -Dquick-setting-plugins=false \
         -Dstatus-icon-plugins=false \

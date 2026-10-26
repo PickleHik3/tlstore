@@ -10,6 +10,14 @@ Writing a bridge test, in three lines:
 2. Drive the bridge with `fake_push battery '{"percentage":9,...}'` (an SSE event on `/v1/watch`) or `fake_control_post /state/rotation '{...}'`, and check what phosh did with `wait_for 10 "what" <command>`, `on_bus <name>` and `gdbus`.
 3. Check what phosh sent back with `fake_calls`, `fake_call_count POST /v1/vibrate` and `fake_unexpected`; call `fake_reset` first to start from an empty log.
 
+## Test hooks
+
+`tl_get` and `tl_tile` (lib.sh) call two methods on `mobi.phosh.Shell.DebugControl`, `TlState`
+and `TlTile` (recipes/cross/phosh/0023). They exist only in a phosh configured with
+`-Dtl-debug=true` (recipes/cross/phosh/0033), which `run-headless.sh` passes; `build-phosh.sh`
+leaves the option off and checks that the phone's binary does not have them, so no other client of
+the launcher's shared session bus can read the managers or press a quick setting through them.
+
 ## Dependencies below noble's versions
 
 phoc 0.58.0, its wlroots 0.20.2 subproject and phosh 0.58.0 (with the recipes' patches applied, the

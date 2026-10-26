@@ -60,6 +60,8 @@
 #       -Dgudev=false          libgudev (nor this): udev monitoring, sysfs backlight and torch
 #       -Dsearchd=false        upstream's search service
 #     UPower, iio-sensor-proxy and the torch manager stay: they only look for their D-Bus names.
+#     -Dtl-debug stays false (its default): the TlState and TlTile test hooks on DebugControl
+#     (patches 0023 and 0033) are for tests/phosh/run-headless.sh only, never in the archive.
 # Not in the archive yet: the session script, the session files and the compiled gschemas, which
 # are the "session-file step" of docs/PHOSH.md ("Packaging"). The schemas are checked here, with
 # the overrides of data/90_tl.gschema.override, not compiled into the archive.
@@ -286,7 +288,7 @@ build_phosh() {
         -Dtests=false -Dtools=false -Dgtk_doc=false -Dman=false \
         "${opts[@]}" \
         -Dsearchd=false -Dlockscreen-plugins=false -Dquick-setting-plugins=false \
-        -Dstatus-icon-plugins=false \
+        -Dstatus-icon-plugins=false -Dtl-debug=false \
         -Dgmobile:default_library=static -Dlibfeedback:default_library=static \
         -Dlibfeedback:udev=false -Dlibfeedback:vapi=false
     check_pin "$SOURCE_DIR/subprojects/gmobile" "$GMOBILE_COMMIT" "gmobile (for phosh)"
@@ -469,6 +471,11 @@ check_phosh() {
     fi
     "$readelf" -d "$stage/bin/phosh" | grep -E 'RUNPATH' | grep -q '\$ORIGIN/../lib' || {
         echo "error: phosh does not look for libfeedback in ../lib" >&2
+        exit 1
+    }
+    # The test hooks are not in: TlState and TlTile answer "not supported" (patch 0033).
+    grep -qa 'Built without -Dtl-debug' "$stage/bin/phosh" || {
+        echo "error: phosh has the TlState and TlTile test hooks (-Dtl-debug); a phone's build must not" >&2
         exit 1
     }
     check_phosh_schemas
