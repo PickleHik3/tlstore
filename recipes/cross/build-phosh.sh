@@ -108,7 +108,10 @@
 # TL_TERMUX_X11=1; required), TL_ARCH, TL_NDK, TL_OUT, TL_BUILD_DIR, TERMUX_PREFIX,
 # TL_NATIVE_FILE (an extra meson native file, for a host whose glib tools are not where its .pc
 # files say; a host without glib-mkenums or gdbus-codegen, as Arch is, gets one made from the
-# sysroot's glib, see host_glib_tools), TL_BUILD_JOBS.
+# sysroot's glib, see host_glib_tools), TL_BUILD_JOBS, TL_TERMUX_DEBS (the .deb files the sysroot
+# was assembled from, termux-sysroot.sh's TL_CACHE; default: the directory next to TL_SYSROOT
+# named as it is with "sysroot" changed to "debs", which is where build-asset.sh and
+# termux-sysroot.sh's defaults put it; check_parts reads it).
 set -euo pipefail
 
 PHOC_VERSION="0.58.0"
@@ -151,6 +154,9 @@ TL_BUILD_DIR=${TL_BUILD_DIR:-"$PWD/build-phosh"}
 TERMUX_PREFIX=${TERMUX_PREFIX:-/data/data/com.termux/files/usr}
 TL_PHOSH_TREES=${TL_PHOSH_TREES:-phoc phosh phosh-mobile-settings tl-feedbackd}
 TL_SYSROOT=${TL_SYSROOT:-}
+sysroot_name=${TL_SYSROOT%/}
+sysroot_name=${sysroot_name##*/}
+TL_TERMUX_DEBS=${TL_TERMUX_DEBS:-"${TL_SYSROOT%/*}/${sysroot_name/sysroot/debs}"}
 [ -d "$TL_SYSROOT$TERMUX_PREFIX/lib/pkgconfig" ] || {
     echo "error: no Termux sysroot at '$TL_SYSROOT$TERMUX_PREFIX' (TL_SYSROOT; build it with termux-sysroot.sh -f phosh-deps.txt)" >&2
     exit 1
@@ -622,6 +628,71 @@ check_phosh_mobile_settings() {
     fi
 }
 
+# check_parts — every library a program or library of the archive links (NEEDED) that the archive
+# does not carry itself is shipped by a Termux package the phosh-deps row of scripts/items.tsv
+# installs on this processor (its source=, or x86_64:source= on x86_64), so that hand-kept list
+# cannot drift from what the build links. A library is mapped to its package through the .deb
+# files the sysroot was assembled from: the package is the part of the .deb's file name before the
+# first "_", and its libraries are the files under $TERMUX_PREFIX/lib/ in its data archive
+# (dpkg-deb, or ar and bsdtar, as termux-sysroot.sh extracts them). A library no .deb ships must be
+# Android's own (in the NDK's sysroot: libc, libm, libdl, liblog, libandroid, ...).
+check_parts() {
+    local items="$SCRIPT_DIR/../../scripts/items.tsv" index="$TL_BUILD_DIR/lib-packages-$TL_ARCH"
+    local parts deb pkg f lib needed provides missing=0 ndk_lib="$NDK_BIN/../sysroot/usr/lib"
+    [ -f "$items" ] || { echo "error: no $items" >&2; exit 1; }
+    ls "$TL_TERMUX_DEBS"/*.deb >/dev/null 2>&1 || {
+        echo "error: no .deb files in $TL_TERMUX_DEBS (TL_TERMUX_DEBS: the sysroot's package cache)" >&2
+        exit 1
+    }
+    parts=$(awk -F'\t' -v arch="$TL_ARCH" '$1 == "phosh-deps" {
+            list = $5
+            if (arch == "x86_64") {
+                n = split($8, meta, ";")
+                for (i = 1; i <= n; i++)
+                    if (index(meta[i], "x86_64:source=") == 1) list = substr(meta[i], 15)
+            }
+            print list
+        }' "$items")
+    [ -n "$parts" ] || { echo "error: no phosh-deps row in $items" >&2; exit 1; }
+    parts=" $parts "
+
+    # "<library file name> <package>", one line per library file of every .deb
+    : > "$index"
+    for deb in "$TL_TERMUX_DEBS"/*.deb; do
+        pkg=$(basename "$deb")
+        pkg=${pkg%%_*}
+        if command -v dpkg-deb >/dev/null 2>&1; then
+            dpkg-deb --fsys-tarfile "$deb" | tar -tf -
+        else
+            ar p "$deb" "$(ar t "$deb" | grep '^data\.tar')" | bsdtar -tf -
+        fi | sed -n "s#^\.\{0,1\}/\{0,1\}${TERMUX_PREFIX#/}/lib/\([^/]*\.so[^/]*\)\$#\1 $pkg#p" >> "$index"
+    done
+
+    needed=$(for f in "$stage"/bin/* "$stage"/lib/*.so*; do
+                 [ -f "$f" ] && [ ! -L "$f" ] || continue
+                 head -c 4 "$f" | grep -q 'ELF' || continue
+                 "$readelf" -d "$f" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p'
+             done | LC_ALL=C sort -u)
+    for lib in $needed; do
+        [ ! -e "$stage/lib/$lib" ] || continue
+        provides=$(awk -v lib="$lib" '$1 == lib { print $2 }' "$index" | LC_ALL=C sort -u)
+        if [ -z "$provides" ]; then
+            if find "$ndk_lib" -name "$lib" -print -quit 2>/dev/null | grep -q .; then
+                continue
+            fi
+            echo "error: $lib (NEEDED by the archive) is in no package of $TL_TERMUX_DEBS, nor Android's" >&2
+            missing=1
+            continue
+        fi
+        for pkg in $provides; do
+            case "$parts" in *" $pkg "*) continue 2 ;; esac
+        done
+        echo "error: $lib (NEEDED by the archive) comes from ${provides//$'\n'/ }, which the phosh-deps row of scripts/items.tsv does not install on $TL_ARCH" >&2
+        missing=1
+    done
+    [ "$missing" = 0 ] || exit 1
+}
+
 for tree in $TL_PHOSH_TREES; do
     case "$tree" in
         phoc) check_phoc ;;
@@ -630,6 +701,7 @@ for tree in $TL_PHOSH_TREES; do
         tl-feedbackd) check_tl_feedbackd ;;
     esac
 done
+check_parts
 
 # --- the archive ----------------------------------------------------------------------------
 rm -f "$TL_OUT/phosh"
