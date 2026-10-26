@@ -1,0 +1,44 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PickleHik3 <noreply@example.invalid>
+Date: Mon, 26 Oct 2026 13:00:00 +0000
+Subject: [PATCH 14/14] Start from the desktop file, not through D-Bus activation
+
+The desktop file asked for D-Bus activation, and the service file it installs has the
+absolute path of the binary at the build's prefix, which is / here. DBusActivatable=false makes
+the launcher run Exec=phosh-mobile-settings from the session's PATH; the service file is not
+installed.
+---
+
+--- a/data/meson.build
++++ b/data/meson.build
+@@ -31,19 +31,6 @@
+   test('Validate appstream file', appstream_util, args: ['validate', '--no-net', appstream_file])
+ endif
+ 
+-dbus_service_conf = configuration_data()
+-dbus_service_conf.set('bindir', bindir)
+-dbus_service_conf.set('appid', app_id)
+-
+-dbus_service = '@0@.service'.format(app_id)
+-configure_file(
+-  input: dbus_service + '.in',
+-  output: dbus_service,
+-  install: true,
+-  install_dir: datadir / 'dbus-1' / 'services',
+-  configuration: dbus_service_conf,
+-)
+-
+ schemas = ['mobi.phosh.MobileSettings.gschema.xml']
+ compiled = gnome.compile_schemas(build_by_default: true, depend_files: schemas)
+ 
+--- a/data/mobi.phosh.MobileSettings.desktop.in
++++ b/data/mobi.phosh.MobileSettings.desktop.in
+@@ -7,7 +7,7 @@
+ Type=Application
+ Categories=GNOME;GTK;Settings;
+ StartupNotify=true
+-DBusActivatable=true
++DBusActivatable=false
+ # Translators: Search terms to find this application. Do NOT translate or localize the semicolons. The list MUST also end with a semicolon.
+ Keywords=Mobile;Preferences;MobileSettings;Tweaks;
+ OnlyShowIn=Phosh;

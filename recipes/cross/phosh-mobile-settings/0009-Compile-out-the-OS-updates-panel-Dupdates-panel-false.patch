@@ -1,0 +1,60 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PickleHik3 <noreply@example.invalid>
+Date: Mon, 26 Oct 2026 13:00:00 +0000
+Subject: [PATCH 09/14] Compile out the OS updates panel (-Dupdates-panel=false)
+
+Termux updates through its package manager, not systemd-sysupdate.
+---
+
+--- a/src/mobile-settings.gresource.xml
++++ b/src/mobile-settings.gresource.xml
+@@ -36,7 +36,9 @@
+     <file>ui/ms-sound-row.ui</file>
+     <file>ui/ms-topbar-panel.ui</file>
+     <file>ui/ms-hidden-apps-dialog.ui</file>
++    <!-- tl-if updates-panel -->
+     <file>ui/ms-updates-panel.ui</file>
++    <!-- tl-endif -->
+     <file>ui/ms-welcome-panel.ui</file>
+     <file>ui/ms-window.ui</file>
+     <file alias="shortcuts-dialog.ui">ui/shortcuts-dialog.ui</file>
+--- a/src/ms-main.c
++++ b/src/ms-main.c
+@@ -32,7 +32,9 @@
+ #include "ms-overview-panel.h"
+ #include "ms-sensor-panel.h"
+ #include "ms-topbar-panel.h"
++#if MOBILE_SETTINGS_HAVE_UPDATES_PANEL
+ #include "ms-updates-panel.h"
++#endif
+ #include "ms-welcome-panel.h"
+ 
+ #include <glib/gi18n.h>
+@@ -60,7 +62,9 @@
+   g_type_ensure (MS_TYPE_OVERVIEW_PANEL);
+   g_type_ensure (MS_TYPE_SENSOR_PANEL);
+   g_type_ensure (MS_TYPE_TOPBAR_PANEL);
++#if MOBILE_SETTINGS_HAVE_UPDATES_PANEL
+   g_type_ensure (MS_TYPE_UPDATES_PANEL);
++#endif
+   g_type_ensure (MS_TYPE_WELCOME_PANEL);
+ }
+ 
+--- a/src/ui/ms-window.ui
++++ b/src/ui/ms-window.ui
+@@ -365,6 +365,7 @@
+                       </object>
+                     </child>
+ 
++                    <!-- tl-if updates-panel -->
+                     <child>
+                       <object class="AdwViewStackPage">
+                         <property name="title" translatable="yes">OS Updates</property>
+@@ -384,6 +385,7 @@
+                         </property>
+                       </object>
+                     </child>
++                    <!-- tl-endif -->
+ 
+                     <child>
+                       <object class="AdwViewStackPage">

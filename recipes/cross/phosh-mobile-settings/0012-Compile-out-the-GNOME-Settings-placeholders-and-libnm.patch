@@ -1,0 +1,97 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PickleHik3 <noreply@example.invalid>
+Date: Mon, 26 Oct 2026 13:00:00 +0000
+Subject: [PATCH 12/14] Compile out the placeholders for GNOME Settings' panels, and libnm without them
+
+Sound, Wi-Fi, Network, Bluetooth, Cellular and Online Accounts are disabled placeholder
+pages that the panels taken from GNOME Settings (-Dgcc-panels=true) fill in. Without gcc-panels
+they have no panel behind them, so they are not in the window. ms-cc-panels.c includes
+NetworkManager.h only with gcc-panels, as libnm is needed only then.
+---
+
+--- a/src/ms-cc-panels.c
++++ b/src/ms-cc-panels.c
+@@ -14,7 +14,9 @@
+ #include "ms-panel.h"
+ #include "ms-window.h"
+ 
++#ifdef MOBILE_SETTINGS_HAVE_GCC_PANELS
+ #include <NetworkManager.h>
++#endif
+ #include <adwaita.h>
+ 
+ #include <glib/gi18n.h>
+--- a/src/ui/ms-window.ui
++++ b/src/ui/ms-window.ui
+@@ -349,6 +349,7 @@
+                     </child>
+                     <!-- tl-endif -->
+ 
++                    <!-- tl-if gcc-panels -->
+                     <child>
+                       <object class="AdwViewStackPage">
+                         <property name="title" translatable="yes">Sound</property>
+@@ -372,6 +373,7 @@
+                         </property>
+                       </object>
+                     </child>
++                    <!-- tl-endif -->
+ 
+                     <!-- tl-if updates-panel -->
+                     <child>
+@@ -416,6 +418,7 @@
+                     </child>
+                     <!-- tl-endif -->
+ 
++                    <!-- tl-if gcc-panels -->
+                     <child>
+                       <object class="AdwViewStackPage">
+                         <property name="title" translatable="yes">Wi-Fi</property>
+@@ -440,7 +443,9 @@
+                         </property>
+                       </object>
+                     </child>
++                    <!-- tl-endif -->
+ 
++                    <!-- tl-if gcc-panels -->
+                     <child>
+                       <object class="AdwViewStackPage">
+                         <property name="title" translatable="yes">Network</property>
+@@ -466,7 +471,9 @@
+                         </property>
+                       </object>
+                     </child>
++                    <!-- tl-endif -->
+ 
++                    <!-- tl-if gcc-panels -->
+                     <child>
+                       <object class="AdwViewStackPage">
+                         <property name="title" translatable="yes">Bluetooth</property>
+@@ -487,7 +494,9 @@
+                         </property>
+                       </object>
+                     </child>
++                    <!-- tl-endif -->
+ 
++                    <!-- tl-if gcc-panels -->
+                     <child>
+                       <object class="AdwViewStackPage">
+                         <property name="title" translatable="yes">Cellular</property>
+@@ -511,7 +520,9 @@
+                         </property>
+                       </object>
+                     </child>
++                    <!-- tl-endif -->
+ 
++                    <!-- tl-if gcc-panels -->
+                     <child>
+                       <object class="AdwViewStackPage">
+                         <property name="title" translatable="yes">Online Accounts</property>
+@@ -533,6 +544,7 @@
+                         </property>
+                       </object>
+                     </child>
++                    <!-- tl-endif -->
+ 
+                   </object>
+                 </property>

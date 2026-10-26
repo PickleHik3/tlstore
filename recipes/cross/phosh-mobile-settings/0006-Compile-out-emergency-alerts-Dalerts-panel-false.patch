@@ -1,0 +1,65 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PickleHik3 <noreply@example.invalid>
+Date: Mon, 26 Oct 2026 13:00:00 +0000
+Subject: [PATCH 06/14] Compile out the emergency alerts panel (-Dalerts-panel=false)
+
+The panel talks to cbd, the cell broadcast daemon, with libcellbroadcast (a meson
+subproject): there is no modem to receive from.
+---
+
+--- a/src/mobile-settings.gresource.xml
++++ b/src/mobile-settings.gresource.xml
+@@ -3,9 +3,13 @@
+   <gresource prefix="/mobi/phosh/MobileSettings">
+     <file>style.css</file>
+     <file>ui/ms-about-panel.ui</file>
++    <!-- tl-if alerts-panel -->
+     <file>ui/ms-alerts-panel.ui</file>
++    <!-- tl-endif -->
+     <file>ui/ms-audio-device-row.ui</file>
++    <!-- tl-if alerts-panel -->
+     <file>ui/ms-cb-message-row.ui</file>
++    <!-- tl-endif -->
+     <file>ui/ms-compositor-panel.ui</file>
+     <file>ui/ms-convergence-panel.ui</file>
+     <file>ui/ms-features-panel.ui</file>
+--- a/src/ms-main.c
++++ b/src/ms-main.c
+@@ -13,7 +13,9 @@
+ #include "mobile-settings-config.h"
+ #include "mobile-settings-resources.h"
+ #include "ms-about-panel.h"
++#if MOBILE_SETTINGS_HAVE_ALERTS_PANEL
+ #include "ms-alerts-panel.h"
++#endif
+ #include "ms-compositor-panel.h"
+ #include "ms-convergence-panel.h"
+ #include "ms-features-panel.h"
+@@ -35,7 +37,9 @@
+ ms_init_types (void)
+ {
+   g_type_ensure (MS_TYPE_ABOUT_PANEL);
++#if MOBILE_SETTINGS_HAVE_ALERTS_PANEL
+   g_type_ensure (MS_TYPE_ALERTS_PANEL);
++#endif
+   g_type_ensure (MS_TYPE_COMPOSITOR_PANEL);
+   g_type_ensure (MS_TYPE_CONVERGENCE_PANEL);
+   g_type_ensure (MS_TYPE_FEATURES_PANEL);
+--- a/src/ui/ms-window.ui
++++ b/src/ui/ms-window.ui
+@@ -252,6 +252,7 @@
+                       </object>
+                     </child>
+ 
++                    <!-- tl-if alerts-panel -->
+                     <child>
+                       <object class="AdwViewStackPage">
+                         <property name="title" translatable="yes">Emergency Alerts</property>
+@@ -272,6 +273,7 @@
+                         </property>
+                       </object>
+                     </child>
++                    <!-- tl-endif -->
+ 
+                     <child>
+                       <object class="AdwViewStackPage">

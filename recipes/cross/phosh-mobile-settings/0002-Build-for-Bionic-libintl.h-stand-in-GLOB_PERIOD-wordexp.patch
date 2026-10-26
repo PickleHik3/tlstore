@@ -1,0 +1,86 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PickleHik3 <noreply@example.invalid>
+Date: Mon, 26 Oct 2026 13:00:00 +0000
+Subject: [PATCH 02/14] Build for Bionic: libintl.h stand-in, no GLOB_PERIOD, wordexp from Termux
+
+Termux has no libintl.h (glib's gi18n.h includes it): src/compat/libintl.h answers with the
+untranslated text (the same file phoc and phosh carry), as a global argument set before the
+first subproject so that libgvc and gmobile see it too. Termux's glob.h has no GLOB_PERIOD, so
+the symlink backend of the Configurable Tweaks defines it as 0 there, and wordexp () comes from
+Termux's libandroid-wordexp and glob () from libandroid-glob, which are linked when found.
+---
+
+--- a/meson.build
++++ b/meson.build
+@@ -6,6 +6,13 @@
+   default_options: ['warning_level=2', 'werror=false', 'c_std=gnu11'],
+ )
+ 
++# Bionic has no gettext, and Termux ships no libintl.h: src/compat/ has a stand-in that answers
++# with the untranslated text. A global argument, set before the first subproject, so that libgvc
++# and gmobile see it as well.
++if not meson.get_compiler('c').has_header('libintl.h')
++  add_global_arguments('-I' + meson.project_source_root() / 'src' / 'compat', language: 'c')
++endif
++
+ app_id = 'mobi.phosh.MobileSettings'
+ 
+ prefix = get_option('prefix')
+--- a/src/compat/libintl.h
++++ b/src/compat/libintl.h
+@@ -0,0 +1,29 @@
++/*
++ * Termux Launcher: stand-in for <libintl.h>.
++ *
++ * Bionic has no gettext, and Termux's glib (built with its own stubs) does not link a libintl
++ * either, so no message catalog is ever read on the device. These are the calls <glib/gi18n.h>
++ * and phoc's main() name, answering with the untranslated text.
++ */
++#pragma once
++
++#include <stddef.h>
++
++static inline char *gettext (const char *msgid) __attribute__ ((format_arg (1)));
++static inline char *dgettext (const char *domain, const char *msgid) __attribute__ ((format_arg (2)));
++static inline char *dcgettext (const char *domain, const char *msgid, int category) __attribute__ ((format_arg (2)));
++static inline char *ngettext (const char *msgid, const char *msgid_plural, unsigned long n) __attribute__ ((format_arg (1), format_arg (2)));
++static inline char *dngettext (const char *domain, const char *msgid, const char *msgid_plural, unsigned long n) __attribute__ ((format_arg (2), format_arg (3)));
++
++static inline char *gettext (const char *msgid) { return (char *) msgid; }
++static inline char *dgettext (const char *domain, const char *msgid) { return (char *) msgid; }
++static inline char *dcgettext (const char *domain, const char *msgid, int category) { return (char *) msgid; }
++static inline char *ngettext (const char *msgid, const char *msgid_plural, unsigned long n) {
++  return (char *) (n == 1 ? msgid : msgid_plural);
++}
++static inline char *dngettext (const char *domain, const char *msgid, const char *msgid_plural, unsigned long n) {
++  return (char *) (n == 1 ? msgid : msgid_plural);
++}
++static inline char *textdomain (const char *domain) { return (char *) domain; }
++static inline char *bindtextdomain (const char *domain, const char *dir) { return (char *) dir; }
++static inline char *bind_textdomain_codeset (const char *domain, const char *codeset) { return (char *) codeset; }
+--- a/src/conf-tweaks/backends/ms-tweaks-backend-symlink.c
++++ b/src/conf-tweaks/backends/ms-tweaks-backend-symlink.c
+@@ -17,6 +17,11 @@
+ #include <glob.h>
+ #include <unistd.h>
+ 
++#ifndef GLOB_PERIOD
++/* Termux's glob () has no GLOB_PERIOD: a * does not match a leading dot there */
++# define GLOB_PERIOD 0
++#endif
++
+ 
+ enum {
+   PROP_0,
+--- a/src/meson.build
++++ b/src/meson.build
+@@ -114,6 +114,9 @@
+   polkit_gobject_dep,
+   wayland_client_dep,
+   yaml_dep,
++  # Termux's glob and wordexp (Bionic has no wordexp, and no glob below API level 28)
++  cc.find_library('android-glob', required: false),
++  cc.find_library('android-wordexp', required: false),
+   cc.find_library('m', required: false),
+ ]
+ 
