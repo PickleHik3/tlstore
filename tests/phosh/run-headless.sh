@@ -183,9 +183,9 @@ build_deps() {
         5fd4349bcbc9bab9a46f8cf77d1f434296a7a052c87440a094f63fcf62a58e20 \
         -Dtests=false
     # phoc >= 0.43.4, wlroots >= 0.43.0 (noble 0.42.2)
-    want_dep pixman && build_dep pixman 0.43.4 \
-        https://www.cairographics.org/releases/pixman-0.43.4.tar.gz \
-        a0624db90180c7ddb79fc7a9151093dc37c646d8c38d3f232f767cf64b85a226 \
+    want_dep pixman && build_dep pixman 0.46.4 \
+        https://www.cairographics.org/releases/pixman-0.46.4.tar.gz \
+        d09c44ebc3bd5bee7021c79f922fe8fb2fb57f7320f55e97ff9914d2346a591c \
         -Dgtk=disabled -Dlibpng=disabled -Dtests=disabled -Ddemos=disabled
     # wlroots >= 2.4.129 (noble 2.4.120, 2.4.125 in -updates); no GPU drivers, no tests
     want_dep libdrm && build_dep libdrm 2.4.129 \
