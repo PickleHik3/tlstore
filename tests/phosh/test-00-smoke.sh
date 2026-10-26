@@ -9,14 +9,14 @@ set -euo pipefail
 
 settle=${TL_HEADLESS_SECONDS:-10}
 
-wait_for 60 "phosh owns sm.puri.Phosh on the session bus" on_bus sm.puri.Phosh
+wait_for 60 "phosh owns org.gnome.Shell on the session bus" on_bus org.gnome.Shell
 pid=$(phosh_pid) || die "phosh is not a child of phoc"
 pass "phosh is running (pid $pid)"
 
 sleep "$settle"
 kill -0 "$PHOC_PID" 2>/dev/null || die "phoc died within ${settle}s"
 kill -0 "$pid" 2>/dev/null || die "phosh died within ${settle}s"
-on_bus sm.puri.Phosh || die "sm.puri.Phosh left the bus"
+on_bus org.gnome.Shell || die "org.gnome.Shell left the bus"
 pass "phoc and phosh alive after ${settle}s"
 
 if bad=$(fake_unexpected); then
