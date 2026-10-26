@@ -248,7 +248,7 @@ build_phoc() {
     # The phone's options (build-phosh.sh), with the headless backend added to the X11 one: phoc's
     # patch 0004 calls wlr_output_is_x11 (), so the X11 backend stays compiled in.
     meson setup "$TL_TEST_DIR/phoc-build" "$TL_TEST_DIR/phoc-src" \
-        --prefix="$prefix" --buildtype=debug --wrap-mode=default \
+        --prefix="$prefix" --buildtype=release --wrap-mode=default \
         -Dtests=false -Dgtk_doc=false -Dman=false -Dxwayland=disabled \
         -Dwlroots:default_library=static -Dgmobile:default_library=static \
         -Dwlroots:backends=x11 -Dwlroots:renderers= -Dwlroots:allocators= \
@@ -267,7 +267,7 @@ build_phosh() {
     local opts=() feature
     for feature in "${PHOSH_FEATURES_OFF[@]}"; do opts+=("-D$feature=false"); done
     meson setup "$TL_TEST_DIR/phosh-build" "$TL_TEST_DIR/phosh-src" \
-        --prefix="$prefix" --libexecdir=bin --buildtype=debug --wrap-mode=default \
+        --prefix="$prefix" --libexecdir=bin --buildtype=release --wrap-mode=default \
         -Dtests=false -Dtools=false -Dgtk_doc=false -Dman=false \
         "${opts[@]}" \
         -Dsearchd=false -Dlockscreen-plugins=false -Dquick-setting-plugins=false \
