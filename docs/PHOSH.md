@@ -216,8 +216,11 @@ The `phosh` row carries `min-launcher=` set to the first launcher release with a
   `share/` (gschemas compiled at build, pointed at by `GSETTINGS_SCHEMA_DIR`; icons, the phosh and
   phosh-mobile-settings `.desktop` files, locale). The wrapper exports `XDG_DATA_DIRS` and
   `GSETTINGS_SCHEMA_DIR` to include the archive's `share/`.
-- Size: to be measured in M1. The trial's Alpine install is not a guide (it pulled GNOME's
-  whole session stack).
+- Size, measured in M1 (2026-10-26): the archive is 1.34 MB (aarch64) and 1.39 MB (x86_64) as a
+  `.tar.gz`, about 4 MB unpacked. The Termux packages `phosh-deps` pulls in beyond a stock Termux
+  are 123 packages, 87 MB to download and 535 MB on disk (`pkg-size=87,535`; the libllvm that mesa
+  needs is 174 MB of that, gtk4 for the settings app 42 MB). The trial's Alpine install is not a guide (it pulled GNOME's whole
+  session stack).
 
 ## Build
 
