@@ -25,7 +25,8 @@ tl_tile torch click
 wait_for 10 "the second tap posts /v1/torch off" fake_body_is POST /v1/torch '{"on":false}'
 wait_for 10 "the torch is off" tl_is torch.enabled false
 n=$(fake_call_count POST /v1/torch)
-[ "$n" = 2 ] || die "/v1/torch was posted $n times, wanted 2"
+[ "$n" = 2 ] || die "/v1/torch was posted $n times, wanted 2; the calls, in order:
+$(fake_calls_for POST /v1/torch)"
 
 if bad=$(fake_unexpected); then
     pass "the fake received no unexpected call"

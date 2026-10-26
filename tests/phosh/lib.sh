@@ -35,6 +35,18 @@ m, p = sys.argv[1:3]
 print(sum(1 for c in json.load(sys.stdin) if c["method"] == m and c["path"] == p))' "$1" "$2"
 }
 
+# fake_calls_for <method> <path> - print the recorded calls of that kind, one per line: number,
+# time, method, path, body, status (for a failure message that shows the order of the calls).
+fake_calls_for() {
+    fake_calls | python3 -I -c '
+import json, sys
+m, p = sys.argv[1:3]
+for c in json.load(sys.stdin):
+    if c["method"] == m and c["path"] == p:
+        print("#%s t=%s %s %s %s -> %s" % (c.get("n"), c.get("time"), c["method"], c["path"],
+                                          json.dumps(c.get("body"), sort_keys=True), c.get("status")))' "$1" "$2"
+}
+
 # fake_unexpected - print the recorded calls marked unexpected (bad token, unknown route, bad
 # body); succeeds when there are none.
 fake_unexpected() {
