@@ -146,3 +146,24 @@ libwebrtc-audio-processing
 abseil-cpp
 libandroid-stub
 atk
+
+# M4, phosh-mobile-settings' libraries. Names checked against both Packages indexes (aarch64 and
+# x86_64, main and x11) on 2026-10-26.
+# Present: gtk4 4.24.1 (needs >= 4.22), libadwaita 1.10.0 (needs >= 1.9), gnome-desktop4,
+# gsound (with libcanberra), libportal and libportal-gtk4, libyaml, graphene, ministream,
+# json-glib and libwayland-protocols (above).
+# Not in Termux under any name: accountsservice, polkit (polkit-gobject-1), libnm,
+# libcellbroadcast (a meson subproject of phosh-mobile-settings, whose wrap is dropped too) and
+# libgudev. The patch set in recipes/cross/phosh-mobile-settings/ compiles out the panels that
+# need them. gmobile, libgvc and libfeedback are meson subprojects, as in phosh.
+graphene
+gtk4                    # x11-repo
+libadwaita              # x11-repo
+ministream
+gnome-desktop4          # x11-repo
+gsound                  # x11-repo
+libcanberra             # x11-repo
+libportal               # x11-repo
+libportal-gtk4          # x11-repo
+libyaml
+libandroid-wordexp        # wordexp.h and the library (Bionic has none; the conf-tweaks backends call wordexp)
