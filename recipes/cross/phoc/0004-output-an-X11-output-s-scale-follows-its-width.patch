@@ -1,0 +1,127 @@
+From 3d3d7f46fe6557c2e8e204366864d273be09e50e Mon Sep 17 00:00:00 2001
+From: PickleHik3 <noreply@users.noreply.github.com>
+Date: Mon, 26 Oct 2026 11:32:56 +0300
+Subject: [PATCH] output: an X11 output's scale follows its width
+
+An X11 output has no physical size, so the DPI-based scale was always 1. Its scale is now the
+width divided by 360, rounded down, at least 1, computed when the output is created and again
+when the backend asks for a new mode (the root window was resized), unless the output config
+sets a scale. PHOSH_SCALE (an integer or a decimal from 1 to 10) overrides it; that is the hook
+for the settings app.
+---
+ src/output.c | 62 ++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 62 insertions(+)
+
+diff --git a/src/output.c b/src/output.c
+index d95d6db..c91ad42 100644
+--- a/src/output.c
++++ b/src/output.c
+@@ -26,6 +26,7 @@
+ #include <stdlib.h>
+ #include <time.h>
+ #include <wlr/backend/drm.h>
++#include <wlr/backend/x11.h>
+ #include <wlr/config.h>
+ #include <wlr/render/swapchain.h>
+ #include <wlr/types/wlr_compositor.h>
+@@ -68,6 +69,7 @@ typedef struct _PhocOutputPrivate {
+   struct wl_listener    request_state;
+ 
+   PhocOutputScaleFilter scale_filter;
++  gboolean fixed_scale; /* the output config sets the scale */
+   gboolean gamma_lut_changed;
+ 
+   GQueue  *layer_surfaces[ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY + 1];
+@@ -751,6 +753,9 @@ phoc_output_handle_commit (struct wl_listener *listener, void *data)
+ }
+ 
+ 
++static float phoc_output_compute_scale (PhocOutput *self, struct wlr_output_state *pending);
++
++
+ static void
+ handle_request_state (struct wl_listener *listener, void *data)
+ {
+@@ -758,15 +763,71 @@ handle_request_state (struct wl_listener *listener, void *data)
+   PhocOutput *self = PHOC_OUTPUT_SELF (priv);
+   const struct wlr_output_event_request_state *event = data;
+ 
++  /* The X11 backend asks for a new mode when the root window is resized: the scale follows it */
++  if (wlr_output_is_x11 (self->wlr_output) &&
++      (event->state->committed & WLR_OUTPUT_STATE_MODE) &&
++      !(event->state->committed & WLR_OUTPUT_STATE_SCALE) &&
++      !priv->fixed_scale) {
++    struct wlr_output_state state;
++
++    wlr_output_state_init (&state);
++    if (wlr_output_state_copy (&state, event->state)) {
++      wlr_output_state_set_scale (&state, phoc_output_compute_scale (self, &state));
++      wlr_output_commit_state (self->wlr_output, &state);
++      wlr_output_state_finish (&state);
++      return;
++    }
++    wlr_output_state_finish (&state);
++  }
++
+   wlr_output_commit_state (self->wlr_output, event->state);
+ }
+ 
+ 
++/**
++ * phoc_output_x11_scale:
++ * @width: The output's width in pixels
++ *
++ * The scale of an X11 output, which has no physical size to go by: @width / 360 rounded
++ * down, at least 1. `PHOSH_SCALE` (an integer or a decimal, read each time) overrides it;
++ * this is the hook for the settings app, which sets it in phoc's environment or writes a
++ * scale into an output config (which wins over both).
++ *
++ * Returns: The output scale
++ */
++static double
++phoc_output_x11_scale (int32_t width)
++{
++  const char *env = g_getenv ("PHOSH_SCALE");
++
++  if (env && *env) {
++    char *end;
++    double scale = g_ascii_strtod (env, &end);
++
++    if (*end == '\0' && scale >= 1.0 && scale <= 10.0)
++      return round (scale * 120) / 120; /* fractional-scale-v1 sends steps of 1/120 */
++    g_warning ("Ignoring PHOSH_SCALE='%s' (want 1 to 10)", env);
++  }
++
++  return MAX (1, width / 360);
++}
++
++
+ static float
+ phoc_output_compute_scale (PhocOutput *self, struct wlr_output_state *pending)
+ {
+   int32_t width = 0, height = 0;
+ 
++  /* An X11 output follows the X root window, which has no physical size */
++  if (wlr_output_is_x11 (self->wlr_output)) {
++    if ((pending->committed & WLR_OUTPUT_STATE_MODE) &&
++        pending->mode_type == WLR_OUTPUT_STATE_MODE_CUSTOM)
++      width = pending->custom_mode.width;
++    else
++      width = self->wlr_output->width;
++    return phoc_output_x11_scale (width);
++  }
++
+   if (!self->wlr_output->phys_width || !self->wlr_output->phys_height) {
+     g_message ("Output '%s' has invalid physical size, "
+                "using default scale", self->wlr_output->name);
+@@ -903,6 +964,7 @@ phoc_output_fill_state (PhocOutput              *self,
+       wlr_output_state_set_mode (pending, preferred_mode);
+     }
+ 
++    priv->fixed_scale = !!output_config->scale;
+     if (output_config->scale)
+       scale = output_config->scale;
+     else
+-- 
+2.56.0
+

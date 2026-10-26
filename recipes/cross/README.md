@@ -358,3 +358,14 @@ patch files its wrap applies. xcb-util-errors is not built: `-Dwlroots:xcb-error
 only names X11 errors. On a host whose glib tools are missing where its `.pc` files say (Arch
 without `glib2-devel`), `TL_NATIVE_FILE=<meson native file>` points meson's build-machine
 `pkg_config_path` at a copy of the `.pc` files that names the tools in the sysroot instead.
+
+`phoc/0003` and `phoc/0004` make phoc's output follow the X root window (docs/PHOSH.md, "Size and
+scale"). 0003 is a wlroots patch file the wrap applies: the X11 backend starts the output at the
+root's current size, selects StructureNotify on the root and, on the root's ConfigureNotify (what
+RandR sends), resizes the output's window, which then asks phoc for the new mode. 0004 is phoc's
+side: an X11 output's scale is width / 360 rounded down, at least 1, set at creation and again on
+each such request, unless the output config sets a scale; `PHOSH_SCALE` (1 to 10, an integer or a
+decimal) in phoc's environment overrides it, which is the hook for the settings app.
+`phoc-xvfb-test.sh` builds phoc natively with the patches and checks the behaviour on an Xvfb
+screen resized with `xrandr --fb` (needs Xvfb, xrandr, wlr-randr and wayland-info; exits 77 when a
+tool is missing, 1 under `TL_XVFB_TEST_STRICT=1`).

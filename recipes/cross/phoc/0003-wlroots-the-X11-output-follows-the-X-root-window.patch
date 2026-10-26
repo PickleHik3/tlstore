@@ -1,0 +1,140 @@
+From 7f04026bc67ade8623ea0ff5301cb5a43c95f57d Mon Sep 17 00:00:00 2001
+From: PickleHik3 <noreply@users.noreply.github.com>
+Date: Mon, 26 Oct 2026 11:32:56 +0300
+Subject: [PATCH] wlroots: the X11 output follows the X root window
+
+The X11 backend's output started at a fixed 1024x768 and ignored the root's size. It now starts
+at the root's current geometry, selects StructureNotify on the root, and on the root's
+ConfigureNotify (sent by the X server when RandR changes the screen size) resizes each output's
+window. The window's own ConfigureNotify then takes the existing path, which sends the
+compositor a request_state with the new mode. Carried as a wlroots patch file that
+wlroots.wrap applies. No polling and no timers.
+---
+ .../tl/0003-x11-follow-root-window-size.patch | 103 ++++++++++++++++++
+ subprojects/wlroots.wrap                      |   3 +-
+ 2 files changed, 105 insertions(+), 1 deletion(-)
+ create mode 100644 subprojects/packagefiles/wlroots/tl/0003-x11-follow-root-window-size.patch
+
+diff --git a/subprojects/packagefiles/wlroots/tl/0003-x11-follow-root-window-size.patch b/subprojects/packagefiles/wlroots/tl/0003-x11-follow-root-window-size.patch
+new file mode 100644
+index 0000000..cbb7d0b
+--- /dev/null
++++ b/subprojects/packagefiles/wlroots/tl/0003-x11-follow-root-window-size.patch
+@@ -0,0 +1,103 @@
++Termux Launcher: the X11 backend's output follows the X root window. It starts at the root's
++current size (not a fixed 1024x768), selects StructureNotify on the root, and on the root's
++ConfigureNotify (which the X server sends when RandR changes the screen size) resizes each
++output's window; the window's own ConfigureNotify then takes the existing path and sends the
++compositor a request_state with the new mode.
++
++diff --git i/backend/x11/backend.c w/backend/x11/backend.c
++index 4dc4bf1..4fed4e5 100644
++--- i/backend/x11/backend.c
+++++ w/backend/x11/backend.c
++@@ -78,6 +78,10 @@ static void handle_x11_event(struct wlr_x11_backend *x11,
++ 	case XCB_CONFIGURE_NOTIFY: {
++ 		xcb_configure_notify_event_t *ev =
++ 			(xcb_configure_notify_event_t *)event;
+++		if (ev->window == x11->screen->root) {
+++			handle_x11_root_configure_notify(x11, ev);
+++			break;
+++		}
++ 		struct wlr_x11_output *output =
++ 			get_x11_output_from_window_id(x11, ev->window);
++ 		if (output != NULL) {
++@@ -164,6 +168,13 @@ static bool backend_start(struct wlr_backend *backend) {
++ 
++ 	wlr_log(WLR_INFO, "Starting X11 backend");
++ 
+++	// Follow the root window's size: the X server sends it a ConfigureNotify
+++	// when RandR changes the screen size.
+++	uint32_t root_mask = XCB_EVENT_MASK_STRUCTURE_NOTIFY;
+++	xcb_change_window_attributes(x11->xcb, x11->screen->root,
+++		XCB_CW_EVENT_MASK, &root_mask);
+++	xcb_flush(x11->xcb);
+++
++ 	wl_signal_emit_mutable(&x11->backend.events.new_input, &x11->keyboard.base);
++ 
++ 	for (size_t i = 0; i < x11->requested_outputs; ++i) {
++diff --git i/backend/x11/output.c w/backend/x11/output.c
++index 51a9c14..b7f9b3e 100644
++--- i/backend/x11/output.c
+++++ w/backend/x11/output.c
++@@ -603,9 +603,21 @@ struct wlr_output *wlr_x11_output_create(struct wlr_backend *backend) {
++ 
++ 	struct wlr_output *wlr_output = &output->wlr_output;
++ 
+++	// Start at the root window's current size, not a fixed one
+++	int32_t init_width = 1024, init_height = 768;
+++	xcb_get_geometry_reply_t *geo = xcb_get_geometry_reply(x11->xcb,
+++		xcb_get_geometry(x11->xcb, x11->screen->root), NULL);
+++	if (geo != NULL) {
+++		if (geo->width > 0 && geo->height > 0) {
+++			init_width = geo->width;
+++			init_height = geo->height;
+++		}
+++		free(geo);
+++	}
+++
++ 	struct wlr_output_state state;
++ 	wlr_output_state_init(&state);
++-	wlr_output_state_set_custom_mode(&state, 1024, 768, 0);
+++	wlr_output_state_set_custom_mode(&state, init_width, init_height, 0);
++ 
++ 	wlr_output_init(wlr_output, &x11->backend, &output_impl, x11->event_loop, &state);
++ 	wlr_output_state_finish(&state);
++@@ -711,6 +723,27 @@ void handle_x11_configure_notify(struct wlr_x11_output *output,
++ 	wlr_output_state_finish(&state);
++ }
++ 
+++void handle_x11_root_configure_notify(struct wlr_x11_backend *x11,
+++		xcb_configure_notify_event_t *ev) {
+++	if (ev->width == 0 || ev->height == 0) {
+++		return;
+++	}
+++
+++	// Resize each output's window to the root; the window's own
+++	// ConfigureNotify then takes the usual path (handle_x11_configure_notify)
+++	// and asks the compositor for the new mode.
+++	struct wlr_x11_output *output;
+++	wl_list_for_each(output, &x11->outputs, link) {
+++		if (output->win_width == ev->width && output->win_height == ev->height) {
+++			continue;
+++		}
+++		const uint32_t values[] = { ev->width, ev->height };
+++		xcb_configure_window(x11->xcb, output->win,
+++			XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT, values);
+++	}
+++	xcb_flush(x11->xcb);
+++}
+++
++ bool wlr_output_is_x11(struct wlr_output *wlr_output) {
++ 	return wlr_output->impl == &output_impl;
++ }
++diff --git i/include/backend/x11.h w/include/backend/x11.h
++index fcea4d2..5edd1fd 100644
++--- i/include/backend/x11.h
+++++ w/include/backend/x11.h
++@@ -141,6 +141,8 @@ void update_x11_pointer_position(struct wlr_x11_output *output,
++ 
++ void handle_x11_configure_notify(struct wlr_x11_output *output,
++ 	xcb_configure_notify_event_t *event);
+++void handle_x11_root_configure_notify(struct wlr_x11_backend *x11,
+++	xcb_configure_notify_event_t *event);
++ void handle_x11_present_event(struct wlr_x11_backend *x11,
++ 	xcb_ge_generic_event_t *event);
++ 
+diff --git a/subprojects/wlroots.wrap b/subprojects/wlroots.wrap
+index 8192c1b..d642031 100644
+--- a/subprojects/wlroots.wrap
++++ b/subprojects/wlroots.wrap
+@@ -12,4 +12,5 @@ diff_files =
+   wlroots/text-input-v2/0004-text-input-v3-Bump-protocol-version-to-2.patch,
+   wlroots/0001-Revert-layer-shell-error-on-0-dimension-without-anch.patch,
+   wlroots/tl/0001-bionic-no-librt.patch,
+-  wlroots/tl/0002-bionic-no-shm-open.patch
++  wlroots/tl/0002-bionic-no-shm-open.patch,
++  wlroots/tl/0003-x11-follow-root-window-size.patch
+-- 
+2.56.0
+
