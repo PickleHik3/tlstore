@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PickleHik3 <noreply@example.invalid>
+Date: Mon, 26 Oct 2026 12:00:00 +0000
+Subject: [PATCH 03/16] Look for libfeedback in ../lib of the binary
+
+feedbackd builds libfeedback as a shared library whatever default_library says. The archive
+has bin/phosh and lib/libfeedback-0.0.so, so the binary looks one directory up.
+---
+ src/meson.build | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/meson.build b/src/meson.build
+index c42c21d..b057c81 100644
+--- a/src/meson.build
++++ b/src/meson.build
+@@ -680,6 +680,9 @@ phosh = executable(
+   dependencies: phosh_static_lib_dep,
+   link_depends: dynamic_list,
+   link_args: phosh_export_sym_link_arg,
++  # libfeedback (a shared library, as feedbackd builds it) is shipped in lib/ next to the
++  # directory the binary is installed into
++  install_rpath: '$ORIGIN/../lib',
+   install: true,
+   install_dir: libexecdir,
+ )

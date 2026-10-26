@@ -1,0 +1,128 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PickleHik3 <noreply@example.invalid>
+Date: Mon, 26 Oct 2026 12:00:00 +0000
+Subject: [PATCH 02/16] Build for Bionic: libintl.h stand-in, memfd_create by
+ system call, no exp10
+
+Termux has no libintl.h (glib's gi18n.h includes it), Bionic declares memfd_create () from
+API level 30 on and has no shm_open () at all, no exp10 () and no ulong. src/compat/libintl.h
+answers with the untranslated text (the same file phoc carries), as a global argument so that
+libgvc, gmobile and libfeedback see it too.
+---
+ meson.build           | 12 ++++++++++++
+ src/backlight.c       |  2 +-
+ src/compat/libintl.h  | 29 +++++++++++++++++++++++++++++
+ src/system-prompter.c |  2 +-
+ src/util.c            |  7 +++++++
+ 5 files changed, 50 insertions(+), 2 deletions(-)
+ create mode 100644 src/compat/libintl.h
+
+diff --git a/meson.build b/meson.build
+index 35e93a2..55ac269 100644
+--- a/meson.build
++++ b/meson.build
+@@ -67,6 +67,13 @@ root_inc = include_directories('.')
+ 
+ cc = meson.get_compiler('c')
+ 
++# Bionic has no gettext, and Termux ships no libintl.h: src/compat/ has a stand-in that answers
++# with the untranslated text. A global argument, so that the subprojects (libgvc, gmobile,
++# libfeedback) see it as well.
++if not cc.has_header('libintl.h')
++  add_global_arguments('-I' + meson.project_source_root() / 'src' / 'compat', language: 'c')
++endif
++
+ global_c_args = []
+ test_c_args = [
+   '-Wcast-align',
+@@ -216,6 +223,11 @@ have_memfd_create = cc.has_function(
+   'memfd_create',
+   prefix: ['#define _GNU_SOURCE', '#include <sys/mman.h>'],
+ )
++# Bionic declares memfd_create () from API level 30 on but the system call is there; util.c
++# makes it with syscall (). Bionic has no shm_open () either, so there is no fall back.
++if host_machine.system() == 'android'
++  have_memfd_create = true
++endif
+ 
+ config_h = configuration_data()
+ config_h.set_quoted('GETTEXT_PACKAGE', 'phosh')
+diff --git a/src/backlight.c b/src/backlight.c
+index a1d9bbc..7b2c0a5 100644
+--- a/src/backlight.c
++++ b/src/backlight.c
+@@ -104,7 +104,7 @@ phosh_backlight_brightness_to_level (PhoshBacklight *self, double brightness)
+   if (priv->scale == PHOSH_BACKLIGHT_SCALE_NON_LINEAR)
+     return round (brightness);
+ 
+-  level = round (exp10 (brightness));
++  level = round (pow (10.0, brightness)); /* exp10 () is not in Bionic */
+   return CLAMP (level, priv->level.min, priv->level.max);
+ }
+ 
+diff --git a/src/compat/libintl.h b/src/compat/libintl.h
+new file mode 100644
+index 0000000..4c52e27
+--- /dev/null
++++ b/src/compat/libintl.h
+@@ -0,0 +1,29 @@
++/*
++ * Termux Launcher: stand-in for <libintl.h>.
++ *
++ * Bionic has no gettext, and Termux's glib (built with its own stubs) does not link a libintl
++ * either, so no message catalog is ever read on the device. These are the calls <glib/gi18n.h>
++ * and phoc's main() name, answering with the untranslated text.
++ */
++#pragma once
++
++#include <stddef.h>
++
++static inline char *gettext (const char *msgid) __attribute__ ((format_arg (1)));
++static inline char *dgettext (const char *domain, const char *msgid) __attribute__ ((format_arg (2)));
++static inline char *dcgettext (const char *domain, const char *msgid, int category) __attribute__ ((format_arg (2)));
++static inline char *ngettext (const char *msgid, const char *msgid_plural, unsigned long n) __attribute__ ((format_arg (1), format_arg (2)));
++static inline char *dngettext (const char *domain, const char *msgid, const char *msgid_plural, unsigned long n) __attribute__ ((format_arg (2), format_arg (3)));
++
++static inline char *gettext (const char *msgid) { return (char *) msgid; }
++static inline char *dgettext (const char *domain, const char *msgid) { return (char *) msgid; }
++static inline char *dcgettext (const char *domain, const char *msgid, int category) { return (char *) msgid; }
++static inline char *ngettext (const char *msgid, const char *msgid_plural, unsigned long n) {
++  return (char *) (n == 1 ? msgid : msgid_plural);
++}
++static inline char *dngettext (const char *domain, const char *msgid, const char *msgid_plural, unsigned long n) {
++  return (char *) (n == 1 ? msgid : msgid_plural);
++}
++static inline char *textdomain (const char *domain) { return (char *) domain; }
++static inline char *bindtextdomain (const char *domain, const char *dir) { return (char *) dir; }
++static inline char *bind_textdomain_codeset (const char *domain, const char *codeset) { return (char *) codeset; }
+diff --git a/src/system-prompter.c b/src/system-prompter.c
+index fac2a97..5f1d78d 100644
+--- a/src/system-prompter.c
++++ b/src/system-prompter.c
+@@ -24,7 +24,7 @@
+  * wide modal #PhoshSystemPrompt dialogs
+  */
+ static GcrSystemPrompter *_prompter;
+-static ulong owner_id;
++static guint owner_id;
+ static gboolean registered_prompter;
+ static gboolean acquired_prompter;
+ 
+diff --git a/src/util.c b/src/util.c
+index a2728fd..70431e7 100644
+--- a/src/util.c
++++ b/src/util.c
+@@ -296,6 +296,13 @@ randname (char *buf)
+ }
+ 
+ 
++#ifdef __ANDROID__
++/* Bionic has no memfd_create () below API level 30 and no shm_open () at all */
++# include <sys/syscall.h>
++# include <unistd.h>
++# define memfd_create(name, flags) ((int) syscall (SYS_memfd_create, (name), (flags)))
++#endif
++
+ static int
+ anonymous_shm_open (void)
+ {

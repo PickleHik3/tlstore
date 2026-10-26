@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PickleHik3 <noreply@example.invalid>
+Date: Mon, 26 Oct 2026 12:00:00 +0000
+Subject: [PATCH 07/16] Compile out the polkit agent: -Dpolkit=false
+
+No polkit authentication agent and prompt.
+---
+ src/shell.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/src/shell.c b/src/shell.c
+index 31afe52..c30f31d 100644
+--- a/src/shell.c
++++ b/src/shell.c
+@@ -636,10 +636,14 @@ phosh_shell_dispose (GObject *object)
+   g_clear_object (&priv->feedback_manager);
+   g_clear_object (&priv->notify_manager);
+   g_clear_object (&priv->screen_saver_manager);
++#if PHOSH_HAVE_POLKIT
+   g_clear_object (&priv->polkit_auth_agent);
++#endif
+   g_clear_object (&priv->wifi_manager);
+   g_clear_object (&priv->toplevel_manager);
++#if PHOSH_HAVE_OSK
+   g_clear_object (&priv->osk_manager);
++#endif
+   g_clear_object (&priv->idle_manager);
+   g_clear_object (&priv->lockscreen_manager);
+   g_clear_object (&priv->monitor_manager);
+@@ -1182,15 +1186,19 @@ phosh_shell_constructed (GObject *object)
+   priv->faders = g_ptr_array_new_with_free_func ((GDestroyNotify) (gtk_widget_destroy));
+ 
+   phosh_system_prompter_register ();
++#if PHOSH_HAVE_POLKIT
+   priv->polkit_auth_agent = phosh_polkit_auth_agent_new ();
++#endif
+ 
+   priv->feedback_manager = phosh_feedback_manager_new ();
+   priv->keyboard_events = phosh_keyboard_events_new (&err);
+   if (priv->keyboard_events) {
++#if PHOSH_HAVE_CALLS
+     g_signal_connect_swapped (priv->keyboard_events,
+                               "pressed",
+                               G_CALLBACK (on_keyboard_events_pressed),
+                               self);
++#endif
+   } else {
+     g_warning ("Failed to initialize keyboard events: %s", err->message);
+   }

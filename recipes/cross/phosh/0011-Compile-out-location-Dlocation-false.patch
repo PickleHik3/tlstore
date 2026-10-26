@@ -1,0 +1,84 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PickleHik3 <noreply@example.invalid>
+Date: Mon, 26 Oct 2026 12:00:00 +0000
+Subject: [PATCH 11/16] Compile out location: -Dlocation=false
+
+No GeoClue manager, status icon or quick setting.
+---
+ src/shell.c         | 10 ++++++++--
+ src/ui/top-panel.ui |  4 ++++
+ 2 files changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/src/shell.c b/src/shell.c
+index d1d6312..e3fd6e9 100644
+--- a/src/shell.c
++++ b/src/shell.c
+@@ -912,14 +912,18 @@ setup_idle_cb (PhoshShell *self)
+                            self,
+                            G_CONNECT_SWAPPED);
+ 
++#if PHOSH_HAVE_LOCATION
+   phosh_shell_get_location_manager (self);
++#endif
+   if (priv->sensor_proxy_manager) {
++#if PHOSH_HAVE_CALLS
+     priv->proximity = phosh_proximity_new (priv->sensor_proxy_manager,
+                                            priv->calls_manager);
+-    phosh_monitor_manager_set_sensor_proxy_manager (priv->monitor_manager,
+-                                                    priv->sensor_proxy_manager);
+     g_signal_connect_swapped (priv->proximity, "notify::fader",
+                               G_CALLBACK (on_proximity_fader_changed), self);
++#endif
++    phosh_monitor_manager_set_sensor_proxy_manager (priv->monitor_manager,
++                                                    priv->sensor_proxy_manager);
+   }
+ 
+   priv->mount_manager = phosh_mount_manager_new ();
+@@ -2185,6 +2189,7 @@ phosh_shell_get_hks_manager (PhoshShell *self)
+   return priv->hks_manager;
+ }
+ 
++#if PHOSH_HAVE_LOCATION
+ /**
+  * phosh_shell_get_location_manager:
+  * @self: The shell singleton
+@@ -2207,6 +2212,7 @@ phosh_shell_get_location_manager (PhoshShell *self)
+   g_return_val_if_fail (PHOSH_IS_LOCATION_MANAGER (priv->location_manager), NULL);
+   return priv->location_manager;
+ }
++#endif
+ 
+ /**
+  * phosh_shell_get_mpris_manager:
+diff --git a/src/ui/top-panel.ui b/src/ui/top-panel.ui
+index 03954e8..9b4cea5 100644
+--- a/src/ui/top-panel.ui
++++ b/src/ui/top-panel.ui
+@@ -320,6 +320,7 @@
+                                 <property name="child">feedback_info</property>
+                               </object>
+                             </child>
++                            <!-- tl-if location -->
+                             <child>
+                               <object class="PhoshRevealer">
+                                 <property name="visible">1</property>
+@@ -327,6 +328,7 @@
+                                 <property name="child">location_info</property>
+                               </object>
+                             </child>
++                            <!-- tl-endif -->
+                             <child>
+                               <object class="PhoshBatteryInfo" id="batteryinfo">
+                                 <property name="visible">1</property>
+@@ -447,9 +449,11 @@
+   <object class="PhoshFeedbackInfo" id="feedback_info">
+     <property name="pixel-size">16</property>
+   </object>
++  <!-- tl-if location -->
+   <object class="PhoshLocationInfo" id="location_info">
+     <property name="pixel-size">16</property>
+   </object>
++  <!-- tl-endif -->
+   <object class="GtkGestureMultiPress" id="click_gesture">
+     <property name="widget">PhoshTopPanel</property>
+     <property name="propagation-phase">target</property>

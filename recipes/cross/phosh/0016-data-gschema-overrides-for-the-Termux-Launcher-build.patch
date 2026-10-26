@@ -1,0 +1,47 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PickleHik3 <noreply@example.invalid>
+Date: Mon, 26 Oct 2026 12:00:00 +0000
+Subject: [PATCH 16/16] data: gschema overrides for the Termux Launcher build
+
+app-filter-mode [] (every app), the screensaver does not lock, no screen keyboard.
+---
+ data/90_tl.gschema.override | 16 ++++++++++++++++
+ data/meson.build            |  2 +-
+ 2 files changed, 17 insertions(+), 1 deletion(-)
+ create mode 100644 data/90_tl.gschema.override
+
+diff --git a/data/90_tl.gschema.override b/data/90_tl.gschema.override
+new file mode 100644
+index 0000000..7fbcae3
+--- /dev/null
++++ b/data/90_tl.gschema.override
+@@ -0,0 +1,16 @@
++# Termux Launcher: where this build differs from upstream's defaults. Read after
++# 00_mobi.Phosh.gschema.override, so these win.
++
++# Show every app in the overview and the app grid. Upstream's 'adaptive' filters out apps that are
++# not marked as fitting a phone, which is most of what Termux installs.
++[sm.puri.phosh:Phosh]
++app-filter-mode=[]
++
++# There is no lock screen in this build (-Dlockscreen=false): nothing locks when the session is idle.
++[org.gnome.desktop.screensaver:Phosh]
++lock-enabled=false
++
++# There is no on-screen keyboard manager in this build (-Dosk=false). The keyboard comes from Android,
++# through termux-x11.
++[org.gnome.desktop.a11y.applications:Phosh]
++screen-keyboard-enabled=false
+diff --git a/data/meson.build b/data/meson.build
+index 4c4b245..cb01c18 100644
+--- a/data/meson.build
++++ b/data/meson.build
+@@ -115,7 +115,7 @@ compiled_schemas = custom_target(
+   depends: [generate_enums_schema, copy_schema],
+ )
+ 
+-overrides = ['00_mobi.Phosh.gschema.override']
++overrides = ['00_mobi.Phosh.gschema.override', '90_tl.gschema.override']
+ 
+ install_data(schemas + overrides, install_dir: schemasdir)
+ 

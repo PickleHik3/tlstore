@@ -1,0 +1,34 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PickleHik3 <noreply@example.invalid>
+Date: Mon, 26 Oct 2026 12:00:00 +0000
+Subject: [PATCH 01/16] subprojects: gmobile v0.6.0_beta1 and feedbackd v0.8.1
+
+The wraps in the tag name gmobile v0.1.0 and feedbackd v0.7.0, the oldest versions phosh's
+meson accepts. 0.58 is written for what phoc 0.58 builds against, gmobile v0.6.0_beta1, and
+for feedbackd 0.8. libhandy is taken from the sysroot, so its wrap stays as it is.
+---
+ subprojects/gmobile.wrap     | 2 +-
+ subprojects/libfeedback.wrap | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/subprojects/gmobile.wrap b/subprojects/gmobile.wrap
+index b9ec8e9..d5fe74b 100644
+--- a/subprojects/gmobile.wrap
++++ b/subprojects/gmobile.wrap
+@@ -1,5 +1,5 @@
+ [wrap-git]
+ directory=gmobile
+ url=https://gitlab.gnome.org/World/Phosh/gmobile.git
+-revision=v0.1.0
++revision=v0.6.0_beta1
+ depth=1
+diff --git a/subprojects/libfeedback.wrap b/subprojects/libfeedback.wrap
+index 0827dc9..483163b 100644
+--- a/subprojects/libfeedback.wrap
++++ b/subprojects/libfeedback.wrap
+@@ -1,4 +1,4 @@
+ [wrap-git]
+ directory=feedbackd
+ url=https://source.puri.sm/Librem5/feedbackd.git
+-revision=v0.7.0
++revision=v0.8.1

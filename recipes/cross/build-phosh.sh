@@ -7,13 +7,13 @@
 # next to this script, applied with `patch -p1` in file-name order:
 #
 #   phoc                    recipes/cross/phoc/                   built (M0)
-#   gmobile, libfeedback    (phoc and phosh build gmobile as a meson subproject today)
-#   phosh                   recipes/cross/phosh/                  M1
+#   gmobile, libfeedback    meson subprojects of phoc and phosh, pinned below, not trees of their own
+#   phosh                   recipes/cross/phosh/                  built (M1)
 #   phosh-mobile-settings   recipes/cross/phosh-mobile-settings/  M4
 #   tl-feedbackd            (this repository's own small daemon)  M3
 #
-# TL_PHOSH_TREES names the trees to build, in order (default: phoc). A tree that is not written yet
-# stops the build instead of being skipped.
+# TL_PHOSH_TREES names the trees to build, in order (default: phoc phosh). A tree that is not
+# written yet stops the build instead of being skipped.
 #
 # M0 builds unpatched-in-spirit phoc 0.58.0: the tag as upstream tags it, plus the numbered patches
 # in recipes/cross/phoc/ that make it compile and link against Bionic and Termux's sysroot, and
@@ -32,6 +32,38 @@
 # and, from the recipe, not a patch: org.gnome.mutter.keybindings (phoc/*.gschema.xml) and the
 # archive's compiled share/glib-2.0/schemas/gschemas.compiled.
 #
+# M1 builds phosh 0.58.0 the same way: the tag, plus the numbered patches in recipes/cross/phosh/
+# (commits on the tag too, exported with `git format-patch`). They are of three kinds:
+#   - the subprojects' wraps, moved to the revisions pinned below (gmobile as phoc has it; the
+#     wraps in the tag name v0.1.0 and feedbackd v0.7.0, which are not what 0.58 is written for);
+#   - Bionic and Termux fixes: the libintl.h stand-in (as in phoc's), memfd_create by system call
+#     in place of shm_open, no exp10, libfeedback found next to the binary;
+#   - meson options, all on by default (that is upstream), that compile out what the launcher does
+#     not ship (docs/PHOSH.md, "Keep, drop, bridge"). This build turns them all off, so there is no
+#     library to stub and no system bus to fake:
+#       -Dlockscreen=false     lock screen, PIN, lock-screen plugins, PAM: phosh starts unlocked
+#       -Dpolkit=false         polkit agent
+#       -Dlogind=false         libsystemd/elogind, logind inhibitors, sd_notify
+#       -Dosk=false            the on-screen keyboard manager (sm.puri.OSK0)
+#       -Deds=false            evolution-data-server, the calendar server and its plugins
+#       -Dcalls=false          calls, call UI (libcall-ui), emergency calls, cell broadcasts
+#       -Dbluetooth=false      gnome-bluetooth, the Bluetooth tile and status page
+#       -Dlocation=false       GeoClue, the location manager
+#       -Dvpn=false            the VPN manager and tile        (also off with networkmanager)
+#       -Dhotspot=false        the Wi-Fi hotspot setting      (also off with networkmanager)
+#       -Dnetworkmanager=false libnm: Wi-Fi, connectivity, network authentication. Termux has no
+#                              libnm, so the providers docs/PHOSH.md wants to keep for now cannot
+#                              be built. The Wi-Fi and WWAN managers are the ones with nothing to
+#                              report (wifi-manager-none.c, wwan-manager-none.c): "no hardware",
+#                              what phosh itself says when NetworkManager is not on the bus
+#       -Dmodemmanager=false   mm-glib (not in Termux either); the oFono backend stays
+#       -Dgudev=false          libgudev (nor this): udev monitoring, sysfs backlight and torch
+#       -Dsearchd=false        upstream's search service
+#     UPower, iio-sensor-proxy and the torch manager stay: they only look for their D-Bus names.
+# Not in the archive yet: the session script, the session files and the compiled gschemas, which
+# are the "session-file step" of docs/PHOSH.md ("Packaging"). The schemas are checked here, with
+# the overrides of data/90_tl.gschema.override, not compiled into the archive.
+#
 # What is built in:
 #   - wlroots 0.20.2, the subproject phoc's wlroots.wrap names, linked statically: backends=x11
 #     only (no DRM, libinput, session), renderers=vulkan (the Vulkan renderer, and pixman, which
@@ -43,8 +75,12 @@
 #     host's glslang (glslang-tools in CI). At start phoc tries Vulkan on the GPU and falls back
 #     to pixman, logging the choice; WLR_RENDERER=pixman|vulkan forces one;
 #   - gmobile v0.6.0_beta1 and gvdb, meson subprojects too, static;
-#   - phoc's own xwayland option off: M0 runs Wayland clients only.
-# The three subprojects are fetched by meson from the wraps phoc ships; their commits are pinned
+#   - phoc's own xwayland option off: M0 runs Wayland clients only;
+#   - for phosh: gmobile (static), libgvc (static, over Termux's libpulse), feedbackd's libfeedback
+#     (a shared library, because its meson says so: lib/libfeedback-0.0.so in the archive, found
+#     through the binary's $ORIGIN/../lib), and everything else from the Termux sysroot (gtk3,
+#     libhandy, gcr, gnome-desktop3, appstream, libsoup3, upower's client library, libpulse).
+# The subprojects are fetched by meson from the wraps the trees ship; their commits are pinned
 # below and checked.
 #
 # Output: $TL_OUT/phosh, a .tar.gz (names sorted, one fixed mtime, numeric owner 0, gzip -n, so the
@@ -57,7 +93,8 @@
 # Env: TL_SYSROOT (the Termux sysroot, recipes/cross/termux-sysroot.sh -f phosh-deps.txt with
 # TL_TERMUX_X11=1; required), TL_ARCH, TL_NDK, TL_OUT, TL_BUILD_DIR, TERMUX_PREFIX,
 # TL_NATIVE_FILE (an extra meson native file, for a host whose glib tools are not where its .pc
-# files say), TL_BUILD_JOBS.
+# files say; a host without glib-mkenums or gdbus-codegen, as Arch is, gets one made from the
+# sysroot's glib, see host_glib_tools), TL_BUILD_JOBS.
 set -euo pipefail
 
 PHOC_VERSION="0.58.0"
@@ -69,6 +106,15 @@ WLROOTS_COMMIT="d783533489e1f75d6886c2ab5c5960090ef268f8"   # 0.20.2
 # Every entry's mtime in the archive (2026-10-26). A fixed date, so a rebuild of the same pin is
 # the same archive.
 PHOSH_MTIME=1792972800
+
+PHOSH_VERSION="0.58.0"
+PHOSH_URL="https://gitlab.gnome.org/World/Phosh/phosh/-/archive/v$PHOSH_VERSION/phosh-v$PHOSH_VERSION.tar.gz"
+PHOSH_SHA256=685ca53406b3692bba2f501b92f694759162864869ca0f272763c1a9b5f317cf
+PHOSH_COMMIT="991730023a5b12c0cd203a98abd1abcea99d3159"   # v0.58.0, the tag's commit
+# What recipes/cross/phosh/0001 points phosh's wraps at (the commits the tags peel to).
+GMOBILE_COMMIT="dcc1c4ebf13e985300f8a448530b29e82acad527"       # v0.6.0_beta1, as in phoc's wrap
+LIBFEEDBACK_COMMIT="f14642cb0408af9b6bf963eff3bc61eff6b0a1b2"   # feedbackd v0.8.1
+GVC_COMMIT="d2442f455844e5292cb4a74ffc66ecc8d7595a9f"           # libgnome-volume-control, as phosh's wrap
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
@@ -82,7 +128,7 @@ TL_NDK=${TL_NDK:-${ANDROID_NDK_HOME:-"${ANDROID_HOME:-$HOME/Android/Sdk}/ndk/$ND
 TL_OUT=${TL_OUT:-"$PWD/out"}
 TL_BUILD_DIR=${TL_BUILD_DIR:-"$PWD/build-phosh"}
 TERMUX_PREFIX=${TERMUX_PREFIX:-/data/data/com.termux/files/usr}
-TL_PHOSH_TREES=${TL_PHOSH_TREES:-phoc}
+TL_PHOSH_TREES=${TL_PHOSH_TREES:-phoc phosh}
 TL_SYSROOT=${TL_SYSROOT:-}
 [ -d "$TL_SYSROOT$TERMUX_PREFIX/lib/pkgconfig" ] || {
     echo "error: no Termux sysroot at '$TL_SYSROOT$TERMUX_PREFIX' (TL_SYSROOT; build it with termux-sysroot.sh -f phosh-deps.txt)" >&2
@@ -104,6 +150,30 @@ jobs=${TL_BUILD_JOBS:-$(nproc)}
 stage="$TL_BUILD_DIR/stage-$TL_ARCH"
 cross_file="$TL_BUILD_DIR/cross-$TL_ARCH.ini"
 "$SCRIPT_DIR/phosh-cross-file.sh" "$cross_file" >/dev/null
+
+# host_glib_tools — meson finds glib-mkenums, glib-genmarshal and gdbus-codegen through the
+# *host's* glib-2.0.pc and gio-2.0.pc (they are build-machine tools). A build machine that has no
+# glib development tools (Arch splits them out) fails there. The sysroot's glib has the same tools,
+# as Python scripts that run as they are (glib-compile-resources and glib-compile-schemas are ELF
+# files for the phone, and the host's own are found by name), so a native pkg-config path holding
+# copies of the two .pc files, with the three scripts' variables pointing into the sysroot, stands
+# in. Everything else of glib the build machine needs, its own .pc files give.
+host_glib_tools() {
+    local src="$TL_SYSROOT$TERMUX_PREFIX" dir="$TL_BUILD_DIR/hostpc" pc
+    if command -v glib-mkenums >/dev/null 2>&1 && command -v gdbus-codegen >/dev/null 2>&1; then
+        return 0
+    fi
+    mkdir -p "$dir"
+    for pc in glib-2.0 gio-2.0; do
+        [ -f "$src/lib/pkgconfig/$pc.pc" ] || { echo "error: no $pc.pc in the sysroot" >&2; exit 1; }
+        sed -E -e 's#^prefix=.*#prefix=/usr#' \
+            -e "s#^((glib_genmarshal|glib_mkenums|gdbus_codegen)=)\\\$\\{bindir\\}/#\\1$src/bin/#" \
+            -e '/^Requires\.private:/d' "$src/lib/pkgconfig/$pc.pc" > "$dir/$pc.pc"
+    done
+    printf "[built-in options]\npkg_config_path = ['%s']\n" "$dir" > "$TL_BUILD_DIR/native-glib.ini"
+    TL_NATIVE_FILE="$TL_BUILD_DIR/native-glib.ini"
+}
+[ -n "${TL_NATIVE_FILE:-}" ] || host_glib_tools
 
 # fetch_tree <name> <url> <sha256> <version> <pin> — the pinned tarball, unpacked and patched into
 # $TL_BUILD_DIR/<name>/source, once per (pin, patch set, script) as build-herdr.sh does it.
@@ -187,7 +257,47 @@ build_phoc() {
     glib-compile-schemas --strict "$schemas"
 }
 
-build_phosh() { echo "error: the phosh tree is built from M1 on" >&2; exit 1; }
+# phosh's options: every feature the launcher does not ship is off (see the top of this file).
+PHOSH_FEATURES_OFF=(
+    lockscreen polkit logind osk eds calls bluetooth location vpn hotspot networkmanager
+    modemmanager gudev
+)
+
+build_phosh() {
+    fetch_tree phosh "$PHOSH_URL" "$PHOSH_SHA256" "$PHOSH_VERSION" "$PHOSH_COMMIT"
+    local build="$TL_BUILD_DIR/phosh/build-$TL_ARCH" native=() opts=() feature
+    [ -z "${TL_NATIVE_FILE:-}" ] || native=(--native-file "$TL_NATIVE_FILE")
+    for feature in "${PHOSH_FEATURES_OFF[@]}"; do opts+=("-D$feature=false"); done
+
+    echo "Configuring phosh $PHOSH_VERSION for $TL_ARCH..."
+    rm -rf "$build"
+    # --libexecdir=bin puts the binary at bin/phosh, next to phoc. The plugins are off: a plugin
+    # is found at a path compiled into phosh, which the archive does not know (it lands under
+    # the user's home), and their preferences are GTK 4 programs.
+    meson setup "$build" "$SOURCE_DIR" --cross-file "$cross_file" "${native[@]}" \
+        --prefix=/ --libexecdir=bin --buildtype=release --wrap-mode=default \
+        -Dtests=false -Dtools=false -Dgtk_doc=false -Dman=false \
+        "${opts[@]}" \
+        -Dsearchd=false -Dlockscreen-plugins=false -Dquick-setting-plugins=false \
+        -Dstatus-icon-plugins=false \
+        -Dgmobile:default_library=static -Dlibfeedback:default_library=static \
+        -Dlibfeedback:udev=false -Dlibfeedback:vapi=false
+    check_pin "$SOURCE_DIR/subprojects/gmobile" "$GMOBILE_COMMIT" "gmobile (for phosh)"
+    check_pin "$SOURCE_DIR/subprojects/feedbackd" "$LIBFEEDBACK_COMMIT" "feedbackd"
+    check_pin "$SOURCE_DIR/subprojects/gvc" "$GVC_COMMIT" "libgvc"
+
+    echo "Building phosh..."
+    ninja -C "$build" -j"$jobs"
+
+    echo "Installing phosh into the stage..."
+    DESTDIR="$stage" meson install -C "$build" --no-rebuild --strip >/dev/null
+
+    # What upstream installs for a systemd and gnome-session desktop. The launcher's own session
+    # script and session file are a later step (docs/PHOSH.md, "Packaging"), and a script of the
+    # same name from here would be taken for it.
+    rm -rf "$stage/lib/systemd" "$stage/share/gnome-session" "$stage/share/wayland-sessions" \
+        "$stage/bin/phosh-session"
+}
 build_phosh_mobile_settings() { echo "error: phosh-mobile-settings is built from M4 on" >&2; exit 1; }
 build_tl_feedbackd() { echo "error: tl-feedbackd is built from M3 on" >&2; exit 1; }
 
@@ -205,35 +315,96 @@ done
 
 # --- the app tree ----------------------------------------------------------------------------
 # meson install also put the static wlroots, gmobile's development files and its udev rules in the
-# stage; none is needed to run phoc (wlroots is inside the binary). M1's phosh brings gmobile's
-# shared library back when phosh needs it at run time.
+# stage; none is needed to run phoc (wlroots is inside the binary) or phosh (gmobile and libgvc are
+# inside the binary too). libfeedback's shared library stays: phosh needs it at run time.
 rm -rf "$stage/include" "$stage/lib/pkgconfig" "$stage/lib/udev" "$stage"/lib/*.a "$stage"/lib/libgmobile*
 find "$stage" -mindepth 1 -type d -empty -delete
 
 # --- checks ---------------------------------------------------------------------------------
 readelf="$NDK_BIN/llvm-readelf"
-[ -x "$stage/bin/phoc" ] || { echo "error: no bin/phoc in the stage" >&2; exit 1; }
-# The X11 backend is the only input and output phoc has; the build must have it, and must not
-# have grown a libinput, libudev, libseat or libgbm dependency by accident.
-grep -qa 'Starting X11 backend' "$stage/bin/phoc" || {
-    echo "error: phoc has no X11 backend" >&2
-    exit 1
+check_phoc() {
+    [ -x "$stage/bin/phoc" ] || { echo "error: no bin/phoc in the stage" >&2; exit 1; }
+    # The X11 backend is the only input and output phoc has; the build must have it, and must not
+    # have grown a libinput, libudev, libseat or libgbm dependency by accident.
+    grep -qa 'Starting X11 backend' "$stage/bin/phoc" || {
+        echo "error: phoc has no X11 backend" >&2
+        exit 1
+    }
+    # The Vulkan renderer's shm present path is in (a missing Vulkan header or glslang makes wlroots
+    # skip the renderer when it is not forced; with renderers=vulkan it fails the configure instead).
+    grep -qa 'presenting through shared memory' "$stage/bin/phoc" || {
+        echo "error: phoc has no Vulkan renderer for the shm output" >&2
+        exit 1
+    }
+    if "$readelf" -d "$stage/bin/phoc" | grep NEEDED | grep -E 'libinput|libudev|libseat|libgbm|libEGL|libGLES'; then
+        echo "error: phoc links a library the X11-only build must not need" >&2
+        exit 1
+    fi
+    # meson install drops the build and sysroot directories from RUNPATH; only the device prefix stays.
+    if "$readelf" -d "$stage/bin/phoc" | grep -E 'RUNPATH|RPATH' | grep -q "$TL_BUILD_DIR\|$TL_SYSROOT"; then
+        echo "error: phoc's RUNPATH names a build directory" >&2
+        exit 1
+    fi
 }
-# The Vulkan renderer's shm present path is in (a missing Vulkan header or glslang makes wlroots
-# skip the renderer when it is not forced; with renderers=vulkan it fails the configure instead).
-grep -qa 'presenting through shared memory' "$stage/bin/phoc" || {
-    echo "error: phoc has no Vulkan renderer for the shm output" >&2
-    exit 1
+
+check_phosh() {
+    local needed
+    [ -x "$stage/bin/phosh" ] || { echo "error: no bin/phosh in the stage" >&2; exit 1; }
+    [ -f "$stage/lib/libfeedback-0.0.so" ] || { echo "error: no lib/libfeedback-0.0.so in the stage" >&2; exit 1; }
+    # No library of a feature that is compiled out, and none of the ones Termux does not have.
+    needed=$("$readelf" -d "$stage/bin/phosh" | grep NEEDED)
+    if printf '%s\n' "$needed" | grep -E 'libsystemd|libelogind|libpam|libnm|libpolkit|libgudev|libudev|libmm-glib|libecal|libedataserver|libgnome-bluetooth|libcall-ui|libsecret|libgeoclue'; then
+        echo "error: phosh links a library of a feature that is compiled out" >&2
+        exit 1
+    fi
+    if "$readelf" -d "$stage/bin/phosh" | grep -E 'RUNPATH|RPATH' | grep -q "$TL_BUILD_DIR\|$TL_SYSROOT"; then
+        echo "error: phosh's RUNPATH names a build directory" >&2
+        exit 1
+    fi
+    "$readelf" -d "$stage/bin/phosh" | grep -E 'RUNPATH' | grep -q '\$ORIGIN/../lib' || {
+        echo "error: phosh does not look for libfeedback in ../lib" >&2
+        exit 1
+    }
+    check_phosh_schemas
 }
-if "$readelf" -d "$stage/bin/phoc" | grep NEEDED | grep -E 'libinput|libudev|libseat|libgbm|libEGL|libGLES'; then
-    echo "error: phoc links a library the X11-only build must not need" >&2
-    exit 1
-fi
-# meson install drops the build and sysroot directories from RUNPATH; only the device prefix stays.
-if "$readelf" -d "$stage/bin/phoc" | grep -E 'RUNPATH|RPATH' | grep -q "$TL_BUILD_DIR\|$TL_SYSROOT"; then
-    echo "error: phoc's RUNPATH names a build directory" >&2
-    exit 1
-fi
+
+# check_phosh_value <schema> <key> <wanted> — what the compiled schemas say, read with the
+# memory backend so that no user setting gets in.
+check_phosh_value() {
+    local got
+    got=$(XDG_CURRENT_DESKTOP=Phosh GSETTINGS_SCHEMA_DIR="$TL_BUILD_DIR/schema-check" \
+          GSETTINGS_BACKEND=memory gsettings get "$1" "$2")
+    case "$got" in
+        "$3"|"@as $3") ;;
+        *) echo "error: $1 $2 is '$got', not $3" >&2; exit 1 ;;
+    esac
+}
+
+# The schemas phosh installs, compiled the way the launcher's session will compile them (the
+# archive's next to the system's), with this build's overrides. It checks that they compile and
+# that the three defaults the build is meant to change are changed; it is not part of the archive.
+check_phosh_schemas() {
+    local dir="$TL_BUILD_DIR/schema-check" sys="$TL_SYSROOT$TERMUX_PREFIX/share/glib-2.0/schemas"
+    rm -rf "$dir"
+    mkdir -p "$dir"
+    cp "$stage"/share/glib-2.0/schemas/* "$dir/"
+    cp "$sys"/org.gnome.desktop*.xml "$dir/"
+    # 00_mobi.Phosh.gschema.override also names gnome-settings-daemon's schemas, which are not here
+    glib-compile-schemas "$dir" 2>&1 | grep -v 'non-existent schema' || true
+    [ -f "$dir/gschemas.compiled" ] || { echo "error: phosh's schemas do not compile" >&2; exit 1; }
+    if command -v gsettings >/dev/null 2>&1; then
+        check_phosh_value sm.puri.phosh app-filter-mode '[]'
+        check_phosh_value org.gnome.desktop.screensaver lock-enabled false
+        check_phosh_value org.gnome.desktop.a11y.applications screen-keyboard-enabled false
+    fi
+}
+
+for tree in $TL_PHOSH_TREES; do
+    case "$tree" in
+        phoc) check_phoc ;;
+        phosh) check_phosh ;;
+    esac
+done
 
 # --- the archive ----------------------------------------------------------------------------
 rm -f "$TL_OUT/phosh"
@@ -245,7 +416,13 @@ rm -f "$TL_OUT/phosh"
 ) | gzip -9n > "$TL_OUT/phosh"
 
 echo
-echo "Built: $TL_OUT/phosh (phoc $PHOC_VERSION for $TL_ARCH: $TL_PHOSH_TREES)"
-"$readelf" -d "$stage/bin/phoc" | grep -E "NEEDED|RUNPATH" || true
+echo "Built: $TL_OUT/phosh (phoc $PHOC_VERSION, phosh $PHOSH_VERSION for $TL_ARCH: $TL_PHOSH_TREES)"
+for tree in $TL_PHOSH_TREES; do
+    if [ -x "$stage/bin/$tree" ]; then
+        echo "-- $tree"
+        "$readelf" -d "$stage/bin/$tree" | grep -E "NEEDED|RUNPATH" || true
+    fi
+done
+file "$stage/bin/"* 2>/dev/null || true
 ls -l "$TL_OUT/phosh"
 sha256sum "$TL_OUT/phosh"

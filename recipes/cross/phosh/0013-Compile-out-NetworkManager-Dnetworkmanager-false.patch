@@ -1,0 +1,490 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PickleHik3 <noreply@example.invalid>
+Date: Mon, 26 Oct 2026 12:00:00 +0000
+Subject: [PATCH 13/16] Compile out NetworkManager: -Dnetworkmanager=false
+
+No libnm: no network authentication agent, connectivity manager or Wi-Fi network list, and the
+Wi-Fi manager and the WWAN manager's base class are the ones in wifi-manager-none.c and
+wwan-manager-none.c. They have no hardware to report, which is what the NetworkManager ones
+say when the daemon is not on the bus, so the Wi-Fi and mobile data tiles stay insensitive and
+the status icons stay hidden.
+---
+ src/quick-settings.c         |   4 +-
+ src/shell.c                  |  10 ++
+ src/ui/quick-settings.ui     |   2 +
+ src/ui/top-panel.ui          |   1 +
+ src/wifi-manager-none.c      | 179 +++++++++++++++++++++++++++++++++++
+ src/wifi-manager.h           |  12 ++-
+ src/wwan/wwan-manager-none.c | 154 ++++++++++++++++++++++++++++++
+ 7 files changed, 359 insertions(+), 3 deletions(-)
+ create mode 100644 src/wifi-manager-none.c
+ create mode 100644 src/wwan/wwan-manager-none.c
+
+diff --git a/src/quick-settings.c b/src/quick-settings.c
+index 73e7ac4..6372cec 100644
+--- a/src/quick-settings.c
++++ b/src/quick-settings.c
+@@ -20,7 +20,9 @@
+ #include "quick-setting.h"
+ #include "quick-settings-box.h"
+ #include "shell-priv.h"
+-#include "wifi-status-page.h"
++#if PHOSH_HAVE_NETWORKMANAGER
++# include "wifi-status-page.h"
++#endif
+ 
+ #define CUSTOM_QUICK_SETTINGS_SCHEMA "sm.puri.phosh.plugins"
+ #define CUSTOM_QUICK_SETTINGS_KEY "quick-settings"
+diff --git a/src/shell.c b/src/shell.c
+index 477487b..f59eb13 100644
+--- a/src/shell.c
++++ b/src/shell.c
+@@ -866,8 +866,10 @@ setup_idle_cb (PhoshShell *self)
+   priv->session_manager = phosh_session_manager_new ();
+   priv->mode_manager = phosh_mode_manager_new ();
+   priv->wifi_manager = phosh_wifi_manager_new ();
++#if PHOSH_HAVE_NETWORKMANAGER
+   /* Connecivity manager needs Wi-Fi manager: */
+   priv->connectivity_manager = phosh_connectivity_manager_new ();
++#endif
+ 
+   priv->sensor_proxy_manager = phosh_sensor_proxy_manager_new (&err);
+   if (priv->sensor_proxy_manager)
+@@ -937,12 +939,18 @@ setup_idle_cb (PhoshShell *self)
+   priv->gnome_shell_manager = phosh_gnome_shell_manager_get_default ();
+   priv->screenshot_manager = phosh_screenshot_manager_new ();
+   priv->run_command_manager = phosh_run_command_manager_new ();
++#if PHOSH_HAVE_NETWORKMANAGER
+   priv->network_auth_manager = phosh_network_auth_manager_new ();
++#endif
+   priv->portal_access_manager = phosh_portal_access_manager_new ();
+   priv->suspend_manager = phosh_suspend_manager_new ();
++#if PHOSH_HAVE_CALLS
+   priv->emergency_calls_manager = phosh_emergency_calls_manager_new ();
++#endif
+   priv->power_menu_manager = phosh_power_menu_manager_new ();
++#if PHOSH_HAVE_CALLS
+   priv->cell_broadcast_manager = phosh_cell_broadcast_manager_new ();
++#endif
+ 
+   setup_primary_monitor_signal_handlers (self);
+   /* Setup event hooks late so state changes in UI files don't trigger feedback */
+@@ -1764,7 +1772,9 @@ phosh_shell_get_connectivity_manager (PhoshShell *self)
+   g_return_val_if_fail (PHOSH_IS_CONNECTIVITY_MANAGER (priv->connectivity_manager), NULL);
+   return priv->connectivity_manager;
+ }
++#endif
+ 
++#if PHOSH_HAVE_CALLS
+ /**
+  * phosh_shell_get_emergency_calls_manager:
+  * @self: The shell singleton
+diff --git a/src/ui/quick-settings.ui b/src/ui/quick-settings.ui
+index 4e1d64b..4a07bf2 100644
+--- a/src/ui/quick-settings.ui
++++ b/src/ui/quick-settings.ui
+@@ -22,7 +22,9 @@
+             <property name="visible">1</property>
+             <property name="sensitive" bind-source="wifiinfo" bind-property="present" bind-flags="sync-create"/>
+             <property name="status-icon">wifiinfo</property>
++            <!-- tl-if networkmanager -->
+             <property name="status-page">wifi_status_page</property>
++            <!-- tl-endif -->
+             <property name="long-press-action-name">panel.launch-mobile-panel</property>
+             <property name="long-press-action-target">(&quot;wifi&quot;, [&lt;&quot;&quot;&gt;])</property>
+             <signal name="clicked" handler="on_wifi_clicked" object="PhoshQuickSettings" swapped="yes"/>
+diff --git a/src/ui/top-panel.ui b/src/ui/top-panel.ui
+index 72175e9..7127997 100644
+--- a/src/ui/top-panel.ui
++++ b/src/ui/top-panel.ui
+@@ -263,6 +263,7 @@
+                             <property name="child">connectivity_info</property>
+                           </object>
+                         </child>
++                        <!-- tl-endif -->
+                         <child>
+                           <object class="PhoshRevealer">
+                             <property name="visible">1</property>
+diff --git a/src/wifi-manager-none.c b/src/wifi-manager-none.c
+new file mode 100644
+index 0000000..b54a20c
+--- /dev/null
++++ b/src/wifi-manager-none.c
+@@ -0,0 +1,179 @@
++/*
++ * Copyright (C) 2019 Purism SPC
++ *               2025 Termux Launcher
++ *
++ * SPDX-License-Identifier: GPL-3.0-or-later
++ *
++ * Author: Guido Günther <agx@sigxcpu.org>
++ */
++#define G_LOG_DOMAIN "phosh-wifi-manager"
++
++#include "phosh-config.h"
++
++#include "wifi-manager.h"
++
++/**
++ * PhoshWifiManager:
++ *
++ * Tracks the Wi-Fi status, without a backend
++ *
++ * This is the Wi-Fi manager of a build without NetworkManager (`-Dnetworkmanager=false`, the
++ * build that has no libnm). It has the properties of the NetworkManager one and answers as that
++ * one does when the daemon is not on the bus: no Wi-Fi hardware, so the Wi-Fi status icon and
++ * the Wi-Fi tile stay hidden. A backend that fills them in replaces this file.
++ */
++
++enum {
++  PROP_0,
++  PROP_ICON_NAME,
++  PROP_SSID,
++  PROP_ENABLED,
++  PROP_PRESENT,
++  PROP_IS_HOTSPOT_MASTER,
++  PROP_LAST_PROP
++};
++
++struct _PhoshWifiManager {
++  GObject parent;
++};
++G_DEFINE_TYPE (PhoshWifiManager, phosh_wifi_manager, G_TYPE_OBJECT);
++
++
++static void
++phosh_wifi_manager_get_property (GObject    *object,
++                                 guint       property_id,
++                                 GValue     *value,
++                                 GParamSpec *pspec)
++{
++  switch (property_id) {
++  case PROP_ICON_NAME:
++    g_value_set_string (value, "network-wireless-disabled-symbolic");
++    break;
++  case PROP_SSID:
++    g_value_set_string (value, NULL);
++    break;
++  case PROP_ENABLED:
++  case PROP_PRESENT:
++  case PROP_IS_HOTSPOT_MASTER:
++    g_value_set_boolean (value, FALSE);
++    break;
++  default:
++    G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
++    break;
++  }
++}
++
++
++static void
++phosh_wifi_manager_class_init (PhoshWifiManagerClass *klass)
++{
++  GObjectClass *object_class = G_OBJECT_CLASS (klass);
++
++  object_class->get_property = phosh_wifi_manager_get_property;
++
++  g_object_class_install_property (
++    object_class, PROP_ICON_NAME,
++    g_param_spec_string ("icon-name", "", "", NULL,
++                         G_PARAM_READABLE | G_PARAM_EXPLICIT_NOTIFY | G_PARAM_STATIC_STRINGS));
++  g_object_class_install_property (
++    object_class, PROP_SSID,
++    g_param_spec_string ("ssid", "", "", NULL,
++                         G_PARAM_READABLE | G_PARAM_EXPLICIT_NOTIFY | G_PARAM_STATIC_STRINGS));
++  g_object_class_install_property (
++    object_class, PROP_ENABLED,
++    g_param_spec_boolean ("enabled", "", "", FALSE,
++                          G_PARAM_READABLE | G_PARAM_EXPLICIT_NOTIFY | G_PARAM_STATIC_STRINGS));
++  g_object_class_install_property (
++    object_class, PROP_PRESENT,
++    g_param_spec_boolean ("present", "", "", FALSE,
++                          G_PARAM_READABLE | G_PARAM_EXPLICIT_NOTIFY | G_PARAM_STATIC_STRINGS));
++  g_object_class_install_property (
++    object_class, PROP_IS_HOTSPOT_MASTER,
++    g_param_spec_boolean ("is-hotspot-master", "", "", FALSE,
++                          G_PARAM_READABLE | G_PARAM_EXPLICIT_NOTIFY | G_PARAM_STATIC_STRINGS));
++}
++
++
++static void
++phosh_wifi_manager_init (PhoshWifiManager *self)
++{
++}
++
++
++PhoshWifiManager *
++phosh_wifi_manager_new (void)
++{
++  return g_object_new (PHOSH_TYPE_WIFI_MANAGER, NULL);
++}
++
++
++guint8
++phosh_wifi_manager_get_strength (PhoshWifiManager *self)
++{
++  g_return_val_if_fail (PHOSH_IS_WIFI_MANAGER (self), 0);
++
++  return 0;
++}
++
++
++const char *
++phosh_wifi_manager_get_icon_name (PhoshWifiManager *self)
++{
++  g_return_val_if_fail (PHOSH_IS_WIFI_MANAGER (self), NULL);
++
++  return "network-wireless-disabled-symbolic";
++}
++
++
++const char *
++phosh_wifi_manager_get_ssid (PhoshWifiManager *self)
++{
++  g_return_val_if_fail (PHOSH_IS_WIFI_MANAGER (self), NULL);
++
++  return NULL;
++}
++
++
++gboolean
++phosh_wifi_manager_get_enabled (PhoshWifiManager *self)
++{
++  g_return_val_if_fail (PHOSH_IS_WIFI_MANAGER (self), FALSE);
++
++  return FALSE;
++}
++
++
++void
++phosh_wifi_manager_set_enabled (PhoshWifiManager *self, gboolean enabled)
++{
++  g_return_if_fail (PHOSH_IS_WIFI_MANAGER (self));
++
++  g_debug ("No Wi-Fi backend, not switching Wi-Fi %s", enabled ? "on" : "off");
++}
++
++
++gboolean
++phosh_wifi_manager_get_present (PhoshWifiManager *self)
++{
++  g_return_val_if_fail (PHOSH_IS_WIFI_MANAGER (self), FALSE);
++
++  return FALSE;
++}
++
++
++gboolean
++phosh_wifi_manager_is_hotspot_master (PhoshWifiManager *self)
++{
++  g_return_val_if_fail (PHOSH_IS_WIFI_MANAGER (self), FALSE);
++
++  return FALSE;
++}
++
++
++void
++phosh_wifi_manager_set_hotspot_master (PhoshWifiManager *self, gboolean is_hotspot_master)
++{
++  g_return_if_fail (PHOSH_IS_WIFI_MANAGER (self));
++
++  g_debug ("No Wi-Fi backend, not %s a hotspot", is_hotspot_master ? "starting" : "stopping");
++}
+diff --git a/src/wifi-manager.h b/src/wifi-manager.h
+index a3c42e2..9ab3643 100644
+--- a/src/wifi-manager.h
++++ b/src/wifi-manager.h
+@@ -8,8 +8,12 @@
+ 
+ #include <glib-object.h>
+ #include <gio/gio.h>
+-#include <NetworkManager.h>
+-#include <wifi-network.h>
++#include "phosh-config.h"
++
++#if PHOSH_HAVE_NETWORKMANAGER
++# include <NetworkManager.h>
++# include <wifi-network.h>
++#endif
+ 
+ G_BEGIN_DECLS
+ 
+@@ -24,14 +28,18 @@ const char        *phosh_wifi_manager_get_ssid (PhoshWifiManager *self);
+ gboolean           phosh_wifi_manager_get_enabled (PhoshWifiManager *self);
+ void               phosh_wifi_manager_set_enabled (PhoshWifiManager *self, gboolean enabled);
+ gboolean           phosh_wifi_manager_get_present (PhoshWifiManager *self);
++#if PHOSH_HAVE_NETWORKMANAGER
+ GListStore        *phosh_wifi_manager_get_networks (PhoshWifiManager *self);
++#endif
+ gboolean           phosh_wifi_manager_is_hotspot_master (PhoshWifiManager *self);
+ void               phosh_wifi_manager_set_hotspot_master (PhoshWifiManager *self, gboolean is_hotspot_master);
++#if PHOSH_HAVE_NETWORKMANAGER
+ void               phosh_wifi_manager_connect_network (PhoshWifiManager *self,
+                                                        PhoshWifiNetwork *network);
+ void               phosh_wifi_manager_request_scan (PhoshWifiManager *self);
+ gboolean           phosh_wifi_manager_get_scanning (PhoshWifiManager *self);
+ NMActiveConnectionState phosh_wifi_manager_get_state (PhoshWifiManager *self);
+ NMActiveConnection     *phosh_wifi_manager_get_active_connection (PhoshWifiManager *self);
++#endif
+ 
+ G_END_DECLS
+diff --git a/src/wwan/wwan-manager-none.c b/src/wwan/wwan-manager-none.c
+new file mode 100644
+index 0000000..02dfef9
+--- /dev/null
++++ b/src/wwan/wwan-manager-none.c
+@@ -0,0 +1,154 @@
++/*
++ * Copyright (C) 2021 Purism SPC
++ *               2023-2024 The Phosh Developers
++ *               2025 Termux Launcher
++ *
++ * SPDX-License-Identifier: GPL-3.0-or-later
++ *
++ * Author: Guido Günther <agx@sigxcpu.org>
++ */
++
++#define G_LOG_DOMAIN "phosh-wwan-manager"
++
++#include "phosh-config.h"
++
++#include "phosh-wwan-iface.h"
++#include "wwan-manager.h"
++
++/**
++ * PhoshWWanManager:
++ *
++ * Base class for `PhoshWWan` interface implementations, without a data connection
++ *
++ * The NetworkManager one of this class handles the mobile data connection. A build without
++ * NetworkManager (`-Dnetworkmanager=false`, the build that has no libnm) has none to handle: the
++ * modem can be seen, but there is no data connection to switch and none that could be activated.
++ */
++
++enum {
++  NEW_CBM,
++  N_SIGNALS
++};
++static guint signals[N_SIGNALS];
++
++enum {
++  PROP_0,
++  PROP_DATA_ENABLED,
++  PROP_HAS_DATA,
++  PROP_LAST_CONNECTION,
++  PROP_LAST_PROP
++};
++
++G_DEFINE_TYPE (PhoshWWanManager, phosh_wwan_manager, G_TYPE_OBJECT);
++
++
++static void
++phosh_wwan_manager_get_property (GObject    *object,
++                                 guint       property_id,
++                                 GValue     *value,
++                                 GParamSpec *pspec)
++{
++  switch (property_id) {
++  case PROP_DATA_ENABLED:
++  case PROP_HAS_DATA:
++    g_value_set_boolean (value, FALSE);
++    break;
++  case PROP_LAST_CONNECTION:
++    g_value_set_string (value, NULL);
++    break;
++  default:
++    G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
++    break;
++  }
++}
++
++
++static void
++phosh_wwan_manager_class_init (PhoshWWanManagerClass *klass)
++{
++  GObjectClass *object_class = G_OBJECT_CLASS (klass);
++
++  object_class->get_property = phosh_wwan_manager_get_property;
++
++  g_object_class_install_property (
++    object_class, PROP_DATA_ENABLED,
++    g_param_spec_boolean ("data-enabled", "", "", FALSE,
++                          G_PARAM_READABLE | G_PARAM_STATIC_STRINGS | G_PARAM_EXPLICIT_NOTIFY));
++  g_object_class_install_property (
++    object_class, PROP_HAS_DATA,
++    g_param_spec_boolean ("has-data", "", "", FALSE,
++                          G_PARAM_READABLE | G_PARAM_STATIC_STRINGS | G_PARAM_EXPLICIT_NOTIFY));
++  g_object_class_install_property (
++    object_class, PROP_LAST_CONNECTION,
++    g_param_spec_string ("last-connection", "", "", NULL,
++                         G_PARAM_READABLE | G_PARAM_STATIC_STRINGS | G_PARAM_EXPLICIT_NOTIFY));
++
++  /**
++   * PhoshWwanManager::new-cbm
++   * @self: The wwan manager
++   * @message: The message text
++   * @channel: The channel specifying the source of the CBM
++   *
++   * This signal is emitted when a new cell broadcast message is
++   * received.
++   *
++   * Since: 0.44.0
++   */
++  signals[NEW_CBM] = g_signal_new ("new-cbm",
++                                   G_TYPE_FROM_CLASS (klass),
++                                   G_SIGNAL_RUN_LAST,
++                                   0, NULL, NULL, NULL,
++                                   G_TYPE_NONE,
++                                   2,
++                                   G_TYPE_STRING,
++                                   G_TYPE_UINT);
++}
++
++
++static void
++phosh_wwan_manager_init (PhoshWWanManager *self)
++{
++}
++
++
++PhoshWWanManager *
++phosh_wwan_manager_new (void)
++{
++  return PHOSH_WWAN_MANAGER (g_object_new (PHOSH_TYPE_WWAN_MANAGER, NULL));
++}
++
++
++void
++phosh_wwan_manager_set_enabled (PhoshWWanManager *self, gboolean enabled)
++{
++  g_return_if_fail (PHOSH_IS_WWAN_MANAGER (self));
++
++  g_debug ("No NetworkManager, not switching the WWAN radio %s", enabled ? "on" : "off");
++}
++
++
++gboolean
++phosh_wwan_manager_get_data_enabled (PhoshWWanManager *self)
++{
++  g_return_val_if_fail (PHOSH_IS_WWAN_MANAGER (self), FALSE);
++
++  return FALSE;
++}
++
++
++void
++phosh_wwan_manager_set_data_enabled (PhoshWWanManager *self, gboolean enabled)
++{
++  g_return_if_fail (PHOSH_IS_WWAN_MANAGER (self));
++
++  g_debug ("No NetworkManager, not switching mobile data %s", enabled ? "on" : "off");
++}
++
++
++gboolean
++phosh_wwan_manager_has_data (PhoshWWanManager *self)
++{
++  g_return_val_if_fail (PHOSH_IS_WWAN_MANAGER (self), FALSE);
++
++  return FALSE;
++}
