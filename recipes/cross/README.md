@@ -409,6 +409,14 @@ new `-D` flag. `0023` adds `TlState` and `TlTile` to `mobi.phosh.Shell.DebugCont
 `tests/phosh/test-1*.sh`. Without an endpoint file the client does nothing and the tiles stay
 insensitive. Patch numbers 0030 and up are for `tl-feedbackd` and the notifications.
 
+`phosh/0030` makes notify-manager post each notification it accepts through that client with
+`POST /v1/notify` (id `phosh-<phosh's id>`, title, plain-text body, urgency, `"action":
+"open-display"`) and withdraw it with `{"close": "phosh-<id>"}` when phosh closes it (dismissed,
+CloseNotification, expiry of a transient one). Launcherctl allows 60 notify calls a minute and
+the bridge does not throttle. Without an endpoint file the post fails quietly (one log line).
+`0031` fixes the `G_IS_DESKTOP_APP_INFO` critical of shell notifications when phosh's desktop file
+is not installed. Test: `tests/phosh/test-30-notify.sh`.
+
 M4 adds phosh-mobile-settings 0.58.0, built after phosh in the same stage. `phosh-mobile-settings/` is
 its patch set, made like phosh's: the gmobile wrap's revision, the Bionic fixes (the `libintl.h`
 stand-in, no `GLOB_PERIOD`, `libandroid-glob` and `libandroid-wordexp` from Termux), libfeedback

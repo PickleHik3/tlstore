@@ -113,6 +113,28 @@ tl_tile() {
 # fake_body_is <method> <path> <json> - the last such call had exactly that body (for wait_for).
 fake_body_is() { [ "$(fake_last_body "$1" "$2" 2>/dev/null)" = "$3" ]; }
 
+# fake_has_body <method> <path> <json> - some such call had exactly that body, compared compact and
+# key-sorted like fake_last_body (for wait_for).
+fake_has_body() {
+    fake_calls | python3 -I -c '
+import json, sys
+m, p, want = sys.argv[1:4]
+want = json.dumps(json.loads(want), sort_keys=True, separators=(",", ":"))
+for c in json.load(sys.stdin):
+    if c["method"] == m and c["path"] == p and \
+            json.dumps(c["body"], sort_keys=True, separators=(",", ":")) == want:
+        sys.exit(0)
+sys.exit(1)' "$1" "$2" "$3"
+}
+
+# notify_send <summary> <body> <expire_ms> <hints> - org.freedesktop.Notifications.Notify as an app
+# would call it (hints as a GVariant a{sv}, e.g. "{'transient': <true>}"); prints phosh's id.
+notify_send() {
+    gdbus call --session --dest org.freedesktop.Notifications --object-path /org/freedesktop/Notifications \
+        --method org.freedesktop.Notifications.Notify tl-test 0 '' "$1" "$2" '[]' "$4" "$3" |
+        sed -n 's/^(uint32 \([0-9][0-9]*\),)$/\1/p'
+}
+
 # fake_self_test - run-headless.sh --self-test: the fake alone, over curl.
 fake_self_test() {
     local code out stream cpid n

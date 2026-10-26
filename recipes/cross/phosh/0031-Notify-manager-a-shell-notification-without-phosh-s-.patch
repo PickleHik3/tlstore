@@ -1,0 +1,44 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PickleHik3 <noreply@example.invalid>
+Date: Mon, 26 Oct 2026 12:00:00 +0000
+Subject: [PATCH 31/31] Notify-manager: a shell notification without phosh's desktop file
+
+phosh_notify_manager_add_shell_notification() returned 0 with a critical
+(G_IS_DESKTOP_APP_INFO (info)) when org.gnome.Shell.Phosh.desktop is not installed where
+GIO looks, as on the emulator after an app launch timed out, and the notification was lost.
+It now goes on without the app name and icon it would have taken from the desktop file.
+---
+ src/notifications/notify-manager.c | 9 +-
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+--- a/src/notifications/notify-manager.c
++++ b/src/notifications/notify-manager.c
+@@ -1160,8 +1160,11 @@
+ {
+   g_autoptr (GDesktopAppInfo) info = NULL;
+ 
++  /* Without phosh's desktop file installed there is no app info: the notification keeps the name
++   * and icon its caller gave it instead of being dropped with a critical. */
+   info = g_desktop_app_info_new (PHOSH_APP_ID ".desktop");
+-  g_return_val_if_fail (G_IS_DESKTOP_APP_INFO (info), 0);
++  if (!info)
++    g_debug ("No %s.desktop, shell notification without app name and icon", PHOSH_APP_ID);
+ 
+   if (!id) {
+     id = phosh_notify_manager_get_notification_id (self);
+@@ -1170,13 +1173,13 @@
+ 
+   /* We don't just set the app_info but name and icon separately to
+    * not overwrite values set by the caller */
+-  if (g_strcmp0 (phosh_notification_get_app_name (notification), _("Notification")) == 0) {
++  if (info && g_strcmp0 (phosh_notification_get_app_name (notification), _("Notification")) == 0) {
+     const char *name = g_app_info_get_name (G_APP_INFO (info));
+ 
+     phosh_notification_set_app_name (notification, name);
+   }
+ 
+-  if (!phosh_notification_get_app_icon (notification)) {
++  if (info && !phosh_notification_get_app_icon (notification)) {
+     GIcon *icon = g_app_info_get_icon (G_APP_INFO (info));
+ 
+     phosh_notification_set_app_icon (notification, icon);
