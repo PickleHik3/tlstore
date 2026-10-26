@@ -5,7 +5,7 @@
 #   ./build-asset.sh <tool> [edition]
 #
 #   tool      btop | tl-priv | tuios-cpu | kitten | tuios | sigye | herdr | terminal-browser | fastfetch | dawn |
-#             musl-loader | musl-runtime | launcher-skills
+#             musl-loader | musl-runtime | launcher-skills | phosh
 #   edition   com.termux (default) | io.vaj.tl — only for fastfetch, dawn and musl-loader, the
 #             three whose binary carries the edition's prefix (README.md, "One build per
 #             launcher edition"); the others build once for every edition
@@ -235,6 +235,14 @@ case "$tool" in
         sysroot libcurl openssl zlib libnghttp2
         "$SCRIPT_DIR/build-dawn.sh"
         cp "$TL_OUT/dawn" "$TL_ASSETS/$asset"
+        ;;
+    phosh)
+        # phoc (and later phosh and its parts) as a .tar.gz archive tree, built against the Termux
+        # sysroot of phosh-deps.txt, which takes packages from Termux's x11-repo as well.
+        export TL_TERMUX_X11=1
+        sysroot -f "$SCRIPT_DIR/phosh-deps.txt"
+        "$SCRIPT_DIR/build-phosh.sh"
+        cp "$TL_OUT/phosh" "$TL_ASSETS/$asset"
         ;;
     musl-loader)
         ndk_clang_as_clang "$TL_MUSL_TARGET"
