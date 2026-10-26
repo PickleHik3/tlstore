@@ -10,9 +10,9 @@
 #   gmobile, libfeedback    meson subprojects of phoc and phosh, pinned below, not trees of their own
 #   phosh                   recipes/cross/phosh/                  built (M1)
 #   phosh-mobile-settings   recipes/cross/phosh-mobile-settings/  built (M4)
-#   tl-feedbackd            (this repository's own small daemon)  M3
+#   tl-feedbackd            recipes/cross/tl-feedbackd/           built (M3)
 #
-# TL_PHOSH_TREES names the trees to build, in order (default: phoc phosh phosh-mobile-settings).
+# TL_PHOSH_TREES names the trees to build, in order (default: phoc phosh phosh-mobile-settings tl-feedbackd).
 # A tree that is not written yet stops the build instead of being skipped.
 #
 # M0 builds unpatched-in-spirit phoc 0.58.0: the tag as upstream tags it, plus the numbered patches
@@ -135,7 +135,7 @@ TL_NDK=${TL_NDK:-${ANDROID_NDK_HOME:-"${ANDROID_HOME:-$HOME/Android/Sdk}/ndk/$ND
 TL_OUT=${TL_OUT:-"$PWD/out"}
 TL_BUILD_DIR=${TL_BUILD_DIR:-"$PWD/build-phosh"}
 TERMUX_PREFIX=${TERMUX_PREFIX:-/data/data/com.termux/files/usr}
-TL_PHOSH_TREES=${TL_PHOSH_TREES:-phoc phosh phosh-mobile-settings}
+TL_PHOSH_TREES=${TL_PHOSH_TREES:-phoc phosh phosh-mobile-settings tl-feedbackd}
 TL_SYSROOT=${TL_SYSROOT:-}
 [ -d "$TL_SYSROOT$TERMUX_PREFIX/lib/pkgconfig" ] || {
     echo "error: no Termux sysroot at '$TL_SYSROOT$TERMUX_PREFIX' (TL_SYSROOT; build it with termux-sysroot.sh -f phosh-deps.txt)" >&2
@@ -371,7 +371,23 @@ build_phosh_mobile_settings() {
     rm -rf "$dev"
     for pc in phosh-plugins phosh-settings libfeedback-0.0; do rm -f "$prefix/lib/pkgconfig/$pc.pc"; done
 }
-build_tl_feedbackd() { echo "error: tl-feedbackd is built from M3 on" >&2; exit 1; }
+# tl-feedbackd (M3, #13): this repository's own daemon, GLib and GIO only; it owns
+# org.sigxcpu.Feedback and turns feedback events into launcherctl vibrate calls. It goes to
+# bin/tl-feedbackd, with its D-Bus activation file in share/dbus-1/services/. D-Bus wants an absolute
+# Exec= and the archive's root is wherever the store unpacks it ($HOME/.local/lib/phosh, as the
+# session script's fallback has it), so the file's Exec is a shell line that finds it from $HOME.
+build_tl_feedbackd() {
+    local build="$TL_BUILD_DIR/tl-feedbackd/build-$TL_ARCH" native=() exec_line
+    [ -z "${TL_NATIVE_FILE:-}" ] || native=(--native-file "$TL_NATIVE_FILE")
+    exec_line="$TERMUX_PREFIX/bin/sh -c 'exec \"\${PHOSH_APP:-\$HOME/.local/lib/phosh}/bin/tl-feedbackd\"'"
+    echo "Configuring tl-feedbackd for $TL_ARCH..."
+    rm -rf "$build"
+    meson setup "$build" "$SCRIPT_DIR/tl-feedbackd" --cross-file "$cross_file" "${native[@]}" \
+        --prefix=/ --buildtype=release "-Dservice_exec=$exec_line"
+    echo "Building tl-feedbackd..."
+    ninja -C "$build" -j"$jobs"
+    DESTDIR="$stage" meson install -C "$build" --no-rebuild --strip >/dev/null
+}
 
 rm -rf "$stage"
 mkdir -p "$stage"
@@ -418,6 +434,21 @@ check_phoc() {
     # meson install drops the build and sysroot directories from RUNPATH; only the device prefix stays.
     if "$readelf" -d "$stage/bin/phoc" | grep -E 'RUNPATH|RPATH' | grep -q "$TL_BUILD_DIR\|$TL_SYSROOT"; then
         echo "error: phoc's RUNPATH names a build directory" >&2
+        exit 1
+    fi
+}
+
+check_tl_feedbackd() {
+    local svc="$stage/share/dbus-1/services/org.sigxcpu.Feedback.service"
+    [ -x "$stage/bin/tl-feedbackd" ] || { echo "error: no bin/tl-feedbackd in the stage" >&2; exit 1; }
+    [ -f "$svc" ] || { echo "error: no D-Bus activation file for tl-feedbackd" >&2; exit 1; }
+    grep -q '^Name=org.sigxcpu.Feedback$' "$svc" && grep -q '^Exec=.*tl-feedbackd' "$svc" || {
+        echo "error: the activation file of tl-feedbackd is wrong" >&2
+        exit 1
+    }
+    # GLib and GIO only (plus libc): no libsoup, libcurl or json-glib crept in.
+    if "$readelf" -d "$stage/bin/tl-feedbackd" | grep NEEDED | grep -vE 'libglib-2|libgio-2|libgobject-2|libgmodule-2|libc\.so|libm\.so|libdl\.so|libintl|libpcre|libffi|libiconv|libz'; then
+        echo "error: tl-feedbackd links a library beyond GLib" >&2
         exit 1
     fi
 }
@@ -540,6 +571,7 @@ for tree in $TL_PHOSH_TREES; do
         phoc) check_phoc ;;
         phosh) check_phosh ;;
         phosh-mobile-settings) check_phosh_mobile_settings ;;
+        tl-feedbackd) check_tl_feedbackd ;;
     esac
 done
 
