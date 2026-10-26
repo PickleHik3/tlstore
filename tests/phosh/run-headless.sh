@@ -251,7 +251,7 @@ build_phoc() {
         --prefix="$prefix" --buildtype=debug --wrap-mode=default \
         -Dtests=false -Dgtk_doc=false -Dman=false -Dxwayland=disabled \
         -Dwlroots:default_library=static -Dgmobile:default_library=static \
-        -Dwlroots:backends=x11,headless -Dwlroots:renderers= -Dwlroots:allocators= \
+        -Dwlroots:backends=x11 -Dwlroots:renderers= -Dwlroots:allocators= \
         -Dwlroots:session=disabled -Dwlroots:xcb-errors=disabled -Dwlroots:xwayland=disabled \
         -Dwlroots:color-management=disabled -Dwlroots:libliftoff=disabled \
         -Dwlroots:examples=false
