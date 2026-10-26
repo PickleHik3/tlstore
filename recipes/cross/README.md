@@ -369,3 +369,15 @@ decimal) in phoc's environment overrides it, which is the hook for the settings 
 `phoc-xvfb-test.sh` builds phoc natively with the patches and checks the behaviour on an Xvfb
 screen resized with `xrandr --fb` (needs Xvfb, xrandr, wlr-randr and wayland-info; exits 77 when a
 tool is missing, 1 under `TL_XVFB_TEST_STRICT=1`).
+
+`phoc/0005` is a wlroots patch file (`wlroots/tl/0004-vulkan-render-into-shm.patch`, applied by the
+wrap) that lets wlroots' Vulkan renderer render into shm buffers, for the X11 backend without DRI3
+(docs/PHOSH.md, "Rendering"): the frame is rendered in an internal image, copied into a staging
+buffer by the same command buffer and from there into the shm buffer the backend presents.
+`build-phosh.sh` builds wlroots with `-Dwlroots:renderers=vulkan` (Vulkan beside pixman), which needs
+the sysroot's `vulkan-headers` and `vulkan-loader-generic` (already in `phosh-deps.txt`) and a host
+`glslang` (`glslang-tools`; the shaders are compiled at build time). phoc then links
+`libvulkan.so.1`, so the package must install `vulkan-loader-generic` and, for Adreno,
+`mesa-vulkan-icd-freedreno` (kgsl Turnip) as hidden parts. At start phoc tries Vulkan and falls back
+to pixman, logging `Renderer: ...`; `WLR_RENDERER=pixman|vulkan` forces one. The patch cannot be
+exercised off a phone: the Pong (Adreno) check is owed.

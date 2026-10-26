@@ -23,13 +23,21 @@
 #         none; src/compat/ declares what phoc names and answers "no such device" and "untranslated"
 #   0002  the wlroots subproject's own two Bionic fixes (no librt, no shm_open), carried as wlroots
 #         patch files that wlroots.wrap applies
+#   0003, 0004  the output follows the X root window's size and scale (docs/PHOSH.md, "Size and
+#         scale")
+#   0005  wlroots' Vulkan renderer renders into shm buffers (docs/PHOSH.md, "phoc on the X11
+#         display", Rendering), carried as a wlroots patch file
 #
 # What is built in:
 #   - wlroots 0.20.2, the subproject phoc's wlroots.wrap names, linked statically: backends=x11
-#     only (no DRM, libinput, session), renderers= (none of GLES2 and Vulkan: pixman, which
-#     wlroots always has), no allocators (no gbm, no udmabuf), no libliftoff, color management or
-#     Xwayland, and xcb-errors off (Termux has no xcb-util-errors; it only gives the X11 backend
-#     readable error names);
+#     only (no DRM, libinput, session), renderers=vulkan (the Vulkan renderer, and pixman, which
+#     wlroots always has; no GLES2), no allocators (no gbm, no udmabuf; the shm allocator is
+#     always built), no libliftoff, color management or Xwayland, and xcb-errors off (Termux has
+#     no xcb-util-errors; it only gives the X11 backend readable error names). The Vulkan
+#     renderer links libvulkan.so (Termux's vulkan-loader-generic, with mesa-vulkan-icd-freedreno
+#     for the GPU: a hidden part of the archive's package) and compiles its shaders with the
+#     host's glslang (glslang-tools in CI). At start phoc tries Vulkan on the GPU and falls back
+#     to pixman, logging the choice; WLR_RENDERER=pixman|vulkan forces one;
 #   - gmobile v0.6.0_beta1 and gvdb, meson subprojects too, static;
 #   - phoc's own xwayland option off: M0 runs Wayland clients only.
 # The three subprojects are fetched by meson from the wraps phoc ships; their commits are pinned
@@ -81,6 +89,10 @@ NDK_BIN="$TL_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
 for tool in meson ninja pkg-config git curl patch tar gzip wayland-scanner msgfmt; do
     command -v "$tool" >/dev/null 2>&1 || { echo "error: $tool is not on PATH" >&2; exit 1; }
 done
+command -v glslang >/dev/null 2>&1 || command -v glslangValidator >/dev/null 2>&1 || {
+    echo "error: glslang is not on PATH (wlroots' Vulkan renderer compiles its shaders with it)" >&2
+    exit 1
+}
 export TL_ARCH TL_NDK TL_SYSROOT TERMUX_PREFIX
 
 mkdir -p "$TL_OUT" "$TL_BUILD_DIR"
@@ -149,7 +161,7 @@ build_phoc() {
         -Dtests=false -Dgtk_doc=false -Dman=false \
         -Dxwayland=disabled \
         -Dwlroots:default_library=static -Dgmobile:default_library=static \
-        -Dwlroots:backends=x11 -Dwlroots:renderers= -Dwlroots:allocators= \
+        -Dwlroots:backends=x11 -Dwlroots:renderers=vulkan -Dwlroots:allocators= \
         -Dwlroots:session=disabled -Dwlroots:xcb-errors=disabled -Dwlroots:xwayland=disabled \
         -Dwlroots:color-management=disabled -Dwlroots:libliftoff=disabled \
         -Dwlroots:examples=false
@@ -192,6 +204,12 @@ readelf="$NDK_BIN/llvm-readelf"
 # have grown a libinput, libudev, libseat or libgbm dependency by accident.
 grep -qa 'Starting X11 backend' "$stage/bin/phoc" || {
     echo "error: phoc has no X11 backend" >&2
+    exit 1
+}
+# The Vulkan renderer's shm present path is in (a missing Vulkan header or glslang makes wlroots
+# skip the renderer when it is not forced; with renderers=vulkan it fails the configure instead).
+grep -qa 'presenting through shared memory' "$stage/bin/phoc" || {
+    echo "error: phoc has no Vulkan renderer for the shm output" >&2
     exit 1
 }
 if "$readelf" -d "$stage/bin/phoc" | grep NEEDED | grep -E 'libinput|libudev|libseat|libgbm|libEGL|libGLES'; then

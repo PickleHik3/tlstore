@@ -1,0 +1,714 @@
+From: PickleHik3 <noreply@users.noreply.github.com>
+Subject: [PATCH] wlroots: the Vulkan renderer renders into shm buffers
+
+The X11 backend without DRI3 (termux-x11) takes shm buffers only, and wlroots' Vulkan renderer
+only rendered into DMA-BUFs. The renderer now renders into an internal device-local image and
+copies each finished frame into the shm buffer the backend presents over MIT-SHM, and
+wlr_renderer_autocreate() tries it before pixman, falling back (and logging the choice) when no
+GPU renderer starts. Carried as a wlroots patch file that wlroots.wrap applies; the patch's own
+header says what it does.
+---
+--- /dev/null
++++ b/subprojects/packagefiles/wlroots/tl/0004-vulkan-render-into-shm.patch
+@@ -0,0 +1,690 @@
++Termux Launcher: the Vulkan renderer renders into host (shm) buffers, so the X11 backend can
++present a GPU-rendered frame over MIT-SHM on an X server without DRI3 (termux-x11).
++
++An output that takes shm buffers only (backend buffer_caps has SHM, not DMABUF) and has no DRM
++node gets a renderer from wlr_vk_renderer_create_for_shm_output(): the first hardware (not CPU)
++Vulkan device, with the DMA-BUF format sets not advertised and the formats it renders in optimal
++tiling advertised as shm render formats. For each shm buffer the renderer keeps an internal
++device-local image (the framebuffer renders into it), and the render command buffer copies the
++finished image into a host-visible, cached staging buffer; once the command buffer has completed
++the CPU copies that into the wlr_buffer, which the X11 backend already presents as an xcb shm
++pixmap. No DMA-BUF fence, no foreign-queue ownership transfer and no sync_file semaphore is used
++for such a buffer.
++
++wlr_renderer_autocreate() tries it when the backend has no DRM node and no DMA-BUF, and with
++WLR_RENDERER=vulkan. Automatic selection falls back to pixman when no GPU renderer starts, and
++logs the choice (one INFO line, "Renderer: ..."); WLR_RENDERER=pixman|vulkan forces it.
++Also: a texture destroyed twice before its command buffer completes is queued once.
++
++--- a/include/render/vulkan.h
+++++ b/include/render/vulkan.h
++@@ -63,11 +63,21 @@
++ 	struct wlr_drm_format_set dmabuf_render_formats;
++ 	struct wlr_drm_format_set dmabuf_texture_formats;
++ 	struct wlr_drm_format_set shm_texture_formats;
+++
+++	// Termux Launcher: formats the device can render into an internal image
+++	// that is then copied out to a host (shm) buffer, with the implicit
+++	// modifier, and whether this device is used that way (the display has no
+++	// DRI3 and no DRM node): the DMA-BUF sets above are then not advertised.
+++	struct wlr_drm_format_set shm_render_formats;
+++	bool shm_present;
++ };
++ 
++ // Tries to find the VkPhysicalDevice for the given drm fd.
++ // Might find none and return VK_NULL_HANDLE.
++ VkPhysicalDevice vulkan_find_drm_phdev(struct wlr_vk_instance *ini, int drm_fd);
+++// Termux Launcher: finds the first hardware (not CPU) device, for presenting
+++// through host memory when there is no DRM node.
+++VkPhysicalDevice vulkan_find_gpu_phdev(struct wlr_vk_instance *ini);
++ int vulkan_open_phdev_drm_fd(VkPhysicalDevice phdev);
++ 
++ // Creates a device for the given instance and physical device.
++@@ -235,6 +245,18 @@
++ 	uint32_t mem_count;
++ 	VkImage image;
++ 
+++	// Termux Launcher: the wlr_buffer is host (shm) memory. `image` is then an
+++	// internal device-local image; the render command buffer copies it into
+++	// the host-visible staging buffer and the CPU copies that into the
+++	// wlr_buffer once the GPU is done.
+++	bool shm;
+++	uint32_t shm_format; // DRM format
+++	uint32_t shm_bytes_per_pixel;
+++	VkBuffer shm_stage_buffer;
+++	VkDeviceMemory shm_stage_memory;
+++	void *shm_stage_data;
+++	VkDeviceSize shm_stage_size;
+++
++ 	// Framebuffer and image view for rendering directly onto the buffer image,
++ 	// without any color transform.
++ 	struct {
++@@ -266,6 +288,14 @@
++ 	} two_pass;
++ };
++ 
+++// The format and size of the render buffer, as the framebuffer setup wants
+++// them (a DMA-BUF buffer's attributes, or the shm buffer's).
+++bool vulkan_render_buffer_get_attribs(struct wlr_vk_render_buffer *buffer,
+++	struct wlr_dmabuf_attributes *attribs);
+++// Termux Launcher: after the render command buffer has completed, copy the
+++// staging buffer into the shm wlr_buffer.
+++bool vulkan_render_buffer_shm_readback(struct wlr_vk_render_buffer *buffer);
+++
++ bool vulkan_setup_one_pass_framebuffer(struct wlr_vk_render_buffer *buffer,
++ 	const struct wlr_dmabuf_attributes *dmabuf, bool srgb);
++ bool vulkan_setup_two_pass_framebuffer(struct wlr_vk_render_buffer *buffer,
++--- a/include/wlr/render/vulkan.h
+++++ b/include/wlr/render/vulkan.h
++@@ -20,6 +20,14 @@
++ 
++ struct wlr_renderer *wlr_vk_renderer_create_with_drm_fd(int drm_fd);
++ 
+++/**
+++ * Creates a Vulkan renderer on the first hardware device that renders into
+++ * host (shm) buffers: each frame is copied out of the GPU into the buffer, for
+++ * an output that cannot take a DMA-BUF (an X server without DRI3). Returns NULL
+++ * when there is no such device.
+++ */
+++struct wlr_renderer *wlr_vk_renderer_create_for_shm_output(void);
+++
++ VkInstance wlr_vk_renderer_get_instance(struct wlr_renderer *renderer);
++ VkPhysicalDevice wlr_vk_renderer_get_physical_device(struct wlr_renderer *renderer);
++ VkDevice wlr_vk_renderer_get_device(struct wlr_renderer *renderer);
++--- a/render/vulkan/vulkan.c
+++++ b/render/vulkan/vulkan.c
++@@ -370,6 +370,48 @@
++ 	return VK_NULL_HANDLE;
++ }
++ 
+++VkPhysicalDevice vulkan_find_gpu_phdev(struct wlr_vk_instance *ini) {
+++	VkResult res;
+++	uint32_t num_phdevs = 0;
+++
+++	res = vkEnumeratePhysicalDevices(ini->instance, &num_phdevs, NULL);
+++	if (res != VK_SUCCESS) {
+++		wlr_vk_error("Could not retrieve physical devices", res);
+++		return VK_NULL_HANDLE;
+++	}
+++	if (num_phdevs == 0) {
+++		wlr_log(WLR_INFO, "No Vulkan physical device");
+++		return VK_NULL_HANDLE;
+++	}
+++
+++	VkPhysicalDevice phdevs[num_phdevs];
+++	res = vkEnumeratePhysicalDevices(ini->instance, &num_phdevs, phdevs);
+++	if (res != VK_SUCCESS) {
+++		wlr_vk_error("Could not retrieve physical devices", res);
+++		return VK_NULL_HANDLE;
+++	}
+++
+++	for (uint32_t i = 0; i < num_phdevs; ++i) {
+++		VkPhysicalDeviceProperties props;
+++		vkGetPhysicalDeviceProperties(phdevs[i], &props);
+++		log_phdev(&props);
+++
+++		if (props.apiVersion < VK_API_VERSION_1_1) {
+++			continue;
+++		}
+++		if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU) {
+++			wlr_log(WLR_INFO, "  Ignoring software device \"%s\"",
+++				props.deviceName);
+++			continue;
+++		}
+++
+++		wlr_log(WLR_INFO, "Found Vulkan physical device: %s", props.deviceName);
+++		return phdevs[i];
+++	}
+++
+++	return VK_NULL_HANDLE;
+++}
+++
++ int vulkan_open_phdev_drm_fd(VkPhysicalDevice phdev) {
++ 	// vulkan_find_drm_phdev() already checks that VK_EXT_physical_device_drm
++ 	// is supported
++@@ -672,6 +714,7 @@
++ 	wlr_drm_format_set_finish(&dev->dmabuf_render_formats);
++ 	wlr_drm_format_set_finish(&dev->dmabuf_texture_formats);
++ 	wlr_drm_format_set_finish(&dev->shm_texture_formats);
+++	wlr_drm_format_set_finish(&dev->shm_render_formats);
++ 
++ 	for (unsigned i = 0u; i < dev->format_prop_count; ++i) {
++ 		vulkan_format_props_finish(&dev->format_props[i]);
++--- a/render/vulkan/pixel_format.c
+++++ b/render/vulkan/pixel_format.c
++@@ -572,6 +572,22 @@
++ 	}
++ 	wlr_log(WLR_DEBUG, "    Shared memory: %s", shm_texture_status);
++ 
+++	// Termux Launcher: a format the device renders in optimal tiling can be
+++	// rendered into an internal image and copied out to a host (shm) buffer,
+++	// whatever the DMA-BUF modifiers say. Listed with the implicit modifier
+++	// (and linear, the layout the copy produces) for the output's shm formats.
+++	const VkFormatFeatureFlags shm_render_features = render_features |
+++		VK_FORMAT_FEATURE_TRANSFER_SRC_BIT;
+++	if ((fmtp.formatProperties.optimalTilingFeatures & shm_render_features) ==
+++			shm_render_features && !vulkan_format_is_ycbcr(format) &&
+++			format_info != NULL) {
+++		wlr_drm_format_set_add(&dev->shm_render_formats,
+++			format->drm, DRM_FORMAT_MOD_INVALID);
+++		wlr_drm_format_set_add(&dev->shm_render_formats,
+++			format->drm, DRM_FORMAT_MOD_LINEAR);
+++		add_fmt_props = true;
+++	}
+++
++ 	if (modp.drmFormatModifierCount > 0) {
++ 		add_fmt_props |= query_modifier_support(dev, &props,
++ 			modp.drmFormatModifierCount);
++--- a/render/vulkan/texture.c
+++++ b/render/vulkan/texture.c
++@@ -191,9 +191,12 @@
++ 	// Add it to the renderer->destroy_textures list, destroying
++ 	// _after_ the stage command buffer has executed
++ 	if (texture->last_used_cb != NULL) {
++-		assert(texture->destroy_link.next == NULL); // not already inserted
++-		wl_list_insert(&texture->last_used_cb->destroy_textures,
++-			&texture->destroy_link);
+++		// Termux Launcher: only queue it once, a second destroy before the
+++		// command buffer has completed must not trip over the first.
+++		if (texture->destroy_link.next == NULL) {
+++			wl_list_insert(&texture->last_used_cb->destroy_textures,
+++				&texture->destroy_link);
+++		}
++ 		return;
++ 	}
++ 
++--- a/render/vulkan/renderer.c
+++++ b/render/vulkan/renderer.c
++@@ -637,6 +637,16 @@
++ 			buffer->two_pass.blend_descriptor_set);
++ 	}
++ 
+++	if (buffer->shm_stage_buffer != VK_NULL_HANDLE) {
+++		if (buffer->shm_stage_data != NULL) {
+++			vkUnmapMemory(dev, buffer->shm_stage_memory);
+++		}
+++		vkDestroyBuffer(dev, buffer->shm_stage_buffer, NULL);
+++	}
+++	if (buffer->shm_stage_memory != VK_NULL_HANDLE) {
+++		vkFreeMemory(dev, buffer->shm_stage_memory, NULL);
+++	}
+++
++ 	vkDestroyImage(dev, buffer->image, NULL);
++ 	for (size_t i = 0u; i < buffer->mem_count; ++i) {
++ 		vkFreeMemory(dev, buffer->memories[i], NULL);
++@@ -898,6 +908,179 @@
++ 	return false;
++ }
++ 
+++// Termux Launcher: sets up a render buffer for a host (shm) wlr_buffer: an
+++// internal device-local image to render into, and a host-visible buffer the
+++// render command buffer copies each finished frame into (see pass.c).
+++static bool init_shm_render_buffer(struct wlr_vk_render_buffer *buffer,
+++		const struct wlr_shm_attributes *shm) {
+++	struct wlr_vk_renderer *renderer = buffer->renderer;
+++	VkDevice dev = renderer->dev->dev;
+++	VkResult res;
+++
+++	if (!renderer->dev->shm_present) {
+++		wlr_log(WLR_ERROR, "Cannot render into a shm buffer: "
+++			"the device is not set up for it");
+++		return false;
+++	}
+++
+++	const struct wlr_vk_format_props *fmt = vulkan_format_props_from_drm(
+++		renderer->dev, shm->format);
+++	const struct wlr_pixel_format_info *info = drm_get_pixel_format_info(shm->format);
+++	if (fmt == NULL || info == NULL || info->bytes_per_block == 0 ||
+++			info->block_width != 1 || info->block_height != 1 ||
+++			!wlr_drm_format_set_has(&renderer->dev->shm_render_formats,
+++				shm->format, DRM_FORMAT_MOD_INVALID)) {
+++		wlr_log(WLR_ERROR, "Unsupported shm render format 0x%"PRIX32, shm->format);
+++		return false;
+++	}
+++
+++	uint32_t width = buffer->wlr_buffer->width;
+++	uint32_t height = buffer->wlr_buffer->height;
+++
+++	VkImageCreateInfo img_info = {
+++		.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+++		.imageType = VK_IMAGE_TYPE_2D,
+++		.format = fmt->format.vk,
+++		.mipLevels = 1,
+++		.arrayLayers = 1,
+++		.samples = VK_SAMPLE_COUNT_1_BIT,
+++		.tiling = VK_IMAGE_TILING_OPTIMAL,
+++		.initialLayout = VK_IMAGE_LAYOUT_PREINITIALIZED,
+++		.extent = (VkExtent3D){ width, height, 1 },
+++		.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+++			VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+++		.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+++	};
+++	res = vkCreateImage(dev, &img_info, NULL, &buffer->image);
+++	if (res != VK_SUCCESS) {
+++		wlr_vk_error("vkCreateImage (shm render buffer)", res);
+++		return false;
+++	}
+++
+++	VkMemoryRequirements mem_reqs;
+++	vkGetImageMemoryRequirements(dev, buffer->image, &mem_reqs);
+++	int mem_type = vulkan_find_mem_type(renderer->dev,
+++		VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, mem_reqs.memoryTypeBits);
+++	if (mem_type < 0) {
+++		wlr_log(WLR_ERROR, "No device-local memory type for the shm render buffer");
+++		return false;
+++	}
+++	VkMemoryAllocateInfo mem_info = {
+++		.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+++		.allocationSize = mem_reqs.size,
+++		.memoryTypeIndex = mem_type,
+++	};
+++	res = vkAllocateMemory(dev, &mem_info, NULL, &buffer->memories[0]);
+++	if (res != VK_SUCCESS) {
+++		wlr_vk_error("vkAllocateMemory (shm render buffer)", res);
+++		return false;
+++	}
+++	buffer->mem_count = 1;
+++	res = vkBindImageMemory(dev, buffer->image, buffer->memories[0], 0);
+++	if (res != VK_SUCCESS) {
+++		wlr_vk_error("vkBindImageMemory (shm render buffer)", res);
+++		return false;
+++	}
+++
+++	// The staging buffer holds one tightly packed frame; the copy into the
+++	// wlr_buffer honours its stride.
+++	buffer->shm_stage_size = (VkDeviceSize)width * height * info->bytes_per_block;
+++	VkBufferCreateInfo buf_info = {
+++		.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+++		.size = buffer->shm_stage_size,
+++		.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+++		.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+++	};
+++	res = vkCreateBuffer(dev, &buf_info, NULL, &buffer->shm_stage_buffer);
+++	if (res != VK_SUCCESS) {
+++		wlr_vk_error("vkCreateBuffer (shm staging)", res);
+++		return false;
+++	}
+++	vkGetBufferMemoryRequirements(dev, buffer->shm_stage_buffer, &mem_reqs);
+++	// Cached memory first: the CPU reads this buffer back every frame, and
+++	// reading write-combined memory is very slow.
+++	mem_type = vulkan_find_mem_type(renderer->dev,
+++		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT |
+++		VK_MEMORY_PROPERTY_HOST_CACHED_BIT, mem_reqs.memoryTypeBits);
+++	if (mem_type < 0) {
+++		mem_type = vulkan_find_mem_type(renderer->dev,
+++			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+++			mem_reqs.memoryTypeBits);
+++	}
+++	if (mem_type < 0) {
+++		wlr_log(WLR_ERROR, "No host-visible memory type for the shm staging buffer");
+++		return false;
+++	}
+++	mem_info = (VkMemoryAllocateInfo){
+++		.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+++		.allocationSize = mem_reqs.size,
+++		.memoryTypeIndex = mem_type,
+++	};
+++	res = vkAllocateMemory(dev, &mem_info, NULL, &buffer->shm_stage_memory);
+++	if (res != VK_SUCCESS) {
+++		wlr_vk_error("vkAllocateMemory (shm staging)", res);
+++		return false;
+++	}
+++	res = vkBindBufferMemory(dev, buffer->shm_stage_buffer,
+++		buffer->shm_stage_memory, 0);
+++	if (res != VK_SUCCESS) {
+++		wlr_vk_error("vkBindBufferMemory (shm staging)", res);
+++		return false;
+++	}
+++	res = vkMapMemory(dev, buffer->shm_stage_memory, 0, VK_WHOLE_SIZE, 0,
+++		&buffer->shm_stage_data);
+++	if (res != VK_SUCCESS) {
+++		wlr_vk_error("vkMapMemory (shm staging)", res);
+++		buffer->shm_stage_data = NULL;
+++		return false;
+++	}
+++
+++	buffer->shm = true;
+++	buffer->shm_format = shm->format;
+++	buffer->shm_bytes_per_pixel = info->bytes_per_block;
+++	return true;
+++}
+++
+++bool vulkan_render_buffer_get_attribs(struct wlr_vk_render_buffer *buffer,
+++		struct wlr_dmabuf_attributes *attribs) {
+++	if (buffer->shm) {
+++		*attribs = (struct wlr_dmabuf_attributes){
+++			.width = buffer->wlr_buffer->width,
+++			.height = buffer->wlr_buffer->height,
+++			.format = buffer->shm_format,
+++		};
+++		return true;
+++	}
+++	return wlr_buffer_get_dmabuf(buffer->wlr_buffer, attribs);
+++}
+++
+++bool vulkan_render_buffer_shm_readback(struct wlr_vk_render_buffer *buffer) {
+++	assert(buffer->shm);
+++
+++	void *data;
+++	uint32_t format;
+++	size_t stride;
+++	if (!wlr_buffer_begin_data_ptr_access(buffer->wlr_buffer,
+++			WLR_BUFFER_DATA_PTR_ACCESS_WRITE, &data, &format, &stride)) {
+++		wlr_log(WLR_ERROR, "Cannot write the shm render buffer");
+++		return false;
+++	}
+++
+++	size_t row = (size_t)buffer->wlr_buffer->width * buffer->shm_bytes_per_pixel;
+++	const uint8_t *src = buffer->shm_stage_data;
+++	uint8_t *dst = data;
+++	if (stride == row) {
+++		memcpy(dst, src, row * buffer->wlr_buffer->height);
+++	} else {
+++		for (int y = 0; y < buffer->wlr_buffer->height; y++) {
+++			memcpy(dst + y * stride, src + y * row, row);
+++		}
+++	}
+++
+++	wlr_buffer_end_data_ptr_access(buffer->wlr_buffer);
+++	return true;
+++}
+++
++ static struct wlr_vk_render_buffer *create_render_buffer(
++ 		struct wlr_vk_renderer *renderer, struct wlr_buffer *wlr_buffer) {
++ 	struct wlr_vk_render_buffer *buffer = calloc(1, sizeof(*buffer));
++@@ -912,8 +1095,20 @@
++ 	wl_list_insert(&renderer->render_buffers, &buffer->link);
++ 
++ 	struct wlr_dmabuf_attributes dmabuf = {0};
+++	struct wlr_shm_attributes shm = {0};
++ 	if (!wlr_buffer_get_dmabuf(wlr_buffer, &dmabuf)) {
++-		goto error;
+++		// Termux Launcher: host memory, when the device presents through it
+++		if (!wlr_buffer_get_shm(wlr_buffer, &shm) ||
+++				!init_shm_render_buffer(buffer, &shm)) {
+++			goto error;
+++		}
+++
+++		wlr_log(WLR_DEBUG, "vulkan create_render_buffer: %.4s, %dx%d (shm)",
+++			(const char*) &shm.format, wlr_buffer->width, wlr_buffer->height);
+++
+++		// The framebuffer is set up when the first pass needs it, on the
+++		// internal image.
+++		return buffer;
++ 	}
++ 
++ 	wlr_log(WLR_DEBUG, "vulkan create_render_buffer: %.4s, %dx%d",
++@@ -1094,7 +1289,7 @@
++ static const struct wlr_drm_format_set *vulkan_get_texture_formats(
++ 		struct wlr_renderer *wlr_renderer, uint32_t buffer_caps) {
++ 	struct wlr_vk_renderer *renderer = vulkan_get_renderer(wlr_renderer);
++-	if (buffer_caps & WLR_BUFFER_CAP_DMABUF) {
+++	if ((buffer_caps & WLR_BUFFER_CAP_DMABUF) && !renderer->dev->shm_present) {
++ 		return &renderer->dev->dmabuf_texture_formats;
++ 	} else if (buffer_caps & WLR_BUFFER_CAP_DATA_PTR) {
++ 		return &renderer->dev->shm_texture_formats;
++@@ -1106,6 +1301,9 @@
++ static const struct wlr_drm_format_set *vulkan_get_render_formats(
++ 		struct wlr_renderer *wlr_renderer) {
++ 	struct wlr_vk_renderer *renderer = vulkan_get_renderer(wlr_renderer);
+++	if (renderer->dev->shm_present) {
+++		return &renderer->dev->shm_render_formats;
+++	}
++ 	return &renderer->dev->dmabuf_render_formats;
++ }
++ 
++@@ -2528,7 +2726,8 @@
++ 	}
++ 
++ 	renderer->dev = dev;
++-	wlr_renderer_init(&renderer->wlr_renderer, &renderer_impl, WLR_BUFFER_CAP_DMABUF);
+++	wlr_renderer_init(&renderer->wlr_renderer, &renderer_impl,
+++		dev->shm_present ? WLR_BUFFER_CAP_DATA_PTR : WLR_BUFFER_CAP_DMABUF);
++ 	renderer->wlr_renderer.features.input_color_transform = true;
++ 	renderer->wlr_renderer.features.output_color_transform = true;
++ 	wl_list_init(&renderer->stage.buffers);
++@@ -2621,6 +2820,34 @@
++ 
++ 	return vulkan_renderer_create_for_device(dev);
++ 
+++error:
+++	vulkan_instance_destroy(ini);
+++	return NULL;
+++}
+++
+++struct wlr_renderer *wlr_vk_renderer_create_for_shm_output(void) {
+++	struct wlr_vk_instance *ini = vulkan_instance_create(default_debug);
+++	if (!ini) {
+++		wlr_log(WLR_ERROR, "creating vulkan instance for renderer failed");
+++		return NULL;
+++	}
+++
+++	VkPhysicalDevice phdev = vulkan_find_gpu_phdev(ini);
+++	if (!phdev) {
+++		wlr_log(WLR_INFO, "No hardware Vulkan device to render with");
+++		goto error;
+++	}
+++
+++	struct wlr_vk_device *dev = vulkan_device_create(ini, phdev);
+++	if (!dev) {
+++		wlr_log(WLR_ERROR, "Failed to create vulkan device");
+++		goto error;
+++	}
+++	// No DRM node: frames leave the GPU through host memory
+++	dev->shm_present = true;
+++
+++	return vulkan_renderer_create_for_device(dev);
+++
++ error:
++ 	vulkan_instance_destroy(ini);
++ 	return NULL;
++--- a/render/vulkan/pass.c
+++++ b/render/vulkan/pass.c
++@@ -341,6 +341,54 @@
++ 
++ 	vkCmdEndRenderPass(render_cb->vk);
++ 
+++	if (render_buffer->shm) {
+++		// Termux Launcher: copy the finished frame into the host-visible
+++		// staging buffer; the CPU moves it into the wlr_buffer once this
+++		// command buffer has completed (below).
+++		VkImageMemoryBarrier to_src = {
+++			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+++			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+++			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+++			.image = render_buffer->image,
+++			.oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+++			.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+++			.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+++			.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+++			.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+++			.subresourceRange.layerCount = 1,
+++			.subresourceRange.levelCount = 1,
+++		};
+++		vkCmdPipelineBarrier(render_cb->vk,
+++			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+++			VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 0, NULL, 1, &to_src);
+++
+++		VkBufferImageCopy copy = {
+++			.imageSubresource = {
+++				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+++				.layerCount = 1,
+++			},
+++			.imageExtent = {
+++				render_buffer->wlr_buffer->width,
+++				render_buffer->wlr_buffer->height,
+++				1,
+++			},
+++		};
+++		vkCmdCopyImageToBuffer(render_cb->vk, render_buffer->image,
+++			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+++			render_buffer->shm_stage_buffer, 1, &copy);
+++
+++		VkImageMemoryBarrier to_general = to_src;
+++		to_general.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+++		to_general.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+++		to_general.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+++		to_general.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+++			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+++		vkCmdPipelineBarrier(render_cb->vk,
+++			VK_PIPELINE_STAGE_TRANSFER_BIT,
+++			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+++			0, 0, NULL, 0, NULL, 1, &to_general);
+++	}
+++
++ 	size_t pass_textures_len = pass->textures.size / sizeof(struct wlr_vk_render_pass_texture);
++ 	size_t render_wait_cap = (1 + pass_textures_len) * WLR_DMABUF_MAX_PLANES;
++ 	render_wait = calloc(render_wait_cap, sizeof(*render_wait));
++@@ -447,7 +495,8 @@
++ 		}
++ 	}
++ 
++-	if (!render_pass_wait_render_buffer(pass, render_wait, &render_wait_len)) {
+++	if (!render_buffer->shm &&
+++			!render_pass_wait_render_buffer(pass, render_wait, &render_wait_len)) {
++ 		wlr_log(WLR_ERROR, "Failed to wait for render buffer DMA-BUF fence");
++ 	}
++ 
++@@ -488,11 +537,18 @@
++ 			0, 0, NULL, 0, NULL, 1, &blend_acq_barrier);
++ 	}
++ 
+++	// Termux Launcher: the image behind a shm render buffer is internal, it
+++	// never changes queue family ownership.
+++	uint32_t buffer_src_family = render_buffer->shm ?
+++		VK_QUEUE_FAMILY_IGNORED : VK_QUEUE_FAMILY_FOREIGN_EXT;
+++	uint32_t buffer_dst_family = render_buffer->shm ?
+++		VK_QUEUE_FAMILY_IGNORED : renderer->dev->queue_family;
+++
++ 	// acquire render buffer before rendering
++ 	acquire_barriers[idx] = (VkImageMemoryBarrier){
++ 		.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
++-		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_FOREIGN_EXT,
++-		.dstQueueFamilyIndex = renderer->dev->queue_family,
+++		.srcQueueFamilyIndex = buffer_src_family,
+++		.dstQueueFamilyIndex = buffer_dst_family,
++ 		.image = render_buffer->image,
++ 		.oldLayout = src_layout,
++ 		.newLayout = VK_IMAGE_LAYOUT_GENERAL,
++@@ -507,8 +563,8 @@
++ 	// release render buffer after rendering
++ 	release_barriers[idx] = (VkImageMemoryBarrier){
++ 		.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
++-		.srcQueueFamilyIndex = renderer->dev->queue_family,
++-		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_FOREIGN_EXT,
+++		.srcQueueFamilyIndex = buffer_dst_family,
+++		.dstQueueFamilyIndex = buffer_src_family,
++ 		.image = render_buffer->image,
++ 		.oldLayout = VK_IMAGE_LAYOUT_GENERAL,
++ 		.newLayout = VK_IMAGE_LAYOUT_GENERAL,
++@@ -586,7 +642,8 @@
++ 		.semaphore = renderer->timeline_semaphore,
++ 		.value = render_timeline_point,
++ 	};
++-	if (renderer->dev->implicit_sync_interop || pass->signal_timeline != NULL) {
+++	if (!render_buffer->shm &&
+++			(renderer->dev->implicit_sync_interop || pass->signal_timeline != NULL)) {
++ 		if (render_cb->binary_semaphore == VK_NULL_HANDLE) {
++ 			VkExportSemaphoreCreateInfo export_info = {
++ 				.sType = VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO,
++@@ -644,7 +701,14 @@
++ 		wl_list_insert(&stage_cb->stage_buffers, &stage_buf->link);
++ 	}
++ 
++-	if (!vulkan_sync_render_pass_release(renderer, pass)) {
+++	if (render_buffer->shm) {
+++		// Termux Launcher: wait for the GPU, then move the frame into the
+++		// host buffer the output presents.
+++		if (!vulkan_wait_command_buffer(render_cb, renderer) ||
+++				!vulkan_render_buffer_shm_readback(render_buffer)) {
+++			wlr_log(WLR_ERROR, "Failed to copy the frame out of the GPU");
+++		}
+++	} else if (!vulkan_sync_render_pass_release(renderer, pass)) {
++ 		wlr_log(WLR_ERROR, "Failed to sync render buffer");
++ 	}
++ 
++@@ -1240,7 +1304,7 @@
++ 
++ 	if (using_linear_pathway && !buffer->linear.out.image_view) {
++ 		struct wlr_dmabuf_attributes attribs;
++-		wlr_buffer_get_dmabuf(buffer->wlr_buffer, &attribs);
+++		vulkan_render_buffer_get_attribs(buffer, &attribs);
++ 		if (!vulkan_setup_one_pass_framebuffer(buffer, &attribs, false)) {
++ 			wlr_log(WLR_ERROR, "Failed to set up blend image");
++ 			return NULL;
++@@ -1259,7 +1323,7 @@
++ 
++ 		if (!buffer->two_pass.out.image_view) {
++ 			struct wlr_dmabuf_attributes attribs;
++-			wlr_buffer_get_dmabuf(buffer->wlr_buffer, &attribs);
+++			vulkan_render_buffer_get_attribs(buffer, &attribs);
++ 			if (!vulkan_setup_two_pass_framebuffer(buffer, &attribs)) {
++ 				wlr_log(WLR_ERROR, "Failed to set up blend image");
++ 				return NULL;
++--- a/render/wlr_renderer.c
+++++ b/render/wlr_renderer.c
++@@ -199,23 +199,6 @@
++ 	wlr_log(is_auto ? WLR_DEBUG : WLR_ERROR, "%s%s", msg, is_auto ? ". Skipping!" : "");
++ }
++ 
++-static bool has_render_node(struct wlr_backend *backend) {
++-	if (!backend) {
++-		return false;
++-	}
++-
++-	int backend_drm_fd = wlr_backend_get_drm_fd(backend);
++-	if (backend_drm_fd < 0) {
++-		return false;
++-	}
++-
++-	char *render_node = drmGetRenderDeviceNameFromFd(backend_drm_fd);
++-	bool has_render_node = render_node != NULL;
++-	free(render_node);
++-
++-	return has_render_node;
++-}
++-
++ static struct wlr_renderer *renderer_autocreate(struct wlr_backend *backend, int drm_fd) {
++ 	const char *renderer_options[] = {
++ 		"auto",
++@@ -250,7 +233,24 @@
++ 
++ 	if ((is_auto && WLR_HAS_VULKAN_RENDERER) || strcmp(renderer_name, "vulkan") == 0) {
++ 		if (!open_preferred_drm_fd(backend, &drm_fd, &own_drm_fd)) {
++-			log_creation_failure(is_auto, "Cannot create Vulkan renderer: no DRM FD available");
+++			// Termux Launcher: an output that takes host memory only (the X11
+++			// backend without DRI3) has no DRM node. Render on the GPU and
+++			// copy each frame out to its buffer.
+++			if (backend != NULL && drm_fd < 0 &&
+++					!(backend->buffer_caps & WLR_BUFFER_CAP_DMABUF) &&
+++					(backend->buffer_caps & WLR_BUFFER_CAP_SHM)) {
+++#if WLR_HAS_VULKAN_RENDERER
+++				renderer = wlr_vk_renderer_create_for_shm_output();
+++#endif
+++				if (renderer) {
+++					wlr_log(WLR_INFO, "Renderer: vulkan, presenting through "
+++						"shared memory (no DRM node)");
+++					goto out;
+++				}
+++				log_creation_failure(is_auto, "Failed to create a Vulkan renderer for a shm output");
+++			} else {
+++				log_creation_failure(is_auto, "Cannot create Vulkan renderer: no DRM FD available");
+++			}
++ 		} else {
++ #if WLR_HAS_VULKAN_RENDERER
++ 			renderer = wlr_vk_renderer_create_with_drm_fd(drm_fd);
++@@ -265,9 +265,13 @@
++ 		}
++ 	}
++ 
++-	if ((is_auto && !has_render_node(backend)) || strcmp(renderer_name, "pixman") == 0) {
+++	// Termux Launcher: automatic selection falls back to pixman whenever
+++	// nothing above worked, not only when the backend has no render node.
+++	if (is_auto || strcmp(renderer_name, "pixman") == 0) {
++ 		renderer = wlr_pixman_renderer_create();
++ 		if (renderer) {
+++			wlr_log(WLR_INFO, "Renderer: pixman%s",
+++				is_auto ? " (fallback, the GPU renderer did not start)" : "");
++ 			goto out;
++ 		} else {
++ 			log_creation_failure(is_auto, "Failed to create a pixman renderer");
+--- a/subprojects/wlroots.wrap
++++ b/subprojects/wlroots.wrap
+@@ -13,4 +13,5 @@
+   wlroots/0001-Revert-layer-shell-error-on-0-dimension-without-anch.patch,
+   wlroots/tl/0001-bionic-no-librt.patch,
+   wlroots/tl/0002-bionic-no-shm-open.patch,
+-  wlroots/tl/0003-x11-follow-root-window-size.patch
++  wlroots/tl/0003-x11-follow-root-window-size.patch,
++  wlroots/tl/0004-vulkan-render-into-shm.patch
+-- 
+2.56.0

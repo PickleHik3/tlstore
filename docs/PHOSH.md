@@ -161,14 +161,31 @@ The `phosh` row carries `min-launcher=` set to the first launcher release with a
   `xev` + `xdotool` + `wlr-randr` watcher (Q12).
 - **Input.** Keyboard, pointer and touch arrive as X11 events on phoc's window. No libinput, no
   udev, no libseat session.
-- **Rendering (Q25, Q26).** Vulkan through Mesa's Turnip on Adreno's kgsl kernel interface, with
-  the wlroots changes from [phosh-termux-gpu](https://github.com/Azkali/phosh-termux-gpu) that
-  copy each frame into the X window over shared memory (the display offers no DRI3). At start phoc
-  tries Vulkan on kgsl and falls back to pixman when that does not initialise (Surface, the
-  emulator, Mali and others). The choice is logged. `WLR_RENDERER` or the compositor panel
-  overrides it. Whether Termux's own mesa package carries a kgsl-enabled Turnip, or the archive
-  has to ship one, is settled in M5.
-- **Apps' renderer.** GTK apps keep `GSK_RENDERER=cairo` until M5 shows the GL path works.
+- **Rendering (Q25, Q26).** Vulkan through Mesa's Turnip on Adreno's kgsl kernel interface,
+  carried to the screen the way [phosh-termux-gpu](https://github.com/Azkali/phosh-termux-gpu)
+  does it, since the display offers no DRI3: wlroots' Vulkan renderer (built in, `renderers=vulkan`,
+  with pixman beside it) renders each frame into an internal device-local image, the same command
+  buffer copies it into a host-visible staging buffer, and once the GPU is done the CPU copies that
+  into the shm buffer the X11 backend already presents as an xcb shm pixmap (`recipes/cross/phoc/0005`,
+  a wlroots patch file). The Vulkan device is the first hardware one; a CPU device (llvmpipe) is
+  skipped. At start `wlr_renderer_autocreate` tries it and falls back to pixman when the loader, the
+  ICD or the device does not initialise (Surface, the emulator, Mali and others), and logs one line
+  either way (`Renderer: vulkan, presenting through shared memory (no DRM node)` or `Renderer: pixman
+  (fallback, the GPU renderer did not start)`). `WLR_RENDERER=pixman|vulkan` forces one (a forced
+  Vulkan that fails does not fall back); the compositor panel sets it later. Termux's own
+  `mesa-vulkan-icd-freedreno` carries the kgsl Turnip, so the archive ships no driver (Q3, settled
+  2026-10-26): version 26.2.5 (main repository, aarch64, 1.6 MB; `libvulkan_freedreno.so` is 13.9 MB
+  unpacked) holds `tu_knl_kgsl.cc` and opens `/dev/kgsl-3d0`, and installs
+  `share/vulkan/icd.d/freedreno_icd.aarch64.json`; it depends on `vulkan-loader-generic` (1.4.366),
+  which supplies the `libvulkan.so.1` phoc links. Both are hidden parts of the archive's package
+  (they must be installed for phoc to start, phoc links the loader). The ICD's "DRI3" strings are
+  its window-system code, which wlroots does not use. Cost per frame: the whole frame is read back
+  and copied once (about 10 MB on a 1080x2400 screen), on a path the pixman renderer pays in CPU
+  blending instead.
+- **Apps' renderer.** GTK apps keep `GSK_RENDERER=cairo`. M5 did not try the GL path: with no DRI3
+  and no DMA-BUF between the display and phoc, phoc advertises no `linux-dmabuf` (the Vulkan
+  renderer hides its DMA-BUF formats in this mode), so a GTK app has no way to hand it a GPU
+  buffer and its GL renderer would copy through shm anyway.
 
 ## Session
 
@@ -264,8 +281,11 @@ M2 can run alongside M0–M1. M5 can start after M0.
    launcher also reads `~/.local/share/xsessions`. Decided in M1.
 2. The watch stream's wire format (NDJSON over a held HTTP response, or SSE). Decided in M2 with
    the launcher's API conventions.
-3. Whether Termux's mesa has a kgsl-enabled Turnip or the archive ships its own Vulkan driver.
-   Decided in M5.
+3. ~~Whether Termux's mesa has a kgsl-enabled Turnip or the archive ships its own Vulkan
+   driver.~~ Settled in M5 (2026-10-26): Termux's `mesa-vulkan-icd-freedreno` 26.2.5 (main,
+   aarch64) is built with the kgsl backend, so the archive ships no driver. Should that package
+   ever lose kgsl, building Mesa here would take `-Dvulkan-drivers=freedreno -Dfreedreno-kmds=kgsl`
+   (about 14 MB for `libvulkan_freedreno.so`, as Termux builds it), as a separate hidden part of the package.
 4. Where `tl-feedbackd` lives if other Linux desktops on the display want haptics too: inside the
    phosh archive (now) or as its own hidden item (later).
 
