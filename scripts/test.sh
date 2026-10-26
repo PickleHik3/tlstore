@@ -2462,6 +2462,94 @@ EOF
     rm -rf "$TESTHOME/.local"
     mv "$ROOT/saved-local" "$TESTHOME/.local"
 
+    # --- phosh (docs/PHOSH.md, "Packaging"): an archive with its parts and a session file ---
+    # The shape of the real rows: the archive requires a hidden pkg part (itself behind the
+    # repo=1 x11-repo part) and a hidden file part that lands under $PREFIX, not the home, so the
+    # launcher's Desktops list sees it. host=launcher and min-launcher keep it off the plain app
+    # and off an older launcher. Like the archive block, this one starts from nothing installed.
+    rm -rf "$ROOT/saved-local"
+    cp -a "$TESTHOME/.local" "$ROOT/saved-local"
+    rm -rf "$TESTHOME/.local/share/tlstore/installed.tsv" "$TESTHOME/.local/lib" "$TESTHOME/.local/bin"
+    mk_phosh() {
+        mkdir -p "$1/bin" "$1/share/glib-2.0/schemas"
+        printf '#!/bin/sh\necho "phosh-session %s $*"\n' "$2" > "$1/bin/phosh-session"
+        chmod 755 "$1/bin/phosh-session"
+        printf 'schemas of %s\n' "$2" > "$1/share/glib-2.0/schemas/gschemas.compiled"
+    }
+    mk_phosh "$FX/phoshsrc-1" "1"
+    mk_phosh "$FX/phoshsrc-2" "2"
+    mkdir -p "$FX/rel/phosh-1" "$FX/rel/phosh-2"
+    tar czf "$FX/rel/phosh-1/phosh-aarch64" -C "$FX/phoshsrc-1" .
+    tar czf "$FX/rel/phosh-2/phosh-aarch64" -C "$FX/phoshsrc-2" .
+    printf '[Desktop Entry]\nType=XSession\nName=Phosh\nExec=phosh-session\n' > "$FX/phosh.desktop"
+    ph_opts="hidden=1;host=launcher;min-launcher=1.1.0-pre.6"
+    write_phosh_catalog() {
+        {
+            printf '# tlstore catalog\tserial=2026090653\n'
+            printf 'phosh\tarchive\t%s\tcom.termux\tbinaries:phosh@phosh-%s\t%s\t-\tphosh-deps,phosh-session-file\texe=bin/phosh-session;host=launcher;min-launcher=1.1.0-pre.6\tThe phone shell, on the display.\t%s\n' \
+                "$1" "$2" "$(sha "$FX/rel/phosh-$2/phosh-aarch64")" "$R5_NONE"
+            printf 'x11-repo\tpkg\t-\tcom.termux\tx11-repo\t-\t-\t-\thidden=1;repo=1\tThe x11 package source.\t%s\n' "$R5_NONE"
+            printf 'phosh-deps\tpkg\t-\tcom.termux\tdemo-one demo-two\t-\t-\tx11-repo\t%s\tWhat phosh links at run time.\t%s\n' "$ph_opts" "$R5_NONE"
+            printf 'phosh-session-file\tfile\t1\tcom.termux\tfile://%s/phosh.desktop\t%s\t$PREFIX/local/share/xsessions/phosh.desktop\t-\t%s\tPhosh in the launchers Desktops list.\t%s\n' \
+                "$FX" "$(sha "$FX/phosh.desktop")" "$ph_opts" "$R5_NONE"
+        } > "$user_catalog"
+    }
+    write_phosh_catalog 0.58.0+tl.0 1
+    ph_dir="$TESTHOME/.local/lib/phosh"
+    ph_cmd="$TESTHOME/.local/bin/phosh"
+    ph_session="$TPREFIX/local/share/xsessions/phosh.desktop"
+
+    # The min-launcher refusal, and the plain app not seeing it at all.
+    HOST_KNOB=launcher TPV_KNOB=1.1.0-pre.5 tl install phosh -y
+    expect_status "a launcher older than min-launcher is refused" 1
+    expect_no_file "and nothing was put in place" "$ph_dir"
+    tl list
+    expect_no_out "the plain app is not offered it" "phosh"
+    HOST_KNOB=launcher TPV_KNOB=1.1.0-pre.5 tl list
+    expect_no_out "nor is an older launcher" "phosh"
+    HOST_KNOB=launcher TPV_KNOB=1.1.0-pre.6 tl list
+    expect_out "the launcher at min-launcher is offered it" "phosh"
+    expect_no_out "its parts are not listed" "phosh-deps"
+
+    # Install: the archive, the Termux packages (x11-repo first), the session file.
+    : > "$ROOT/pkg.log"
+    HOST_KNOB=launcher TPV_KNOB=1.1.0-pre.6 tl install phosh -y
+    expect_status "phosh installs with its parts" 0
+    expect_content "the archive unpacked into ~/.local/lib/phosh" "$ph_dir/share/glib-2.0/schemas/gschemas.compiled" "schemas of 1"
+    if [ "$("$ph_cmd" go 2>&1 | head -1)" = "phosh-session 1 go" ]; then pass; else fail "the wrapper runs bin/phosh-session" "$("$ph_cmd" go 2>&1)"; fi
+    expect_content "the session file landed under the prefix, not the home" "$ph_session" "$(cat "$FX/phosh.desktop")"
+    expect_no_file "and no literal \$PREFIX directory was made" "$TESTHOME/\$PREFIX"
+    if grep -q -- 'x11-repo' "$ROOT/pkg.log" && grep -q -- 'demo-one demo-two' "$ROOT/pkg.log"; then pass; else fail "the package manager was asked for x11-repo and the packages" "$(cat "$ROOT/pkg.log")"; fi
+    if awk -F'\t' -v d="$ph_session" '$1=="phosh-session-file" { exit ($2=="file" && $5==d) ? 0 : 1 }' "$TESTHOME/.local/share/tlstore/installed.tsv"; then pass; else fail "the state records the session file's path" "$(cat "$TESTHOME/.local/share/tlstore/installed.tsv")"; fi
+    HOST_KNOB=launcher TPV_KNOB=1.1.0-pre.6 tl doctor
+    expect_no_out "doctor finds all of it" "Missing"
+
+    # The same build again is not an update; a newer one replaces the directory whole.
+    HOST_KNOB=launcher TPV_KNOB=1.1.0-pre.6 tl upgrade --offline -y phosh
+    expect_out "the same build is not an update" "Everything is up to date."
+    write_phosh_catalog 0.58.0+tl.1 2
+    HOST_KNOB=launcher TPV_KNOB=1.1.0-pre.6 tl update --check --offline
+    expect_out "update --check names the newer build" "phosh 0.58.0+tl.1 is available; you have 0.58.0+tl.0"
+    HOST_KNOB=launcher TPV_KNOB=1.1.0-pre.6 tl upgrade --offline -y phosh
+    expect_status "the newer build installs" 0
+    expect_content "the directory was replaced whole" "$ph_dir/share/glib-2.0/schemas/gschemas.compiled" "schemas of 2"
+    expect_content "the session file is still there" "$ph_session" "$(cat "$FX/phosh.desktop")"
+
+    HOST_KNOB=launcher TPV_KNOB=1.1.0-pre.6 tl rollback phosh -y
+    expect_status "phosh rolls back" 0
+    expect_content "to the build it had before" "$ph_dir/share/glib-2.0/schemas/gschemas.compiled" "schemas of 1"
+    HOST_KNOB=launcher TPV_KNOB=1.1.0-pre.6 tl unhold phosh
+
+    # Remove: the archive and its wrapper go; the parts nothing else needs go with them.
+    HOST_KNOB=launcher TPV_KNOB=1.1.0-pre.6 tl remove phosh -y
+    expect_status "phosh is removed" 0
+    expect_no_file "its directory goes" "$ph_dir"
+    expect_no_file "and its wrapper" "$ph_cmd"
+    expect_no_file "and the session file under the prefix" "$ph_session"
+    if grep -q '^phosh	' "$TESTHOME/.local/share/tlstore/installed.tsv" 2>/dev/null; then fail "and its state row"; else pass; fi
+    rm -rf "$TESTHOME/.local" "$TPREFIX/local"
+    mv "$ROOT/saved-local" "$TESTHOME/.local"
+
     # --- skill (Revision 18): an agent skill, one folder from one pinned .tar.gz ---
     # The tarball's one top-level entry is the skill's folder, named like the item. It unpacks
     # into ~/.agents/skills/<name>, replaced whole by an update, and is linked from
