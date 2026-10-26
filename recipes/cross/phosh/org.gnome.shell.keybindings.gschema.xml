@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Termux Launcher: the GNOME Shell keybindings and the settings-daemon touchscreen key phosh
+     opens at start (src/home.c, top-panel.c, brightness-manager.c, run-command-manager.c,
+     screenshot-manager.c, rotation-manager.c); no Termux package provides either schema, and
+     GLib aborts at g_settings_new() without it. The bindings are GNOME's defaults. -->
+<schemalist>
+  <schema id="org.gnome.shell.keybindings" path="/org/gnome/shell/keybindings/">
+    <key name="toggle-overview" type="as"><default>["&lt;Super&gt;s"]</default>
+      <summary>Toggle the overview</summary><description>Toggle the overview.</description></key>
+    <key name="toggle-application-view" type="as"><default>["&lt;Super&gt;a"]</default>
+      <summary>Toggle the application view</summary><description>Toggle the application view.</description></key>
+    <key name="toggle-message-tray" type="as"><default>["&lt;Super&gt;v"]</default>
+      <summary>Toggle the message tray</summary><description>Toggle the message tray.</description></key>
+    <key name="panel-run-dialog" type="as"><default>["&lt;Alt&gt;F2"]</default>
+      <summary>Run dialog</summary><description>Show the run dialog.</description></key>
+    <key name="screenshot" type="as"><default>["Print"]</default>
+      <summary>Screenshot</summary><description>Take a screenshot.</description></key>
+    <key name="screen-brightness-up" type="as"><default>["XF86MonBrightnessUp"]</default>
+      <summary>Brightness up</summary><description>Raise the screen brightness.</description></key>
+    <key name="screen-brightness-down" type="as"><default>["XF86MonBrightnessDown"]</default>
+      <summary>Brightness down</summary><description>Lower the screen brightness.</description></key>
+    <key name="screen-brightness-up-monitor" type="as"><default>[]</default>
+      <summary>Monitor brightness up</summary><description>Raise the brightness of the monitor.</description></key>
+    <key name="screen-brightness-down-monitor" type="as"><default>[]</default>
+      <summary>Monitor brightness down</summary><description>Lower the brightness of the monitor.</description></key>
+  </schema>
+  <schema id="org.gnome.settings-daemon.peripherals.touchscreen" path="/org/gnome/settings-daemon/peripherals/touchscreen/">
+    <key name="orientation-lock" type="b"><default>false</default>
+      <summary>Orientation lock</summary><description>Whether the screen orientation is locked.</description></key>
+  </schema>
+</schemalist>

@@ -3,40 +3,58 @@
 # as phoc's shell. The archive's exe= (docs/PHOSH.md, "Session"); the store's wrapper
 # ~/.local/bin/phosh-session execs it, and the launcher's Desktops entry runs it too.
 #
-#   phosh-session          start the display if needed, then run the session (phoc is exec'd)
+#   phosh-session          run the session on the launcher's display (phoc runs as a child)
 #   phosh-session stop     end it: phoc goes, and phosh and its children with it
+#
+# The display is the launcher's: its Desktops entry opens the Display window and starts the server
+# before it runs this, and nothing from a shell can open that window. Run from a terminal with no
+# Display window open, phoc cannot connect and this says so.
 #
 # PHOSH_SCALE, if set, overrides the output scale (phoc reads it); the settings app's display-scale
 # supplies it when it is not set.
 set -eu
 
 PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
+tmp="${TERMUX_TMP_PREFIX:-$PREFIX/tmp}"
 
 if [ "${1:-}" = stop ]; then
     pkill -x phoc 2>/dev/null || true
+    # The launcher's own session: its Desktops entry records the shell it runs us in.
+    if [ -r "$tmp/termux-x11-session.pid" ]; then
+        pid=$(cat "$tmp/termux-x11-session.pid" 2>/dev/null || true)
+        case "$pid" in
+            ''|*[!0-9]*) ;;
+            *)
+                kill -TERM "$pid" 2>/dev/null || true
+                sleep 1
+                kill -KILL "$pid" 2>/dev/null || true
+                ;;
+        esac
+    fi
     exit 0
 fi
 
-# This archive's root, from where this script is: <root>/bin/phosh-session.
-case "$0" in
-    */*) here=${0%/*} ;;
-    *) here=$(dirname "$(command -v "$0")") ;;
+# This archive's root: <root>/bin/phosh-session, found through any symlinks (the store exposes the
+# exe as ~/.local/bin/phosh-session). A readlink loop, as POSIX sh has no readlink -f.
+self=$0
+case "$self" in
+    */*) ;;
+    *) self=$(command -v "$self" 2>/dev/null || echo "$self") ;;
 esac
-app=$(cd "$here/.." && pwd)
+n=0
+while [ -L "$self" ] && [ "$n" -lt 20 ]; do
+    n=$((n + 1))
+    link=$(readlink "$self")
+    case "$link" in
+        /*) self=$link ;;
+        *) self="${self%/*}/$link" ;;
+    esac
+done
+app=$(cd "${self%/*}/.." 2>/dev/null && pwd) || app=
+[ -n "$app" ] && [ -d "$app/share/glib-2.0/schemas" ] || app="$HOME/.local/lib/phosh"
 
-runtime="${XDG_RUNTIME_DIR:-$PREFIX/tmp}"
-sockets="$PREFIX/tmp/.X11-unix"
-
-# The display: the launcher's own X server, socket X0. `termux-x11` starts it and keeps running.
-if [ ! -S "$sockets/X0" ]; then
-    termux-x11 :0 >/dev/null 2>&1 &
-    n=0
-    while [ ! -S "$sockets/X0" ]; do
-        n=$((n + 1))
-        [ "$n" -le 100 ] || { echo "phosh-session: the display did not start" >&2; exit 1; }
-        sleep 0.1
-    done
-fi
+runtime="${XDG_RUNTIME_DIR:-$tmp}"
+sockets="$tmp/.X11-unix"
 
 # A crashed phoc leaves wayland-0 and its lock behind, and the next one then refuses to start.
 # They are stale unless a phoc is running.
@@ -44,8 +62,9 @@ if ! pgrep -x phoc >/dev/null 2>&1; then
     rm -f "$runtime/wayland-0" "$runtime/wayland-0.lock"
 fi
 
-# The launcher's session bus, shared with the launcher and the rest of its desktop.
-if [ -S "$sockets/termux-launcher-bus" ]; then
+# The launcher's session bus, shared with the launcher and the rest of its desktop, unless the
+# launcher already gave this session one (its dbus-launch wrap).
+if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] && [ -S "$sockets/termux-launcher-bus" ]; then
     DBUS_SESSION_BUS_ADDRESS="unix:path=$sockets/termux-launcher-bus"
     export DBUS_SESSION_BUS_ADDRESS
 fi
@@ -63,7 +82,7 @@ else
     GSETTINGS_SCHEMA_DIR="$app/share/glib-2.0/schemas"
 fi
 
-DISPLAY=:0
+DISPLAY="${DISPLAY:-:0}"
 XDG_RUNTIME_DIR="$runtime"
 XDG_DATA_DIRS="$app/share:$PREFIX/share"
 XDG_CURRENT_DESKTOP=Phosh
@@ -91,4 +110,18 @@ fi
 # tl-feedbackd (#13): start it here, before phoc, once it is in the archive.
 #   [ ! -x "$app/bin/tl-feedbackd" ] || "$app/bin/tl-feedbackd" &
 
-exec phoc -E phosh
+# phoc runs as a child so that a connection failure can be told apart and explained; a TERM (the
+# launcher's stop) is passed on to it.
+log="${XDG_STATE_HOME:-$HOME/.local/state}/phosh/phoc.log"
+phoc -E phosh 2>"$log" &
+pid=$!
+trap 'kill "$pid" 2>/dev/null' TERM INT HUP
+rc=0
+wait "$pid" || rc=$?
+# A signal interrupts the first wait; wait again for the child to be gone.
+while kill -0 "$pid" 2>/dev/null; do wait "$pid" || rc=$?; done
+cat "$log" >&2
+if [ "$rc" -ne 0 ] && grep -q 'xcb connection' "$log" 2>/dev/null; then
+    echo "phosh-session: open Display in the launcher first, or tap Phosh under Desktops" >&2
+fi
+exit "$rc"

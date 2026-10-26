@@ -189,16 +189,27 @@ The `phosh` row carries `min-launcher=` set to the first launcher release with a
 
 ## Session
 
-- `phosh-session` (the archive's `exe=`, wrapper `~/.local/bin/phosh-session`) starts the
-  display if it is not running, starts `tl-feedbackd`, then execs `phoc -E phosh`. It joins the
-  launcher's session bus (`termux-launcher-bus`, Q22) instead of starting a private one.
+- `phosh-session` (the archive's `exe=`, wrapper `~/.local/bin/phosh-session`) finds its archive
+  through the wrapper's symlink (fallback `~/.local/lib/phosh`), runs `phoc -E phosh` on the
+  launcher's display and starts `tl-feedbackd` once it is in the archive. It never starts the
+  display: the launcher opens the Display window and starts the server before it runs a Desktops
+  entry, and nothing from a shell can open that window. From a terminal with no Display window
+  open, phoc fails to connect and the script says "open Display in the launcher first, or tap Phosh
+  under Desktops" and exits 1. It keeps a `DBUS_SESSION_BUS_ADDRESS` the launcher set and otherwise
+  joins its session bus (`termux-launcher-bus`, Q22).
 - **Desktops entry.** The launcher reads whole-desktop sessions from `$PREFIX/share/xsessions`
   and `$PREFIX/local/share/xsessions` (`ProotDistro.sessionDirs()`), not from `~/.local/share`.
   An archive unpacks under `~/.local/lib/phosh`, so the item needs one more step to put
-  `phosh.desktop` (`Exec=phosh-session`) into `$PREFIX/local/share/xsessions`: a hidden `file` part,
-  `phosh-session-file`, with a `$PREFIX` target (ADR 0006).
+  `phosh.desktop` into `$PREFIX/local/share/xsessions`: a hidden `file` part,
+  `phosh-session-file`, with a `$PREFIX` target (ADR 0006). The launcher lists a session only if
+  its `TryExec` resolves and the first word of `Exec` is executable, a bare name being looked up in
+  `$PREFIX/bin` only (not `~/.local/bin`) and `$HOME` not being expanded; so the file has no
+  `TryExec` and says `Exec=sh -c '"$HOME/.local/bin/phosh-session"'` (`sh` is in `$PREFIX/bin`,
+  and the launcher's `sh -c` expands `$HOME` when it runs it). A new file shows without a launcher
+  restart: the catalogue compares the directories' modification times when it is next shown.
 - **Stopping.** Closing the display window from the launcher stops phoc, and phoc's children
-  with it. `phosh-session stop` does the same from a terminal.
+  with it. `phosh-session stop` does the same from a terminal, and also ends the launcher's own
+  session shell (`$TERMUX_TMP_PREFIX/termux-x11-session.pid`) if there is one.
 - **Settings defaults.** Our build's gschema overrides: `app-filter-mode []`, screensaver lock
   off, no OSK. Users' own dconf settings win.
 
