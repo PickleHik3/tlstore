@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Termux Launcher: the two keys phoc reads from GNOME Mutter's org.gnome.mutter.keybindings
+     (src/keybindings.c), which no Termux package provides. The defaults are Mutter's. Installed
+     into the archive's share/glib-2.0/schemas by build-phosh.sh. -->
+<schemalist>
+  <schema id="org.gnome.mutter.keybindings" path="/org/gnome/mutter/keybindings/">
+    <key name="toggle-tiled-left" type="as">
+      <default>["&lt;Super&gt;Left"]</default>
+      <summary>View split on left</summary>
+      <description>Tile the window at the left half of the screen.</description>
+    </key>
+    <key name="toggle-tiled-right" type="as">
+      <default>["&lt;Super&gt;Right"]</default>
+      <summary>View split on right</summary>
+      <description>Tile the window at the right half of the screen.</description>
+    </key>
+  </schema>
+</schemalist>

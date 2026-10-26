@@ -1,0 +1,157 @@
+From: PickleHik3 <noreply@users.noreply.github.com>
+Subject: [PATCH] wlroots: the keymap shm file is a sealed memfd on Android, and phoc survives a failed keymap
+
+wlroots' read-only twin of the keymap file re-opened the memfd through /proc/self/fd, which
+SELinux denies to app processes (EACCES); wlr_keyboard_set_keymap() then failed, and phoc
+dereferenced the keymap and xkb state it had left unset (SIGSEGV at 0x80). The read-only fd is now
+a dup of a sealable memfd, sealed (shrink, grow, write) by the callers after they have written the
+data (wlroots patch file tl/0005). phoc's keyboard_keysyms_raw() returns no keysyms when the
+wlr_keyboard has no keymap, and set_xkb_keymap()/set_fallback_keymap() log a failed
+wlr_keyboard_set_keymap() instead of ignoring it.
+---
+--- a/src/keyboard.c
++++ b/src/keyboard.c
+@@ -357,6 +357,12 @@
+ 
+   *modifiers = wlr_keyboard_get_modifiers (wlr_keyboard);
+ 
++  /* wlr_keyboard_set_keymap() leaves both unset when it fails (e.g. no shm file for the keymap) */
++  if (wlr_keyboard->keymap == NULL || wlr_keyboard->xkb_state == NULL) {
++    *keysyms = NULL;
++    return 0;
++  }
++
+   xkb_layout_index_t layout_index = xkb_state_key_get_layout (wlr_keyboard->xkb_state,
+                                                               keycode);
+   return xkb_keymap_key_get_syms_by_level (wlr_keyboard->keymap,
+@@ -489,7 +495,8 @@
+                                             XKB_KEYMAP_COMPILE_NO_FLAGS);
+   xkb_context_unref (context);
+ 
+-  wlr_keyboard_set_keymap (wlr_keyboard, self->keymap);
++  if (!wlr_keyboard_set_keymap (wlr_keyboard, self->keymap))
++    g_warning ("Cannot set the fallback keymap");
+ }
+ 
+ 
+@@ -531,7 +538,8 @@
+     return;
+   }
+ 
+-  wlr_keyboard_set_keymap (wlr_keyboard, self->keymap);
++  if (!wlr_keyboard_set_keymap (wlr_keyboard, self->keymap))
++    g_warning ("Cannot set the keymap");
+ }
+ 
+ 
+--- /dev/null
++++ b/subprojects/packagefiles/wlroots/tl/0005-bionic-sealed-memfd-pair.patch
+@@ -0,0 +1,99 @@
++Termux Launcher: the read-only side of allocate_shm_file_pair() on Android without /proc.
++
++Bionic has no shm_open(), and re-opening the memfd through /proc/self/fd (the previous version of
++this patch's shm_open_ro) is denied to app processes by SELinux (EACCES), so the keymap file could
++not be allocated. The pair is now a sealable memfd (MFD_ALLOW_SEALING) and its "read-only" fd is a
++dup of the same file; the new seal_shm_file() adds F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_WRITE once
++the caller has written the data and unmapped it, which makes that fd read-only for good (what
++libwayland and xkbcommon recommend for keymaps). The two callers of allocate_shm_file_pair()
++(wlr_keyboard_set_keymap() and the linux-dmabuf feedback table) call it after munmap(); a failure
++returns an error through their existing error paths. Elsewhere seal_shm_file() does nothing.
++
++--- a/include/util/shm.h
+++++ b/include/util/shm.h
++@@ -7,5 +7,10 @@
++ int create_shm_file(void);
++ int allocate_shm_file(size_t size);
++ bool allocate_shm_file_pair(size_t size, int *rw_fd, int *ro_fd);
+++/**
+++ * Make the read-only fd of a pair read-only for good, once the data is written and unmapped
+++ * (Android's memfd has no read-only open; elsewhere the fd already is, and this does nothing).
+++ */
+++bool seal_shm_file(int fd);
++ 
++ #endif
++--- a/types/wlr_keyboard.c
+++++ b/types/wlr_keyboard.c
++@@ -234,6 +234,12 @@
++ 	memcpy(dst, keymap_str, keymap_size);
++ 	munmap(dst, keymap_size);
++ 
+++	if (!seal_shm_file(ro_fd)) {
+++		wlr_log_errno(WLR_ERROR, "Failed to seal the keymap file");
+++		close(ro_fd);
+++		goto error_keymap_str;
+++	}
+++
++ 	keyboard_unset_keymap(kb);
++ 	kb->keymap = xkb_keymap_ref(keymap);
++ 	kb->xkb_state = xkb_state;
++--- a/types/wlr_linux_dmabuf_v1.c
+++++ b/types/wlr_linux_dmabuf_v1.c
++@@ -565,6 +565,12 @@
++ 
++ 	munmap(table, table_size);
++ 
+++	if (!seal_shm_file(ro_fd)) {
+++		wlr_log_errno(WLR_ERROR, "Failed to seal the format table file");
+++		close(ro_fd);
+++		goto err_all_formats;
+++	}
+++
++ 	struct wlr_linux_dmabuf_feedback_v1_compiled *compiled = calloc(1, sizeof(*compiled) +
++ 		tranches_len * sizeof(struct wlr_linux_dmabuf_feedback_v1_compiled_tranche));
++ 	if (compiled == NULL) {
++--- a/util/shm.c
+++++ b/util/shm.c
++@@ -11,21 +11,21 @@
++ #define RANDNAME_PATTERN "/wlroots-XXXXXX"
++ 
++ #ifdef __ANDROID__
++-// Bionic has no shm_open(): an anonymous memfd stands in, and its read-only twin is the same file
++-// opened again through /proc/self/fd.
+++// Bionic has no shm_open(): an anonymous, sealable memfd stands in. The pair's read-only side is a
+++// dup of the same file; re-opening it through /proc/self/fd is denied to app processes by SELinux.
+++// The caller writes through the read-write fd and calls seal_shm_file() on the other once it has
+++// written and unmapped, which is what makes that one read-only.
++ #include <stdio.h>
++ #include <sys/syscall.h>
++ 
++ static int excl_shm_open(char *name) {
++ 	(void)name;
++-	return syscall(SYS_memfd_create, "wlroots", 1U /* MFD_CLOEXEC */);
+++	return syscall(SYS_memfd_create, "wlroots", 3U /* MFD_CLOEXEC | MFD_ALLOW_SEALING */);
++ }
++ 
++ static int shm_open_ro(const char *name, int rw_fd) {
++ 	(void)name;
++-	char path[64];
++-	snprintf(path, sizeof(path), "/proc/self/fd/%d", rw_fd);
++-	return open(path, O_RDONLY | O_CLOEXEC);
+++	return fcntl(rw_fd, F_DUPFD_CLOEXEC, 0);
++ }
++ 
++ #define shm_unlink(name) ((void)(name))
++@@ -121,3 +121,14 @@
++ 	*ro_fd_ptr = ro_fd;
++ 	return true;
++ }
+++
+++bool seal_shm_file(int fd) {
+++#ifdef __ANDROID__
+++	// Nothing may write, grow or shrink the file after this; F_SEAL_WRITE needs every writable
+++	// mapping to be gone (munmap the data first).
+++	return fcntl(fd, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_WRITE) == 0;
+++#else
+++	(void)fd;
+++	return true;
+++#endif
+++}
+--- a/subprojects/wlroots.wrap
++++ b/subprojects/wlroots.wrap
+@@ -14,4 +14,5 @@
+   wlroots/tl/0001-bionic-no-librt.patch,
+   wlroots/tl/0002-bionic-no-shm-open.patch,
+   wlroots/tl/0003-x11-follow-root-window-size.patch,
+-  wlroots/tl/0004-vulkan-render-into-shm.patch
++  wlroots/tl/0004-vulkan-render-into-shm.patch,
++  wlroots/tl/0005-bionic-sealed-memfd-pair.patch
