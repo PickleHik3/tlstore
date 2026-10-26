@@ -195,8 +195,8 @@ The `phosh` row carries `min-launcher=` set to the first launcher release with a
 - **Desktops entry.** The launcher reads whole-desktop sessions from `$PREFIX/share/xsessions`
   and `$PREFIX/local/share/xsessions` (`ProotDistro.sessionDirs()`), not from `~/.local/share`.
   An archive unpacks under `~/.local/lib/phosh`, so the item needs one more step to put
-  `phosh.desktop` (`Exec=phosh-session`) into `$PREFIX/local/share/xsessions`: a `file` part with
-  a `$PREFIX` target or a `post=` script. Which one is decided in M1 (open question 1).
+  `phosh.desktop` (`Exec=phosh-session`) into `$PREFIX/local/share/xsessions`: a hidden `file` part,
+  `phosh-session-file`, with a `$PREFIX` target (ADR 0006).
 - **Stopping.** Closing the display window from the launcher stops phoc, and phoc's children
   with it. `phosh-session stop` does the same from a terminal.
 - **Settings defaults.** Our build's gschema overrides: `app-filter-mode []`, screensaver lock
@@ -213,11 +213,14 @@ The `phosh` row carries `min-launcher=` set to the first launcher release with a
 - `min-launcher=` as above. `host=launcher`: the bridges need launcherctl.
 - The archive holds: `bin/` (phoc, phosh, phosh-session, tl-feedbackd, phosh-mobile-settings),
   `lib/` (gmobile, libfeedback, phoc's static wlroots needs nothing at run time), `libexec/`,
-  `share/` (gschemas compiled at install by `post=` or at session start, icons, the phosh and
+  `share/` (gschemas compiled at build, pointed at by `GSETTINGS_SCHEMA_DIR`; icons, the phosh and
   phosh-mobile-settings `.desktop` files, locale). The wrapper exports `XDG_DATA_DIRS` and
   `GSETTINGS_SCHEMA_DIR` to include the archive's `share/`.
-- Size: to be measured in M1. The trial's Alpine install is not a guide (it pulled GNOME's
-  whole session stack).
+- Size, measured in M1 (2026-10-26): the archive is 1.34 MB (aarch64) and 1.39 MB (x86_64) as a
+  `.tar.gz`, about 4 MB unpacked. The Termux packages `phosh-deps` pulls in beyond a stock Termux
+  are 123 packages, 87 MB to download and 535 MB on disk (`pkg-size=87,535`; the libllvm that mesa
+  needs is 174 MB of that, gtk4 for the settings app 42 MB). The trial's Alpine install is not a guide (it pulled GNOME's whole
+  session stack).
 
 ## Build
 
@@ -276,9 +279,9 @@ M2 can run alongside M0–M1. M5 can start after M0.
 
 ## Open questions
 
-1. How the session file reaches `$PREFIX/local/share/xsessions`: a `file` part with a `$PREFIX`
-   target (the `target` column takes `~` paths today) or the archive's `post=` script. Or the
-   launcher also reads `~/.local/share/xsessions`. Decided in M1.
+1. ~~How the session file reaches `$PREFIX/local/share/xsessions`.~~ Settled in M1 (2026-10-26): a
+   hidden `file` part with a `$PREFIX` target; the engine's target column takes `$PREFIX` now
+   (`docs/adr/0006-phosh-session-file.md`). No `post=`.
 2. The watch stream's wire format (NDJSON over a held HTTP response, or SSE). Decided in M2 with
    the launcher's API conventions.
 3. ~~Whether Termux's mesa has a kgsl-enabled Turnip or the archive ships its own Vulkan

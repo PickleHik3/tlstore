@@ -1,0 +1,94 @@
+#!/bin/sh
+# phosh-session — runs phosh on the launcher's display: phoc nested on it as an X11 client, phosh
+# as phoc's shell. The archive's exe= (docs/PHOSH.md, "Session"); the store's wrapper
+# ~/.local/bin/phosh-session execs it, and the launcher's Desktops entry runs it too.
+#
+#   phosh-session          start the display if needed, then run the session (phoc is exec'd)
+#   phosh-session stop     end it: phoc goes, and phosh and its children with it
+#
+# PHOSH_SCALE, if set, overrides the output scale (phoc reads it); the settings app's display-scale
+# supplies it when it is not set.
+set -eu
+
+PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
+
+if [ "${1:-}" = stop ]; then
+    pkill -x phoc 2>/dev/null || true
+    exit 0
+fi
+
+# This archive's root, from where this script is: <root>/bin/phosh-session.
+case "$0" in
+    */*) here=${0%/*} ;;
+    *) here=$(dirname "$(command -v "$0")") ;;
+esac
+app=$(cd "$here/.." && pwd)
+
+runtime="${XDG_RUNTIME_DIR:-$PREFIX/tmp}"
+sockets="$PREFIX/tmp/.X11-unix"
+
+# The display: the launcher's own X server, socket X0. `termux-x11` starts it and keeps running.
+if [ ! -S "$sockets/X0" ]; then
+    termux-x11 :0 >/dev/null 2>&1 &
+    n=0
+    while [ ! -S "$sockets/X0" ]; do
+        n=$((n + 1))
+        [ "$n" -le 100 ] || { echo "phosh-session: the display did not start" >&2; exit 1; }
+        sleep 0.1
+    done
+fi
+
+# A crashed phoc leaves wayland-0 and its lock behind, and the next one then refuses to start.
+# They are stale unless a phoc is running.
+if ! pgrep -x phoc >/dev/null 2>&1; then
+    rm -f "$runtime/wayland-0" "$runtime/wayland-0.lock"
+fi
+
+# The launcher's session bus, shared with the launcher and the rest of its desktop.
+if [ -S "$sockets/termux-launcher-bus" ]; then
+    DBUS_SESSION_BUS_ADDRESS="unix:path=$sockets/termux-launcher-bus"
+    export DBUS_SESSION_BUS_ADDRESS
+fi
+
+# The archive's schemas, compiled again here: the compiled file in the archive goes stale as trees
+# are added to it, and the archive's directory may not be writable to the session. A copy of the
+# sources in a directory of ours, compiled there, is always current.
+schemas="${XDG_STATE_HOME:-$HOME/.local/state}/phosh/schemas"
+mkdir -p "$schemas"
+rm -f "$schemas"/*.xml "$schemas"/*.override "$schemas/gschemas.compiled"
+cp "$app"/share/glib-2.0/schemas/*.xml "$app"/share/glib-2.0/schemas/*.override "$schemas/" 2>/dev/null || true
+if glib-compile-schemas "$schemas" 2>/dev/null; then
+    GSETTINGS_SCHEMA_DIR="$schemas"
+else
+    GSETTINGS_SCHEMA_DIR="$app/share/glib-2.0/schemas"
+fi
+
+DISPLAY=:0
+XDG_RUNTIME_DIR="$runtime"
+XDG_DATA_DIRS="$app/share:$PREFIX/share"
+XDG_CURRENT_DESKTOP=Phosh
+GSK_RENDERER=cairo
+PATH="$app/bin:$PATH"
+WLR_BACKEND=x11
+WLR_X11_OUTPUTS=1
+WLR_NO_HARDWARE_CURSORS=1
+export DISPLAY XDG_RUNTIME_DIR XDG_DATA_DIRS GSETTINGS_SCHEMA_DIR XDG_CURRENT_DESKTOP \
+    GSK_RENDERER PATH WLR_BACKEND WLR_X11_OUTPUTS WLR_NO_HARDWARE_CURSORS
+
+# Output scale: PHOSH_SCALE from the environment wins; else phosh-mobile-settings' display-scale
+# (a double, 0.0 = automatic, which phoc works out itself).
+if [ -z "${PHOSH_SCALE:-}" ]; then
+    scale=$(gsettings get mobi.phosh.MobileSettings display-scale 2>/dev/null || true)
+    scale=${scale#uint32 }
+    case "$scale" in
+        ''|0|0.0|0.00) ;;
+        *[!0-9.]*) ;;
+        *) PHOSH_SCALE="$scale" ;;
+    esac
+fi
+[ -z "${PHOSH_SCALE:-}" ] || export PHOSH_SCALE
+
+# tl-feedbackd (#13): start it here, before phoc, once it is in the archive.
+#   [ ! -x "$app/bin/tl-feedbackd" ] || "$app/bin/tl-feedbackd" &
+
+exec phoc -E phosh

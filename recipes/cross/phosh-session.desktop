@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=XSession
+Name=Phosh
+Comment=The phone shell, on the display
+Exec=phosh-session
+TryExec=phosh-session
+DesktopNames=Phosh

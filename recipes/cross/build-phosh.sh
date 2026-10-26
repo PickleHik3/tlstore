@@ -387,6 +387,9 @@ done
 # inside the binary too). libfeedback's shared library stays: phosh needs it at run time.
 rm -rf "$stage/include" "$stage/lib/pkgconfig" "$stage/lib/udev" "$stage"/lib/*.a "$stage"/lib/libgmobile*
 find "$stage" -mindepth 1 -type d -empty -delete
+# The launcher's session script (upstream's own was dropped in build_phosh): the archive's exe=.
+mkdir -p "$stage/bin"
+install -m 755 "$SCRIPT_DIR/phosh-session" "$stage/bin/phosh-session"
 
 # --- checks ---------------------------------------------------------------------------------
 readelf="$NDK_BIN/llvm-readelf"
