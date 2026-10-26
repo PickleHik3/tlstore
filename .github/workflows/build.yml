@@ -39,7 +39,7 @@ on:
   workflow_dispatch:
     inputs:
       tools:
-        description: "Tools to build: all, or a comma list of btop, tl-priv, tuios-cpu, kitten, tuios, sigye, herdr, terminal-browser, fastfetch, dawn, musl-loader, musl-runtime, launcher-skills"
+        description: "Tools to build: all, or a comma list of btop, tl-priv, tuios-cpu, kitten, tuios, sigye, herdr, terminal-browser, fastfetch, dawn, musl-loader, musl-runtime, launcher-skills, phosh"
         required: false
         default: "all"
   workflow_call:
@@ -104,6 +104,15 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq cmake ninja-build dpkg-dev make patch python3 file
 
+      # build-phosh.sh runs meson on the host: glib's code generators and schema compiler, gettext's
+      # msgfmt, wayland-scanner (the sysroot's is a phone binary) and the build machine's glib and
+      # wayland .pc files, which meson reads for the tools.
+      - name: phosh's build dependencies
+        if: matrix.tool == 'phosh'
+        run: |
+          sudo apt-get install -y -qq meson pkg-config git curl gettext desktop-file-utils \
+            libwayland-dev libwayland-bin wayland-protocols libglib2.0-dev libglib2.0-dev-bin libglib2.0-bin
+
       - name: kitty's build dependencies
         if: matrix.tool == 'kitten'
         # build-kitten.sh runs kitty's own ./dev.sh build, which compiles kitty for the host
@@ -158,13 +167,13 @@ jobs:
       # so the key rotates monthly; within a month a rebuild extracts from the cached .debs
       # without touching the network.
       - name: Cache the sysroot
-        if: matrix.tool == 'fastfetch' || matrix.tool == 'dawn'
+        if: matrix.tool == 'fastfetch' || matrix.tool == 'dawn' || matrix.tool == 'phosh'
         uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: |
-            work/sysroot-${{ matrix.edition }}-${{ matrix.arch }}
-            work/debs-${{ matrix.edition }}-${{ matrix.arch }}
-          key: sysroot-${{ matrix.tool }}-${{ matrix.edition }}-${{ matrix.arch }}-${{ hashFiles('recipes/cross/termux-sysroot.sh') }}-${{ steps.month.outputs.month }}
+            work/sysroot-${{ matrix.edition == '-' && 'com.termux' || matrix.edition }}-${{ matrix.arch }}
+            work/debs-${{ matrix.edition == '-' && 'com.termux' || matrix.edition }}-${{ matrix.arch }}
+          key: sysroot-${{ matrix.tool }}-${{ matrix.edition }}-${{ matrix.arch }}-${{ hashFiles('recipes/cross/termux-sysroot.sh', 'recipes/cross/phosh-deps.txt') }}-${{ steps.month.outputs.month }}
 
       # kitty's dependency bundle and its generated Go sources: a built kitty is what the
       # generator needs, and that is the slow part of the recipe.
