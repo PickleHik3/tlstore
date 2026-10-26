@@ -390,12 +390,18 @@ what the launcher does not ship (`lockscreen`, `polkit`, `logind`, `osk`, `eds`,
 `bluetooth`, `location`, `vpn`, `hotspot`, `networkmanager`, `modemmanager`, `gudev`, all on in
 upstream's build; the build turns them all off, plus upstream's `searchd` and the plugins). Termux
 has no libnm, mm-glib, libgudev, polkit, libsystemd/elogind, PAM, evolution-data-server,
-gnome-bluetooth or libcall-ui: `phosh-deps.txt` lists what it does have. The patches are commits on
-the `v0.58.0` tag exported with `git format-patch --zero-commit --no-signature`; to move them to a
-new tag, apply them to the old tag as commits (`git am`), `git rebase --onto <new tag>`, and export
-again. `data/90_tl.gschema.override` (app-filter-mode `[]`, no screensaver lock, no screen
-keyboard) is checked by the build against the sysroot's `org.gnome.desktop` schemas; compiling the
-schemas into the session's `GSETTINGS_SCHEMA_DIR` is the session-file step, not done here.
+gnome-bluetooth or libcall-ui: `phosh-deps.txt` lists what it does have. The patch files are not
+all `git format-patch` output, whatever their headers look like: most were exported from commits on
+the tag (`git format-patch --zero-commit --no-signature`), but some were assembled by hand in the
+same layout, without `diff --git`/`index` lines and with `[PATCH n/m]` counters that do not agree
+across the series (phosh 0030 to 0034, phoc 0005 to 0007, and all of phosh-mobile-settings'). What
+holds for every one of them is what the build relies on: they apply with `patch -p1`, in file-name
+order, to the pinned tarball. To move a series to a new tag, apply it to the old tag with
+`patch -p1` and commit each file (`git am` refuses the hand-made ones), `git rebase --onto <new
+tag>`, and export again. `data/90_tl.gschema.override` (app-filter-mode `[]`, no screensaver lock,
+no screen keyboard) is checked by the build against the sysroot's `org.gnome.desktop` schemas;
+`phosh-session` compiles the archive's schemas with `$PREFIX`'s `org.gnome.desktop` ones into its
+own `GSETTINGS_SCHEMA_DIR` at every start, so those overrides apply on the phone.
 
 M3 (`phosh/0017` to `0023`) puts the launcher behind the battery, Wi-Fi, mobile, rotation and torch
 backends: a `tl-launcherctl` client (libsoup 3, json-glib) reads `~/.launcherctl/endpoint` and
@@ -405,9 +411,13 @@ backends: a `tl-launcherctl` client (libsoup 3, json-glib) reads `~/.launcherctl
 `wifi-manager-tl.c`, `wwan/phosh-wwan-tl.c`, `rotation-manager-tl.c` and `torch-manager-tl.c` for the
 UPower, NetworkManager, ModemManager, iio-sensor-proxy and gudev/logind ones, which are not built
 then, and upower-glib is no dependency; `build-phosh.sh` and `tests/phosh/run-headless.sh` need no
-new `-D` flag. `0023` adds `TlState` and `TlTile` to `mobi.phosh.Shell.DebugControl` for the tests in
-`tests/phosh/test-1*.sh`. Without an endpoint file the client does nothing and the tiles stay
-insensitive. Patch numbers 0030 and up are for `tl-feedbackd` and the notifications.
+new `-D` flag for it. `0023` adds `TlState` and `TlTile` to `mobi.phosh.Shell.DebugControl` for the
+tests in `tests/phosh/test-1*.sh`; `0033` puts them behind a boolean option, `tl-debug` (default
+false), which `run-headless.sh` turns on and `build-phosh.sh` leaves off, so the phone's phosh has no
+test hooks on the shared session bus. Without an endpoint file at the first start the client does
+nothing and the tiles stay insensitive; once it has started it keeps reconnecting with its backoff,
+even when the files are briefly gone (`0034`). Patch numbers 0030 and up are for `tl-feedbackd`, the
+notifications and the fixes after them.
 
 `phosh/0030` makes notify-manager post each notification it accepts through that client with
 `POST /v1/notify` (id `phosh-<phosh's id>`, title, plain-text body, urgency, `"action":

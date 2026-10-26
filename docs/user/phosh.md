@@ -32,8 +32,15 @@ Inside Phosh:
   top bar, feedback and compositor
 
 What is not there: the lock screen, an on-screen keyboard, calls and SMS, Bluetooth, VPN, location
-and the hotspot. Wi-Fi and mobile tiles show state and do not switch anything. See the item page
-for why.
+and the hotspot. Wi-Fi and mobile tiles show state and do not switch anything. There is no
+dark-style tile and the quick settings cannot be rearranged: both are Phosh plugins, which this
+build does not have yet. For the dark style, from a terminal:
+
+```sh
+gsettings set org.gnome.desktop.interface color-scheme prefer-dark
+```
+
+See the item page for why the rest is missing.
 
 ## Scale
 
@@ -69,9 +76,10 @@ tlstore rollback phosh     # one version back, and hold it there
 tlstore remove phosh       # the item, its Desktops entry and the part it brought
 ```
 
-Your own settings (what you changed in Mobile Settings, and any dconf values) are kept in your
-home directory, so they survive an update or a removal. Termux packages that other things also
-need stay.
+Your own settings (what you changed in Phosh and Mobile Settings, and any other GSettings
+values) are kept by dconf, which Phosh installs with its Termux packages, in your home directory
+(`~/.config/dconf`), so they survive a restart, an update or a removal. Termux packages that other
+things also need stay.
 
 ## When it does not start
 
@@ -90,4 +98,5 @@ need stay.
   log says which renderer it chose.
 - **Everything is too big or too small.** See Scale.
 - **An app does not open.** Apps that only speak X11 run through Xwayland, which comes with the
-  Termux packages Phosh installs. Run the app from a terminal inside Phosh to see what it says.
+  Termux packages Phosh installs; phoc starts it when the first X11 app opens, so that one takes a
+  moment longer. Run the app from a terminal inside Phosh to see what it says.

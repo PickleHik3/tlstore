@@ -19,6 +19,10 @@ upstream version and move together.
   of ours turns that into a vibration of the phone.
 - **Mobile Settings.** Four panels: the overview, the top bar and quick settings, feedback, and the
   compositor, which holds the display scale.
+- **X11 apps.** Apps that only speak X11 run through Xwayland, which phoc starts the first time
+  one opens (that first one takes a moment longer).
+- **Settings that stay.** What you change in Phosh and Mobile Settings is kept by dconf, which comes
+  with the Termux packages, so it is still there after a restart.
 
 ## What is compiled out, and why
 
@@ -40,7 +44,9 @@ the like are out for the same reasons.
 - **Wi-Fi and mobile tiles show state only**, when the launcher provides it; they cannot switch
   anything. Battery and rotation follow the phone.
 - **No Bluetooth, VPN, location or hotspot** tiles.
-- **The quick-settings page cannot reorder tiles**, because phosh's plugins are not built.
+- **No dark-style tile, and the tiles cannot be rearranged.** Both are phosh plugins, which this
+  build does not have yet. The dark style can still be set from a terminal:
+  `gsettings set org.gnome.desktop.interface color-scheme prefer-dark`.
 - **The display has to be open.** From a terminal, open **Display** in the launcher first, or just
   use the Desktops entry, which opens it.
 - Needs a launcher recent enough for the display and the bridges; the store checks this.
