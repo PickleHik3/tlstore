@@ -38,7 +38,7 @@ jobs:
 
   # phoc and phosh built natively with the recipes' patch sets, run headless against a fake
   # launcherctl (tests/phosh/, docs/PHOSH.md "Testing"). UNVERIFIED: written without a host that
-  # has the dev packages, so it may not be green on its first run; continue-on-error stays until
+  # has the dev packages, so it was seen green on 2026-10-26 (run 40335453739) and is required
   # it has been seen green.
   phosh-headless:
     runs-on: ubuntu-24.04
