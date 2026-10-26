@@ -34,3 +34,11 @@ on a phone) and as few as four, so the prompt has to sit in the top quarter.
 changes, a failed build, the merge conflict), written straight to a five-frame APNG with
 `ffmpeg -framerate 1 -i k%d.png -vf scale=600:-2 -plays 0 -f apng`, since
 `scripts/make-hero.sh` would repeat each still twelve times a second.
+
+`phosh.jpg` is this repository's own: a screenshot of the store's phosh build on the Android 16
+emulator (tl16, 2026-10-26), the app grid just after a Desktops tap, cropped to the top of the
+phosh window (`-crop 1032x400+24+250` on the 1080x2400 screen: the clock, the search field and
+the first row of apps) before the usual conversion. `hero/phosh.png` is a 5 s screen recording
+of the same session (a swipe up to the overview, Foot opening, a swipe back) cropped to the
+phosh window (`crop=1032:1420:24:250`) and run through `scripts/make-hero.sh`. phosh is
+GPL-3.0-or-later; the pictures show only this build.
