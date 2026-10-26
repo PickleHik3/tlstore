@@ -4,6 +4,7 @@
 # (There is no lock screen in this build, -Dlockscreen=false, so "unlocked" is the only state.)
 set -euo pipefail
 # shellcheck source=tests/phosh/lib.sh
+# shellcheck source=./lib.sh
 . "$TL_SCRIPT_DIR/lib.sh"
 
 settle=${TL_HEADLESS_SECONDS:-10}
