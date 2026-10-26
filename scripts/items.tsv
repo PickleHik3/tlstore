@@ -26,7 +26,7 @@
 #           commit>, binaries:<asset>@<tag>, or a URL. npm-musl/npm-android:
 #           npm:<package>#<exe>.
 #           fisher: the plugin list, space separated
-# target    where it lands, ~ allowed; - means the default (an archive: the
+# target    where it lands, ~ and a leading $PREFIX allowed; - means the default (an archive: the
 #           directory ~/.local/lib/<name>; a skill: the directory
 #           ~/.agents/skills/<name>, the links being named after the item
 #           wherever it lands)

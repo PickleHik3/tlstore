@@ -779,11 +779,14 @@ commas() { printf '%s' "$1" | tr ',' ' '; }
 # " a  b " → "a, b", for reading out a list of names.
 words_list() { printf '%s' "$1" | sed 's/^ *//; s/ *$//; s/  */, /g'; }
 
-# A leading ~ in a target is this user's home, not a shell expansion.
-# shellcheck disable=SC2088
+# A leading ~ in a target is this user's home, and a leading $PREFIX is the
+# prefix, not a shell expansion (the launcher's session list lives under the
+# prefix, not the home: docs/adr/0006).
+# shellcheck disable=SC2088,SC2016
 expand_path() {
     case "$1" in
         '~'|'~/'*) printf '%s' "$HOME${1#\~}" ;;
+        '$PREFIX'|'$PREFIX/'*) printf '%s' "$PREFIX${1#\$PREFIX}" ;;
         *) printf '%s' "$1" ;;
     esac
 }
@@ -3853,7 +3856,7 @@ snapshot_channels() {
 snapshot_rows() {
     sn_codex=0
     [ ! -d "$HOME/.codex" ] || sn_codex=1
-    rows | awk -F "$TAB" -v OFS="$TAB" -v state="$STATE" -v heldfile="$HELD" -v home="$HOME" \
+    rows | awk -F "$TAB" -v OFS="$TAB" -v state="$STATE" -v heldfile="$HELD" -v home="$HOME" -v prefix="$PREFIX" \
         -v bindir="$BIN_DIR" -v libdir="$LIB_DIR" -v privdir="$PRIV_DIR" \
         -v skillsdir="$SKILLS_DIR" -v codex="$sn_codex" \
         -v cachedir="$CACHE_DIR" -v launcher_raw="$LAUNCHER_RAW" -v binaries_raw="$BINARIES_RAW" \
@@ -3869,6 +3872,8 @@ snapshot_rows() {
         function expand(p) {
             if (p == "~") return home
             if (substr(p, 1, 2) == "~/") return home substr(p, 2)
+            if (p == "$PREFIX") return prefix
+            if (substr(p, 1, 8) == "$PREFIX/") return prefix substr(p, 8)
             return p
         }
         # item_targets, as the shell does it.
