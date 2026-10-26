@@ -1,0 +1,206 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PickleHik3 <noreply@example.invalid>
+Date: Mon, 26 Oct 2026 12:00:00 +0000
+Subject: [PATCH 30/31] Notify-manager: posts each notification to Android and withdraws it on close
+
+With -Dlauncherctl phosh stays the notification server, and every notification it accepts is also
+posted through the shared client (tl-launcherctl) with POST /v1/notify: id "phosh-<phosh's id>",
+the summary as title, the body as plain text (phosh's Pango markup stripped), urgency low,
+normal or critical, and "action": "open-display", so a tap on the Android notification brings
+the display forward. When the notification is closed in phosh, whatever the reason (dismissed,
+expired while transient, CloseNotification from the app), {"close": "phosh-<id>"} withdraws the
+Android one. A notification with neither summary nor body is not posted.
+
+Without a launcher (no endpoint file) the post fails quietly: a debug line per notification and
+one g_message the first time. Nothing is posted by a build without -Dlauncherctl.
+---
+ src/notifications/notify-manager.c | 164 +-
+ 1 file changed, 164 insertions(+), 0 deletions(-)
+
+--- a/src/notifications/notify-manager.c
++++ b/src/notifications/notify-manager.c
+@@ -22,6 +22,11 @@
+ #include "util.h"
+ 
+ #include <gmobile.h>
++#include <string.h>
++
++#if PHOSH_HAVE_LAUNCHERCTL
++# include "tl-launcherctl.h"
++#endif
+ 
+ #define NOTIFICATIONS_KEY_APP_CHILDREN "application-children"
+ 
+@@ -84,6 +89,161 @@
+                                                 phosh_notify_manager_notify_iface_init));
+ 
+ 
++#if PHOSH_HAVE_LAUNCHERCTL
++/*
++ * Notifications to Android (build with -Dlauncherctl)
++ *
++ * phosh stays the notification server. Each notification it accepts is also posted with
++ * POST /v1/notify, keyed "phosh-<phosh's id>" and with the open-display action (a tap on the
++ * Android one brings the display forward); when it is closed in phosh, for whatever reason
++ * (dismissed, expired when transient, CloseNotification), {"close": "<key>"} takes the Android
++ * one down. Without a launcher nothing is shown and nothing is logged per notification.
++ */
++static gboolean tl_post_failed;
++
++static void
++on_tl_notify_posted (GObject *source, GAsyncResult *res, gpointer data)
++{
++  g_autoptr (GError) err = NULL;
++  g_autoptr (JsonObject) reply = tl_launcherctl_post_finish (TL_LAUNCHERCTL (source), res, &err);
++
++  if (reply || g_error_matches (err, G_IO_ERROR, G_IO_ERROR_CANCELLED))
++    return;
++
++  g_debug ("Posting to the launcher failed: %s", err->message);
++  if (!tl_post_failed) {
++    tl_post_failed = TRUE;
++    g_message ("Notifications are not posted to Android: %s", err->message);
++  }
++}
++
++
++static void
++tl_post_notify (JsonBuilder *builder)
++{
++  g_autoptr (JsonGenerator) gen = json_generator_new ();
++  g_autoptr (JsonNode) root = json_builder_get_root (builder);
++  g_autofree char *json = NULL;
++
++  json_generator_set_root (gen, root);
++  json = json_generator_to_data (gen, NULL);
++  tl_launcherctl_post_async (tl_launcherctl_get_default (), "/v1/notify", json, NULL,
++                             on_tl_notify_posted, NULL);
++}
++
++
++/* phosh keeps a body as Pango markup (b, i, u and escapes); Android shows plain text */
++static char *
++tl_markup_to_plain (const char *markup)
++{
++  static const struct { const char *entity; char ch; } entities[] = {
++    { "&amp;", '&' }, { "&lt;", '<' }, { "&gt;", '>' }, { "&quot;", '"' }, { "&apos;", '\'' },
++  };
++  GString *out = g_string_new (NULL);
++
++  for (const char *p = markup; *p;) {
++    gboolean done = FALSE;
++
++    if (*p == '<') {
++      const char *end = strchr (p, '>');
++
++      if (end) {
++        p = end + 1;
++        continue;
++      }
++    } else if (*p == '&') {
++      for (guint i = 0; i < G_N_ELEMENTS (entities); i++) {
++        gsize len = strlen (entities[i].entity);
++
++        if (strncmp (p, entities[i].entity, len) == 0) {
++          g_string_append_c (out, entities[i].ch);
++          p += len;
++          done = TRUE;
++          break;
++        }
++      }
++    }
++    if (!done)
++      g_string_append_c (out, *p++);
++  }
++  return g_string_free (out, FALSE);
++}
++
++
++static char *
++tl_notify_key (PhoshNotification *notification)
++{
++  return g_strdup_printf ("phosh-%u", phosh_notification_get_id (notification));
++}
++
++
++static void
++on_tl_notification_closed (PhoshNotification      *notification,
++                           PhoshNotificationReason reason,
++                           gpointer                data)
++{
++  g_autoptr (JsonBuilder) builder = json_builder_new ();
++  g_autofree char *key = tl_notify_key (notification);
++
++  g_debug ("Notification %s closed (%d), withdrawing it from Android", key, reason);
++  json_builder_begin_object (builder);
++  json_builder_set_member_name (builder, "close");
++  json_builder_add_string_value (builder, key);
++  json_builder_end_object (builder);
++  tl_post_notify (builder);
++}
++
++
++static void
++tl_bridge_notification (PhoshNotification *notification)
++{
++  g_autoptr (JsonBuilder) builder = json_builder_new ();
++  g_autofree char *key = tl_notify_key (notification);
++  g_autofree char *body = NULL;
++  const char *summary = phosh_notification_get_summary (notification);
++  const char *markup = phosh_notification_get_body (notification);
++  const char *urgency;
++
++  body = markup ? tl_markup_to_plain (markup) : NULL;
++  if (gm_str_is_null_or_empty (summary) && gm_str_is_null_or_empty (body))
++    return;
++
++  switch (phosh_notification_get_urgency (notification)) {
++  case PHOSH_NOTIFICATION_URGENCY_LOW:
++    urgency = "low";
++    break;
++  case PHOSH_NOTIFICATION_URGENCY_CRITICAL:
++    urgency = "critical";
++    break;
++  case PHOSH_NOTIFICATION_URGENCY_NORMAL:
++  default:
++    urgency = "normal";
++  }
++
++  json_builder_begin_object (builder);
++  json_builder_set_member_name (builder, "id");
++  json_builder_add_string_value (builder, key);
++  if (!gm_str_is_null_or_empty (summary)) {
++    json_builder_set_member_name (builder, "title");
++    json_builder_add_string_value (builder, summary);
++  }
++  if (!gm_str_is_null_or_empty (body)) {
++    json_builder_set_member_name (builder, "body");
++    json_builder_add_string_value (builder, body);
++  }
++  json_builder_set_member_name (builder, "urgency");
++  json_builder_add_string_value (builder, urgency);
++  json_builder_set_member_name (builder, "action");
++  json_builder_add_string_value (builder, "open-display");
++  json_builder_end_object (builder);
++
++  g_debug ("Posting notification %s to Android", key);
++  tl_post_notify (builder);
++  g_signal_connect (notification, "closed", G_CALLBACK (on_tl_notification_closed), NULL);
++}
++#endif
++
++
+ static gboolean
+ handle_close_notification (PhoshDBusNotifications *skeleton,
+                            GDBusMethodInvocation  *invocation,
+@@ -880,6 +1040,10 @@
+   if (expire_timeout)
+     phosh_notification_expires (notification, expire_timeout);
+ 
++#if PHOSH_HAVE_LAUNCHERCTL
++  tl_bridge_notification (notification);
++#endif
++
+   g_signal_emit (self, signals[NEW_NOTIFICATION], 0, notification);
+ }
+ 
