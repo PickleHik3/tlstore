@@ -1,21 +1,13 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@example.invalid>
 Date: Mon, 26 Oct 2026 12:00:00 +0000
-Subject: [PATCH 02/16] Build for Bionic: libintl.h stand-in, memfd_create by
- system call, no exp10
+Subject: [PATCH] Build for Bionic: libintl.h stand-in, memfd_create by system
+ call, no exp10
 
 Termux has no libintl.h (glib's gi18n.h includes it), Bionic declares memfd_create () from
 API level 30 on and has no shm_open () at all, no exp10 () and no ulong. src/compat/libintl.h
 answers with the untranslated text (the same file phoc carries), as a global argument so that
 libgvc, gmobile and libfeedback see it too.
----
- meson.build           | 12 ++++++++++++
- src/backlight.c       |  2 +-
- src/compat/libintl.h  | 29 +++++++++++++++++++++++++++++
- src/system-prompter.c |  2 +-
- src/util.c            |  7 +++++++
- 5 files changed, 50 insertions(+), 2 deletions(-)
- create mode 100644 src/compat/libintl.h
 
 diff --git a/meson.build b/meson.build
 index 35e93a2..55ac269 100644

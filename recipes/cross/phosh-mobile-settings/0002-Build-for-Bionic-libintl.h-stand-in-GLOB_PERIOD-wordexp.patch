@@ -1,18 +1,20 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@example.invalid>
 Date: Mon, 26 Oct 2026 13:00:00 +0000
-Subject: [PATCH 02/14] Build for Bionic: libintl.h stand-in, no GLOB_PERIOD, wordexp from Termux
+Subject: [PATCH] Build for Bionic: libintl.h stand-in, no GLOB_PERIOD, wordexp
+ from Termux
 
 Termux has no libintl.h (glib's gi18n.h includes it): src/compat/libintl.h answers with the
 untranslated text (the same file phoc and phosh carry), as a global argument set before the
 first subproject so that libgvc and gmobile see it too. Termux's glob.h has no GLOB_PERIOD, so
 the symlink backend of the Configurable Tweaks defines it as 0 there, and wordexp () comes from
 Termux's libandroid-wordexp and glob () from libandroid-glob, which are linked when found.
----
 
+diff --git a/meson.build b/meson.build
+index 3e72e9a..94280cc 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -6,6 +6,13 @@
+@@ -6,6 +6,13 @@ project(
    default_options: ['warning_level=2', 'werror=false', 'c_std=gnu11'],
  )
  
@@ -26,7 +28,10 @@ Termux's libandroid-wordexp and glob () from libandroid-glob, which are linked w
  app_id = 'mobi.phosh.MobileSettings'
  
  prefix = get_option('prefix')
---- a/src/compat/libintl.h
+diff --git a/src/compat/libintl.h b/src/compat/libintl.h
+new file mode 100644
+index 0000000..4c52e27
+--- /dev/null
 +++ b/src/compat/libintl.h
 @@ -0,0 +1,29 @@
 +/*
@@ -58,6 +63,8 @@ Termux's libandroid-wordexp and glob () from libandroid-glob, which are linked w
 +static inline char *textdomain (const char *domain) { return (char *) domain; }
 +static inline char *bindtextdomain (const char *domain, const char *dir) { return (char *) dir; }
 +static inline char *bind_textdomain_codeset (const char *domain, const char *codeset) { return (char *) codeset; }
+diff --git a/src/conf-tweaks/backends/ms-tweaks-backend-symlink.c b/src/conf-tweaks/backends/ms-tweaks-backend-symlink.c
+index 54aa4e7..1a24e80 100644
 --- a/src/conf-tweaks/backends/ms-tweaks-backend-symlink.c
 +++ b/src/conf-tweaks/backends/ms-tweaks-backend-symlink.c
 @@ -17,6 +17,11 @@
@@ -72,9 +79,11 @@ Termux's libandroid-wordexp and glob () from libandroid-glob, which are linked w
  
  enum {
    PROP_0,
+diff --git a/src/meson.build b/src/meson.build
+index 085a0b9..6f6755e 100644
 --- a/src/meson.build
 +++ b/src/meson.build
-@@ -114,6 +114,9 @@
+@@ -114,6 +114,9 @@ mobile_settings_deps = [
    polkit_gobject_dep,
    wayland_client_dep,
    yaml_dep,

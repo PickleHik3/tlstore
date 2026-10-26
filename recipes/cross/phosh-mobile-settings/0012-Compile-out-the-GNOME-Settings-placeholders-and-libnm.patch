@@ -1,14 +1,16 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@example.invalid>
 Date: Mon, 26 Oct 2026 13:00:00 +0000
-Subject: [PATCH 12/14] Compile out the placeholders for GNOME Settings' panels, and libnm without them
+Subject: [PATCH] Compile out the placeholders for GNOME Settings' panels, and
+ libnm without them
 
 Sound, Wi-Fi, Network, Bluetooth, Cellular and Online Accounts are disabled placeholder
 pages that the panels taken from GNOME Settings (-Dgcc-panels=true) fill in. Without gcc-panels
 they have no panel behind them, so they are not in the window. ms-cc-panels.c includes
 NetworkManager.h only with gcc-panels, as libnm is needed only then.
----
 
+diff --git a/src/ms-cc-panels.c b/src/ms-cc-panels.c
+index 2df15a4..76c0c4f 100644
 --- a/src/ms-cc-panels.c
 +++ b/src/ms-cc-panels.c
 @@ -14,7 +14,9 @@
@@ -21,6 +23,8 @@ NetworkManager.h only with gcc-panels, as libnm is needed only then.
  #include <adwaita.h>
  
  #include <glib/gi18n.h>
+diff --git a/src/ui/ms-window.ui b/src/ui/ms-window.ui
+index 48ea886..8425d4a 100644
 --- a/src/ui/ms-window.ui
 +++ b/src/ui/ms-window.ui
 @@ -349,6 +349,7 @@

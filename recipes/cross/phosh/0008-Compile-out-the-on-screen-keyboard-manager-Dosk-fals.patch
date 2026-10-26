@@ -1,13 +1,9 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@example.invalid>
 Date: Mon, 26 Oct 2026 12:00:00 +0000
-Subject: [PATCH 08/16] Compile out the on-screen keyboard manager: -Dosk=false
+Subject: [PATCH] Compile out the on-screen keyboard manager: -Dosk=false
 
 No sm.puri.OSK0 manager. The home bar has no keyboard to toggle.
----
- src/home.c  | 17 ++++++++++++++++-
- src/shell.c | 18 +++++++++++++++---
- 2 files changed, 31 insertions(+), 4 deletions(-)
 
 diff --git a/src/home.c b/src/home.c
 index 9282179..74d85b7 100644

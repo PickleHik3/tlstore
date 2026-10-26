@@ -1,15 +1,9 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@example.invalid>
 Date: Mon, 26 Oct 2026 12:00:00 +0000
-Subject: [PATCH 12/16] Compile out VPN: -Dvpn=false
+Subject: [PATCH] Compile out VPN: -Dvpn=false
 
 No VPN manager, tile or status icon (NetworkManager's).
----
- src/quick-settings.c     | 4 ++++
- src/shell.c              | 4 ++++
- src/ui/quick-settings.ui | 8 ++++++++
- src/ui/top-panel.ui      | 2 ++
- 4 files changed, 18 insertions(+)
 
 diff --git a/src/quick-settings.c b/src/quick-settings.c
 index 3b7b2dd..73e7ac4 100644

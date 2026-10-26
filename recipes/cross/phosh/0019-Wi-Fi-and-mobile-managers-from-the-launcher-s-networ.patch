@@ -1,8 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@example.invalid>
 Date: Mon, 26 Oct 2026 12:00:00 +0000
-Subject: [PATCH 19/23] Wi-Fi and mobile managers: from the launcher's network
- events
+Subject: [PATCH] Wi-Fi and mobile managers: from the launcher's network events
 
 With -Dlauncherctl, wifi-manager-tl.c (PhoshWifiManager) and PhoshWWanTl (the PhoshWWan
 implementation the shell picks) show the watch stream's network event: Wi-Fi on or off,
@@ -13,18 +12,6 @@ not present, like the managers of a build without a backend, and their tiles sta
 
 wwan-manager-none.c's get_data_enabled and has_data now ask the object's property, which is
 FALSE for the base class and the launcher's value for PhoshWWanTl, which overrides it.
----
- src/meson.build              |   3 +
- src/shell.c                  |   7 +
- src/wifi-manager-tl.c        | 299 ++++++++++++++++++++++++++++++++++
- src/wwan/meson.build         |   5 +
- src/wwan/phosh-wwan-tl.c     | 306 +++++++++++++++++++++++++++++++++++
- src/wwan/phosh-wwan-tl.h     |  20 +++
- src/wwan/wwan-manager-none.c |  11 +-
- 7 files changed, 649 insertions(+), 2 deletions(-)
- create mode 100644 src/wifi-manager-tl.c
- create mode 100644 src/wwan/phosh-wwan-tl.c
- create mode 100644 src/wwan/phosh-wwan-tl.h
 
 diff --git a/src/meson.build b/src/meson.build
 index 4795073..b1b66a0 100644

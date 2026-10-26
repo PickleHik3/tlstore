@@ -1,12 +1,13 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@example.invalid>
 Date: Mon, 26 Oct 2026 13:00:00 +0000
-Subject: [PATCH 08/14] Compile out the on screen keyboard panel (-Dosk-panel=false)
+Subject: [PATCH] Compile out the on screen keyboard panel (-Dosk-panel=false)
 
 phosh is built without the OSK manager (recipes/cross/phosh/0008), and the keyboard is
 Android's. The panel's shortcut dialog and completer information go with it.
----
 
+diff --git a/src/mobile-settings.gresource.xml b/src/mobile-settings.gresource.xml
+index 4c9f627..2565c7e 100644
 --- a/src/mobile-settings.gresource.xml
 +++ b/src/mobile-settings.gresource.xml
 @@ -22,8 +22,12 @@
@@ -22,6 +23,8 @@ Android's. The panel's shortcut dialog and completer information go with it.
      <file>ui/ms-overview-panel.ui</file>
      <file>ui/ms-panel-switcher.ui</file>
      <file>ui/ms-plugin-row.ui</file>
+diff --git a/src/ms-main.c b/src/ms-main.c
+index 59728e3..14890bc 100644
 --- a/src/ms-main.c
 +++ b/src/ms-main.c
 @@ -26,7 +26,9 @@
@@ -34,7 +37,7 @@ Android's. The panel's shortcut dialog and completer information go with it.
  #include "ms-overview-panel.h"
  #include "ms-sensor-panel.h"
  #include "ms-topbar-panel.h"
-@@ -52,7 +54,9 @@
+@@ -52,7 +54,9 @@ ms_init_types (void)
  #if MOBILE_SETTINGS_HAVE_LOCKSCREEN_PANEL
    g_type_ensure (MS_TYPE_LOCKSCREEN_PANEL);
  #endif
@@ -44,6 +47,8 @@ Android's. The panel's shortcut dialog and completer information go with it.
    g_type_ensure (MS_TYPE_OVERVIEW_PANEL);
    g_type_ensure (MS_TYPE_SENSOR_PANEL);
    g_type_ensure (MS_TYPE_TOPBAR_PANEL);
+diff --git a/src/ui/ms-window.ui b/src/ui/ms-window.ui
+index 21b35f6..5227692 100644
 --- a/src/ui/ms-window.ui
 +++ b/src/ui/ms-window.ui
 @@ -232,6 +232,7 @@

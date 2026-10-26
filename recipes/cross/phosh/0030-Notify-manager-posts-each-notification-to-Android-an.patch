@@ -1,7 +1,8 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@example.invalid>
 Date: Mon, 26 Oct 2026 12:00:00 +0000
-Subject: [PATCH 30/31] Notify-manager: posts each notification to Android and withdraws it on close
+Subject: [PATCH] Notify-manager: posts each notification to Android and
+ withdraws it on close
 
 With -Dlauncherctl phosh stays the notification server, and every notification it accepts is also
 posted through the shared client (tl-launcherctl) with POST /v1/notify: id "phosh-<phosh's id>",
@@ -13,10 +14,9 @@ Android one. A notification with neither summary nor body is not posted.
 
 Without a launcher (no endpoint file) the post fails quietly: a debug line per notification and
 one g_message the first time. Nothing is posted by a build without -Dlauncherctl.
----
- src/notifications/notify-manager.c | 164 +-
- 1 file changed, 164 insertions(+), 0 deletions(-)
 
+diff --git a/src/notifications/notify-manager.c b/src/notifications/notify-manager.c
+index 91db7b2..87a1a98 100644
 --- a/src/notifications/notify-manager.c
 +++ b/src/notifications/notify-manager.c
 @@ -22,6 +22,11 @@
@@ -31,7 +31,7 @@ one g_message the first time. Nothing is posted by a build without -Dlauncherctl
  
  #define NOTIFICATIONS_KEY_APP_CHILDREN "application-children"
  
-@@ -84,6 +89,161 @@
+@@ -84,6 +89,161 @@ G_DEFINE_TYPE_WITH_CODE (PhoshNotifyManager,
                                                  phosh_notify_manager_notify_iface_init));
  
  
@@ -193,7 +193,7 @@ one g_message the first time. Nothing is posted by a build without -Dlauncherctl
  static gboolean
  handle_close_notification (PhoshDBusNotifications *skeleton,
                             GDBusMethodInvocation  *invocation,
-@@ -880,6 +1040,10 @@
+@@ -880,6 +1040,10 @@ phosh_notify_manager_add_notification (PhoshNotifyManager *self,
    if (expire_timeout)
      phosh_notification_expires (notification, expire_timeout);
  

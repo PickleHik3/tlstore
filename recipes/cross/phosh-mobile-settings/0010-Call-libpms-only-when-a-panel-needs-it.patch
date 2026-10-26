@@ -1,12 +1,13 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@example.invalid>
 Date: Mon, 26 Oct 2026 13:00:00 +0000
-Subject: [PATCH 10/14] Call libpms only when a panel needs it
+Subject: [PATCH] Call libpms only when a panel needs it
 
 libpms is the library the language, OSK and OS update panels share. When all three are off it
 is not built, and main () does not initialise it.
----
 
+diff --git a/src/main.c b/src/main.c
+index 5aac79e..28679c0 100644
 --- a/src/main.c
 +++ b/src/main.c
 @@ -12,7 +12,9 @@
@@ -19,7 +20,7 @@ is not built, and main () does not initialise it.
  
  #include <glib-unix.h>
  
-@@ -34,8 +36,10 @@
+@@ -34,8 +36,10 @@ main (int argc, char *argv[])
    g_autoptr (GError) err = NULL;
    int ret;
  

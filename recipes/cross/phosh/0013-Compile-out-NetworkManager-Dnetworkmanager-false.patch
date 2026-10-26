@@ -1,24 +1,13 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@example.invalid>
 Date: Mon, 26 Oct 2026 12:00:00 +0000
-Subject: [PATCH 13/16] Compile out NetworkManager: -Dnetworkmanager=false
+Subject: [PATCH] Compile out NetworkManager: -Dnetworkmanager=false
 
 No libnm: no network authentication agent, connectivity manager or Wi-Fi network list, and the
 Wi-Fi manager and the WWAN manager's base class are the ones in wifi-manager-none.c and
 wwan-manager-none.c. They have no hardware to report, which is what the NetworkManager ones
 say when the daemon is not on the bus, so the Wi-Fi and mobile data tiles stay insensitive and
 the status icons stay hidden.
----
- src/quick-settings.c         |   4 +-
- src/shell.c                  |  10 ++
- src/ui/quick-settings.ui     |   2 +
- src/ui/top-panel.ui          |   1 +
- src/wifi-manager-none.c      | 179 +++++++++++++++++++++++++++++++++++
- src/wifi-manager.h           |  12 ++-
- src/wwan/wwan-manager-none.c | 154 ++++++++++++++++++++++++++++++
- 7 files changed, 359 insertions(+), 3 deletions(-)
- create mode 100644 src/wifi-manager-none.c
- create mode 100644 src/wwan/wwan-manager-none.c
 
 diff --git a/src/quick-settings.c b/src/quick-settings.c
 index 73e7ac4..6372cec 100644

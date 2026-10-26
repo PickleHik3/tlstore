@@ -1,16 +1,17 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@example.invalid>
 Date: Mon, 26 Oct 2026 13:00:00 +0000
-Subject: [PATCH 03/14] Look for libfeedback in ../lib of the binary
+Subject: [PATCH] Look for libfeedback in ../lib of the binary
 
 phosh's feedbackd subproject builds libfeedback as a shared library whatever default_library
 says, and the archive has it at lib/libfeedback-0.0.so. The archive has bin/phosh-mobile-settings,
 so the binary looks one directory up.
----
 
+diff --git a/src/meson.build b/src/meson.build
+index 6f6755e..8978a6f 100644
 --- a/src/meson.build
 +++ b/src/meson.build
-@@ -213,6 +213,9 @@
+@@ -213,6 +213,9 @@ pms = executable(
    install: true,
    link_with: cc_panels,
    dependencies: [libms_dep, libgcc_dep],

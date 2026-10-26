@@ -1,5 +1,8 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@users.noreply.github.com>
-Subject: [PATCH] wlroots: the keymap shm file is a sealed memfd on Android, and phoc survives a failed keymap
+Date: Mon, 26 Oct 2026 23:52:06 +0300
+Subject: [PATCH] wlroots: the keymap shm file is a sealed memfd on Android,
+ and phoc survives a failed keymap
 
 wlroots' read-only twin of the keymap file re-opened the memfd through /proc/self/fd, which
 SELinux denies to app processes (EACCES); wlr_keyboard_set_keymap() then failed, and phoc
@@ -8,10 +11,12 @@ a dup of a sealable memfd, sealed (shrink, grow, write) by the callers after the
 data (wlroots patch file tl/0005). phoc's keyboard_keysyms_raw() returns no keysyms when the
 wlr_keyboard has no keymap, and set_xkb_keymap()/set_fallback_keymap() log a failed
 wlr_keyboard_set_keymap() instead of ignoring it.
----
+
+diff --git a/src/keyboard.c b/src/keyboard.c
+index 7f63fa3..f40223d 100644
 --- a/src/keyboard.c
 +++ b/src/keyboard.c
-@@ -357,6 +357,12 @@
+@@ -357,6 +357,12 @@ keyboard_keysyms_raw (PhocKeyboard        *self,
  
    *modifiers = wlr_keyboard_get_modifiers (wlr_keyboard);
  
@@ -24,7 +29,7 @@ wlr_keyboard_set_keymap() instead of ignoring it.
    xkb_layout_index_t layout_index = xkb_state_key_get_layout (wlr_keyboard->xkb_state,
                                                                keycode);
    return xkb_keymap_key_get_syms_by_level (wlr_keyboard->keymap,
-@@ -489,7 +495,8 @@
+@@ -489,7 +495,8 @@ set_fallback_keymap (PhocKeyboard *self)
                                              XKB_KEYMAP_COMPILE_NO_FLAGS);
    xkb_context_unref (context);
  
@@ -34,7 +39,7 @@ wlr_keyboard_set_keymap() instead of ignoring it.
  }
  
  
-@@ -531,7 +538,8 @@
+@@ -531,7 +538,8 @@ set_xkb_keymap (PhocKeyboard *self, const char *layout, const char *variant, con
      return;
    }
  
@@ -44,6 +49,9 @@ wlr_keyboard_set_keymap() instead of ignoring it.
  }
  
  
+diff --git a/subprojects/packagefiles/wlroots/tl/0005-bionic-sealed-memfd-pair.patch b/subprojects/packagefiles/wlroots/tl/0005-bionic-sealed-memfd-pair.patch
+new file mode 100644
+index 0000000..3cc2016
 --- /dev/null
 +++ b/subprojects/packagefiles/wlroots/tl/0005-bionic-sealed-memfd-pair.patch
 @@ -0,0 +1,158 @@
@@ -205,9 +213,11 @@ wlr_keyboard_set_keymap() instead of ignoring it.
 ++	return true;
 ++#endif
 ++}
+diff --git a/subprojects/wlroots.wrap b/subprojects/wlroots.wrap
+index 7c1076d..d18baf8 100644
 --- a/subprojects/wlroots.wrap
 +++ b/subprojects/wlroots.wrap
-@@ -14,4 +14,5 @@
+@@ -14,4 +14,5 @@ diff_files =
    wlroots/tl/0001-bionic-no-librt.patch,
    wlroots/tl/0002-bionic-no-shm-open.patch,
    wlroots/tl/0003-x11-follow-root-window-size.patch,

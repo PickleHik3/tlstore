@@ -1,4 +1,4 @@
-From 3d3d7f46fe6557c2e8e204366864d273be09e50e Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@users.noreply.github.com>
 Date: Mon, 26 Oct 2026 11:32:56 +0300
 Subject: [PATCH] output: an X11 output's scale follows its width
@@ -8,9 +8,6 @@ width divided by 360, rounded down, at least 1, computed when the output is crea
 when the backend asks for a new mode (the root window was resized), unless the output config
 sets a scale. PHOSH_SCALE (an integer or a decimal from 1 to 10) overrides it; that is the hook
 for the settings app.
----
- src/output.c | 62 ++++++++++++++++++++++++++++++++++++++++++++++++++++
- 1 file changed, 62 insertions(+)
 
 diff --git a/src/output.c b/src/output.c
 index d95d6db..c91ad42 100644
@@ -122,6 +119,3 @@ index d95d6db..c91ad42 100644
      if (output_config->scale)
        scale = output_config->scale;
      else
--- 
-2.56.0
-

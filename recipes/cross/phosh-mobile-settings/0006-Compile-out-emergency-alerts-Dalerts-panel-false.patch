@@ -1,12 +1,13 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@example.invalid>
 Date: Mon, 26 Oct 2026 13:00:00 +0000
-Subject: [PATCH 06/14] Compile out the emergency alerts panel (-Dalerts-panel=false)
+Subject: [PATCH] Compile out the emergency alerts panel (-Dalerts-panel=false)
 
 The panel talks to cbd, the cell broadcast daemon, with libcellbroadcast (a meson
 subproject): there is no modem to receive from.
----
 
+diff --git a/src/mobile-settings.gresource.xml b/src/mobile-settings.gresource.xml
+index 7fdf0e1..72712ed 100644
 --- a/src/mobile-settings.gresource.xml
 +++ b/src/mobile-settings.gresource.xml
 @@ -3,9 +3,13 @@
@@ -23,6 +24,8 @@ subproject): there is no modem to receive from.
      <file>ui/ms-compositor-panel.ui</file>
      <file>ui/ms-convergence-panel.ui</file>
      <file>ui/ms-features-panel.ui</file>
+diff --git a/src/ms-main.c b/src/ms-main.c
+index 9505806..84e9b99 100644
 --- a/src/ms-main.c
 +++ b/src/ms-main.c
 @@ -13,7 +13,9 @@
@@ -35,7 +38,7 @@ subproject): there is no modem to receive from.
  #include "ms-compositor-panel.h"
  #include "ms-convergence-panel.h"
  #include "ms-features-panel.h"
-@@ -35,7 +37,9 @@
+@@ -35,7 +37,9 @@ static void
  ms_init_types (void)
  {
    g_type_ensure (MS_TYPE_ABOUT_PANEL);
@@ -45,6 +48,8 @@ subproject): there is no modem to receive from.
    g_type_ensure (MS_TYPE_COMPOSITOR_PANEL);
    g_type_ensure (MS_TYPE_CONVERGENCE_PANEL);
    g_type_ensure (MS_TYPE_FEATURES_PANEL);
+diff --git a/src/ui/ms-window.ui b/src/ui/ms-window.ui
+index fbbd63d..a7267e1 100644
 --- a/src/ui/ms-window.ui
 +++ b/src/ui/ms-window.ui
 @@ -252,6 +252,7 @@

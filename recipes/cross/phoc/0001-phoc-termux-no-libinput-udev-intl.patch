@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@users.noreply.github.com>
 Date: Mon, 26 Oct 2026 11:13:49 +0300
-Subject: [PATCH 1/2] Build for Termux: no libinput, libudev or libintl, no
+Subject: [PATCH] Build for Termux: no libinput, libudev or libintl, no
  examples or tools
 
 phoc's X11 backend gets keyboard, pointer and touch as X11 events, so no input device is a
@@ -11,16 +11,6 @@ and defines what phoc still names: the libinput_device_* and udev calls (never r
 wlr_input_device_is_libinput() is false), the wlroots DRM and session entry points, and
 no-translation gettext. pidfd_open is a function Bionic declares only from API 31, so the pidfd
 code is compiled in only where it is declared. The examples and tools are not built.
----
- meson.build                |  9 ++---
- src/compat/libinput-stub.c | 48 ++++++++++++++++++++++
- src/compat/libinput.h      | 82 ++++++++++++++++++++++++++++++++++++++
- src/compat/libintl.h       | 23 +++++++++++
- src/meson.build            |  3 +-
- 5 files changed, 157 insertions(+), 8 deletions(-)
- create mode 100644 src/compat/libinput-stub.c
- create mode 100644 src/compat/libinput.h
- create mode 100644 src/compat/libintl.h
 
 diff --git a/meson.build b/meson.build
 index 380bad8..dde6134 100644
@@ -263,6 +253,3 @@ index 928c451..c991831 100644
    wayland_server,
    wlroots,
    xkbcommon,
--- 
-2.56.0
-

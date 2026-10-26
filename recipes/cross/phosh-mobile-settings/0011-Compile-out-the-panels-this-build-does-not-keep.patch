@@ -1,13 +1,15 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@example.invalid>
 Date: Mon, 26 Oct 2026 13:00:00 +0000
-Subject: [PATCH 11/14] Compile out the welcome, convergence, sensors, features and about panels
+Subject: [PATCH] Compile out the welcome, convergence, sensors, features and
+ about panels
 
 These panels need no library Termux lacks, but they are not among the four this build keeps
 (overview, quick settings, compositor, feedback), and a settings app of four pages has no use for
 a welcome page.
----
 
+diff --git a/src/mobile-settings.gresource.xml b/src/mobile-settings.gresource.xml
+index a055c53..012938b 100644
 --- a/src/mobile-settings.gresource.xml
 +++ b/src/mobile-settings.gresource.xml
 @@ -2,7 +2,9 @@
@@ -52,6 +54,8 @@ a welcome page.
      <file>ui/ms-window.ui</file>
      <file alias="shortcuts-dialog.ui">ui/shortcuts-dialog.ui</file>
      <file alias="metainfo.xml">../data/mobi.phosh.MobileSettings.metainfo.xml.in</file>
+diff --git a/src/ms-main.c b/src/ms-main.c
+index fce075a..fd4e77b 100644
 --- a/src/ms-main.c
 +++ b/src/ms-main.c
 @@ -12,13 +12,19 @@
@@ -110,7 +114,7 @@ a welcome page.
    g_type_ensure (MS_TYPE_FEEDBACK_PANEL);
  #if MOBILE_SETTINGS_HAVE_LANG_PANEL
    g_type_ensure (MS_TYPE_LANG_PANEL);
-@@ -60,12 +76,16 @@
+@@ -60,12 +76,16 @@ ms_init_types (void)
    g_type_ensure (MS_TYPE_OSK_PANEL);
  #endif
    g_type_ensure (MS_TYPE_OVERVIEW_PANEL);
@@ -127,6 +131,8 @@ a welcome page.
  }
  
  /**
+diff --git a/src/ui/ms-window.ui b/src/ui/ms-window.ui
+index 1554fd9..48ea886 100644
 --- a/src/ui/ms-window.ui
 +++ b/src/ui/ms-window.ui
 @@ -95,6 +95,7 @@

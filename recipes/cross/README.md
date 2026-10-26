@@ -390,15 +390,14 @@ what the launcher does not ship (`lockscreen`, `polkit`, `logind`, `osk`, `eds`,
 `bluetooth`, `location`, `vpn`, `hotspot`, `networkmanager`, `modemmanager`, `gudev`, all on in
 upstream's build; the build turns them all off, plus upstream's `searchd` and the plugins). Termux
 has no libnm, mm-glib, libgudev, polkit, libsystemd/elogind, PAM, evolution-data-server,
-gnome-bluetooth or libcall-ui: `phosh-deps.txt` lists what it does have. The patch files are not
-all `git format-patch` output, whatever their headers look like: most were exported from commits on
-the tag (`git format-patch --zero-commit --no-signature`), but some were assembled by hand in the
-same layout, without `diff --git`/`index` lines and with `[PATCH n/m]` counters that do not agree
-across the series (phosh 0030 to 0034, phoc 0005 to 0007, and all of phosh-mobile-settings'). What
-holds for every one of them is what the build relies on: they apply with `patch -p1`, in file-name
-order, to the pinned tarball. To move a series to a new tag, apply it to the old tag with
-`patch -p1` and commit each file (`git am` refuses the hand-made ones), `git rebase --onto <new
-tag>`, and export again. `data/90_tl.gschema.override` (app-filter-mode `[]`, no screensaver lock,
+gnome-bluetooth or libcall-ui: `phosh-deps.txt` lists what it does have. Every patch file is `git format-patch`
+output (`--zero-commit --no-signature`, one commit per file, exported from the tag with the
+earlier files applied), so the three series are plain `git am` material; the build applies them
+with `patch -p1` in file-name order to the pinned tarball. To move a series to a new tag:
+`git am recipes/cross/<tree>/*.patch` on the old tag, `git rebase --onto <new tag>`, then
+re-export each commit with `git format-patch -1 <sha> --zero-commit --no-signature --no-stat
+--stdout` into its original file name (the names are referenced from the tickets and this file).
+`data/90_tl.gschema.override` (app-filter-mode `[]`, no screensaver lock,
 no screen keyboard) is checked by the build against the sysroot's `org.gnome.desktop` schemas;
 `phosh-session` compiles the archive's schemas with `$PREFIX`'s `org.gnome.desktop` ones into its
 own `GSETTINGS_SCHEMA_DIR` at every start, so those overrides apply on the phone.

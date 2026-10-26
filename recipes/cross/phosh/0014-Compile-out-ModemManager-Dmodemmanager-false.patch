@@ -1,12 +1,9 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@example.invalid>
 Date: Mon, 26 Oct 2026 12:00:00 +0000
-Subject: [PATCH 14/16] Compile out ModemManager: -Dmodemmanager=false
+Subject: [PATCH] Compile out ModemManager: -Dmodemmanager=false
 
 No mm-glib: the oFono backend is the one that is left.
----
- src/shell.c | 12 +++++++++++-
- 1 file changed, 11 insertions(+), 1 deletion(-)
 
 diff --git a/src/shell.c b/src/shell.c
 index f59eb13..bb26377 100644

@@ -1,12 +1,13 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@example.invalid>
 Date: Mon, 26 Oct 2026 13:00:00 +0000
-Subject: [PATCH 05/14] Compile out the language panel (-Dlang-panel=false)
+Subject: [PATCH] Compile out the language panel (-Dlang-panel=false)
 
 The language panel needs accountsservice (the user's language) and polkit (set-locale), which
 Termux does not have.
----
 
+diff --git a/src/mobile-settings.gresource.xml b/src/mobile-settings.gresource.xml
+index 2e6eac5..7fdf0e1 100644
 --- a/src/mobile-settings.gresource.xml
 +++ b/src/mobile-settings.gresource.xml
 @@ -12,7 +12,9 @@
@@ -19,6 +20,8 @@ Termux does not have.
      <file>ui/ms-lockscreen-panel.ui</file>
      <file>ui/ms-osk-add-shortcut-dialog.ui</file>
      <file>ui/ms-osk-panel.ui</file>
+diff --git a/src/ms-main.c b/src/ms-main.c
+index 50c7993..9505806 100644
 --- a/src/ms-main.c
 +++ b/src/ms-main.c
 @@ -18,7 +18,9 @@
@@ -31,7 +34,7 @@ Termux does not have.
  #include "ms-lockscreen-panel.h"
  #include "ms-osk-panel.h"
  #include "ms-overview-panel.h"
-@@ -38,7 +40,9 @@
+@@ -38,7 +40,9 @@ ms_init_types (void)
    g_type_ensure (MS_TYPE_CONVERGENCE_PANEL);
    g_type_ensure (MS_TYPE_FEATURES_PANEL);
    g_type_ensure (MS_TYPE_FEEDBACK_PANEL);
@@ -41,6 +44,8 @@ Termux does not have.
    g_type_ensure (MS_TYPE_LOCKSCREEN_PANEL);
    g_type_ensure (MS_TYPE_OSK_PANEL);
    g_type_ensure (MS_TYPE_OVERVIEW_PANEL);
+diff --git a/src/ui/ms-window.ui b/src/ui/ms-window.ui
+index 8afa8a0..fbbd63d 100644
 --- a/src/ui/ms-window.ui
 +++ b/src/ui/ms-window.ui
 @@ -313,6 +313,7 @@

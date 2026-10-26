@@ -1,8 +1,8 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@example.invalid>
 Date: Mon, 26 Oct 2026 12:00:00 +0000
-Subject: [PATCH 17/23] tl-launcherctl: the client of the launcher's HTTP API,
- and -Dlauncherctl
+Subject: [PATCH] tl-launcherctl: the client of the launcher's HTTP API, and
+ -Dlauncherctl
 
 New feature option launcherctl (default auto). It is on when networkmanager and modemmanager are
 both off, which is this build, and an error when it is enabled with either of them on: the
@@ -33,15 +33,6 @@ API (src/tl-launcherctl.h; also for the notify manager, which POSTs /v1/notify):
 A POST finishes with an error when there is no endpoint or the launcher answers anything but 2xx,
 so a notify manager closes a notification with
   tl_launcherctl_post_async (client, "/v1/notify", "{\"close\":\"<id>\"}", ...).
----
- meson.build          |  19 +-
- meson.options        |   4 +
- src/meson.build      |   6 +
- src/tl-launcherctl.c | 641 +++++++++++++++++++++++++++++++++++++++++++
- src/tl-launcherctl.h |  49 ++++
- 5 files changed, 718 insertions(+), 1 deletion(-)
- create mode 100644 src/tl-launcherctl.c
- create mode 100644 src/tl-launcherctl.h
 
 diff --git a/meson.build b/meson.build
 index 8bb8eff..ced28ac 100644

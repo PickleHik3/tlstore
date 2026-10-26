@@ -1,17 +1,14 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@example.invalid>
 Date: Mon, 26 Oct 2026 12:00:00 +0000
-Subject: [PATCH 22/23] Long-press of the Wi-Fi, mobile and battery quick
- settings: Android's Settings
+Subject: [PATCH] Long-press of the Wi-Fi, mobile and battery quick settings:
+ Android's Settings
 
 With -Dlauncherctl the panels those quick settings name (wifi and wwan of launch-mobile-panel,
 power of launch-panel) are Android's Settings pages: open_settings_panel POSTs
 /v1/settings/open {"page":"wifi"|"mobile"|"battery"} and folds the top panel when the launcher
 has answered. Other panels open as before. The torch quick setting's long-press also names the
 power panel, so it opens Android's battery page.
----
- src/top-panel.c | 56 +++++++++++++++++++++++++++++++++++++++++++++++++
- 1 file changed, 56 insertions(+)
 
 diff --git a/src/top-panel.c b/src/top-panel.c
 index f690379..8307f28 100644

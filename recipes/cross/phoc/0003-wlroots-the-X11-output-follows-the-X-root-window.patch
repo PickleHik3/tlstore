@@ -1,4 +1,4 @@
-From 7f04026bc67ade8623ea0ff5301cb5a43c95f57d Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@users.noreply.github.com>
 Date: Mon, 26 Oct 2026 11:32:56 +0300
 Subject: [PATCH] wlroots: the X11 output follows the X root window
@@ -9,11 +9,6 @@ ConfigureNotify (sent by the X server when RandR changes the screen size) resize
 window. The window's own ConfigureNotify then takes the existing path, which sends the
 compositor a request_state with the new mode. Carried as a wlroots patch file that
 wlroots.wrap applies. No polling and no timers.
----
- .../tl/0003-x11-follow-root-window-size.patch | 103 ++++++++++++++++++
- subprojects/wlroots.wrap                      |   3 +-
- 2 files changed, 105 insertions(+), 1 deletion(-)
- create mode 100644 subprojects/packagefiles/wlroots/tl/0003-x11-follow-root-window-size.patch
 
 diff --git a/subprojects/packagefiles/wlroots/tl/0003-x11-follow-root-window-size.patch b/subprojects/packagefiles/wlroots/tl/0003-x11-follow-root-window-size.patch
 new file mode 100644
@@ -135,6 +130,3 @@ index 8192c1b..d642031 100644
 -  wlroots/tl/0002-bionic-no-shm-open.patch
 +  wlroots/tl/0002-bionic-no-shm-open.patch,
 +  wlroots/tl/0003-x11-follow-root-window-size.patch
--- 
-2.56.0
-

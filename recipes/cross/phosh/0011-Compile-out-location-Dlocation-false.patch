@@ -1,13 +1,9 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@example.invalid>
 Date: Mon, 26 Oct 2026 12:00:00 +0000
-Subject: [PATCH 11/16] Compile out location: -Dlocation=false
+Subject: [PATCH] Compile out location: -Dlocation=false
 
 No GeoClue manager, status icon or quick setting.
----
- src/shell.c         | 10 ++++++++--
- src/ui/top-panel.ui |  4 ++++
- 2 files changed, 12 insertions(+), 2 deletions(-)
 
 diff --git a/src/shell.c b/src/shell.c
 index d1d6312..e3fd6e9 100644

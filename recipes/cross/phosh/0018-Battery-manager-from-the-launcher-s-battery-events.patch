@@ -1,18 +1,13 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@example.invalid>
 Date: Mon, 26 Oct 2026 12:00:00 +0000
-Subject: [PATCH 18/23] Battery manager: from the launcher's battery events
+Subject: [PATCH] Battery manager: from the launcher's battery events
 
 With -Dlauncherctl the battery manager (battery-manager-tl.c) takes the percentage and the
 status (CHARGING, FULL, ...) of the watch stream's battery event instead of UPower's display
 device, with the same properties (present, icon-name, percent) and the same icons. It is
 present while the stream is open and has delivered a battery event. battery-manager.c is not
 built then, and upower-glib is not a dependency.
----
- src/battery-manager-tl.c | 228 +++++++++++++++++++++++++++++++++++++++
- src/meson.build          |   5 +-
- 2 files changed, 231 insertions(+), 2 deletions(-)
- create mode 100644 src/battery-manager-tl.c
 
 diff --git a/src/battery-manager-tl.c b/src/battery-manager-tl.c
 new file mode 100644

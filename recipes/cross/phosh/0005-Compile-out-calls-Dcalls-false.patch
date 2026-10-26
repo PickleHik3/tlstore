@@ -1,28 +1,11 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@example.invalid>
 Date: Mon, 26 Oct 2026 12:00:00 +0000
-Subject: [PATCH 05/16] Compile out calls: -Dcalls=false
+Subject: [PATCH] Compile out calls: -Dcalls=false
 
 Calls, the call notification and UI, emergency calls and menu, cell broadcasts and the proximity
 fader. libcall-ui is not built: phosh used it for cui_call_format_duration () only, which is
 format-duration.h now.
----
- .../caffeine-quick-setting.c                  |  6 +--
- plugins/caffeine-quick-setting/interval-row.c |  4 +-
- plugins/caffeine-quick-setting/meson.build    |  2 +-
- .../prefs/caffeine-quick-setting-prefs.c      |  4 +-
- .../caffeine-quick-setting/prefs/meson.build  |  2 +-
- plugins/pomodoro-quick-setting/meson.build    |  2 +-
- .../pomodoro-quick-setting.c                  |  4 +-
- src/format-duration.h                         | 45 +++++++++++++++++++
- src/lockscreen-manager-priv.h                 | 10 ++++-
- src/lockscreen-manager.c                      | 25 +++++++++++
- src/media-player.c                            |  6 +--
- src/power-menu-manager.c                      | 10 +++++
- src/shell.c                                   | 30 ++++++++++++-
- src/ui/power-menu.ui                          |  2 +
- 14 files changed, 135 insertions(+), 17 deletions(-)
- create mode 100644 src/format-duration.h
 
 diff --git a/plugins/caffeine-quick-setting/caffeine-quick-setting.c b/plugins/caffeine-quick-setting/caffeine-quick-setting.c
 index e60845c..7a9dae4 100644

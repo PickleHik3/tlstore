@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@example.invalid>
 Date: Mon, 26 Oct 2026 13:00:00 +0000
-Subject: [PATCH 13/14] compositor panel: the display scale
+Subject: [PATCH] compositor panel: the display scale
 
 The panel gets a Display scale row: Automatic, 1x, 1.5x, 2x, 2.5x, 3x or 4x. It is a new
 gsettings key of mobi.phosh.MobileSettings, display-scale (a double, 0.0 is automatic, 1.0 to
@@ -9,8 +9,9 @@ gsettings key of mobi.phosh.MobileSettings, display-scale (a double, 0.0 is auto
 script that starts phoc turns the key into PHOSH_SCALE, which phoc reads when it starts
 (recipes/cross/phoc/0004): a change applies the next time the display starts. A scale in
 phoc.ini wins over both, as it does over PHOSH_SCALE.
----
 
+diff --git a/data/mobi.phosh.MobileSettings.gschema.xml b/data/mobi.phosh.MobileSettings.gschema.xml
+index b170bb8..21f6eae 100644
 --- a/data/mobi.phosh.MobileSettings.gschema.xml
 +++ b/data/mobi.phosh.MobileSettings.gschema.xml
 @@ -10,6 +10,21 @@
@@ -35,6 +36,8 @@ phoc.ini wins over both, as it does over PHOSH_SCALE.
      <key name="enable-conf-tweaks" type="b">
        <default>false</default>
        <summary>Whether to parse and display Configurable Tweaks</summary>
+diff --git a/src/ms-compositor-panel.c b/src/ms-compositor-panel.c
+index 49d34ce..f3af383 100644
 --- a/src/ms-compositor-panel.c
 +++ b/src/ms-compositor-panel.c
 @@ -15,15 +15,30 @@
@@ -68,7 +71,7 @@ phoc.ini wins over both, as it does over PHOSH_SCALE.
  
    GtkListBox        *running_apps_listbox;
    GListStore        *running_apps_rows;
-@@ -33,6 +48,38 @@
+@@ -33,6 +48,38 @@ struct _MsCompositorPanel {
  G_DEFINE_TYPE (MsCompositorPanel, ms_compositor_panel, MS_TYPE_PANEL)
  
  
@@ -107,7 +110,7 @@ phoc.ini wins over both, as it does over PHOSH_SCALE.
  static void
  add_application_row (MsCompositorPanel *self, const char *app_id)
  {
-@@ -114,6 +161,7 @@
+@@ -114,6 +161,7 @@ ms_compositor_panel_finalize (GObject *object)
    g_clear_object (&self->running_apps_rows);
    g_clear_object (&self->tracker);
    g_clear_object (&self->settings);
@@ -115,7 +118,7 @@ phoc.ini wins over both, as it does over PHOSH_SCALE.
  
    G_OBJECT_CLASS (ms_compositor_panel_parent_class)->finalize (object);
  }
-@@ -130,6 +178,7 @@
+@@ -130,6 +178,7 @@ ms_compositor_panel_class_init (MsCompositorPanelClass *klass)
    gtk_widget_class_set_template_from_resource (widget_class,
                                                 "/mobi/phosh/MobileSettings/ui/ms-compositor-panel.ui");
    gtk_widget_class_bind_template_child (widget_class, MsCompositorPanel, scale_to_fit_switch);
@@ -123,7 +126,7 @@ phoc.ini wins over both, as it does over PHOSH_SCALE.
    gtk_widget_class_bind_template_child (widget_class, MsCompositorPanel, running_apps_listbox);
  }
  
-@@ -154,6 +203,17 @@
+@@ -154,6 +203,17 @@ ms_compositor_panel_init (MsCompositorPanel *self)
                     "active",
                     G_SETTINGS_BIND_DEFAULT);
  
@@ -141,12 +144,16 @@ phoc.ini wins over both, as it does over PHOSH_SCALE.
    app = MS_APPLICATION (g_application_get_default ());
    g_signal_connect_swapped (app, "notify::toplevel-tracker",
                              G_CALLBACK (on_toplevel_tracker_changed), self);
+diff --git a/src/ui/ms-compositor-panel.ui b/src/ui/ms-compositor-panel.ui
+index fdd54cb..cbf001b 100644
 --- a/src/ui/ms-compositor-panel.ui
 +++ b/src/ui/ms-compositor-panel.ui
-@@ -8,6 +8,31 @@
+@@ -6,6 +6,31 @@
+       <object class="GtkScrolledWindow">
+         <child>
            <object class="AdwPreferencesPage">
-             <child>
-               <object class="AdwPreferencesGroup">
++            <child>
++              <object class="AdwPreferencesGroup">
 +                <property name="title" translatable="yes">Display scale</property>
 +                <property name="description" translatable="yes">How large everything is drawn. This applies the next time the display starts.</property>
 +                <child>
@@ -170,8 +177,6 @@ phoc.ini wins over both, as it does over PHOSH_SCALE.
 +                </child>
 +              </object>
 +            </child>
-+            <child>
-+              <object class="AdwPreferencesGroup">
+             <child>
+               <object class="AdwPreferencesGroup">
                  <property name="title" translatable="yes">Scaling down of running applications</property>
-                 <property name="description" translatable="yes">Only enable this for broken apps that don't fit the screen</property>
-                 <property name="sensitive" bind-source="scale_to_fit_switch" bind-property="active" bind-flags="sync-create|invert-boolean"/>

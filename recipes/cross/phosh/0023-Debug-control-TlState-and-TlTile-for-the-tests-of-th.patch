@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@example.invalid>
 Date: Mon, 26 Oct 2026 12:00:00 +0000
-Subject: [PATCH 23/23] Debug control: TlState and TlTile, for the tests of the
+Subject: [PATCH] Debug control: TlState and TlTile, for the tests of the
  launcherctl build
 
 mobi.phosh.Shell.DebugControl, the interface phosh always exports on the session bus for its log
@@ -16,12 +16,6 @@ domains, gets two methods the headless tests use:
                     long-press action)
 Both answer an error in a build without -Dlauncherctl. phosh_quick_setting_long_press() is the
 quick setting's long-press, public for this.
----
- src/dbus/mobi.phosh.Shell.DebugControl.xml |  25 +++
- src/debug-control.c                        | 237 +++++++++++++++++++++
- src/quick-setting.c                        |  15 ++
- src/quick-setting.h                        |   1 +
- 4 files changed, 278 insertions(+)
 
 diff --git a/src/dbus/mobi.phosh.Shell.DebugControl.xml b/src/dbus/mobi.phosh.Shell.DebugControl.xml
 index dfc033e..fe87dde 100644

@@ -1,19 +1,19 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@example.invalid>
 Date: Mon, 26 Oct 2026 12:00:00 +0000
-Subject: [PATCH 31/31] Notify-manager: a shell notification without phosh's desktop file
+Subject: [PATCH] Notify-manager: a shell notification without phosh's desktop
+ file
 
 phosh_notify_manager_add_shell_notification() returned 0 with a critical
 (G_IS_DESKTOP_APP_INFO (info)) when org.gnome.Shell.Phosh.desktop is not installed where
 GIO looks, as on the emulator after an app launch timed out, and the notification was lost.
 It now goes on without the app name and icon it would have taken from the desktop file.
----
- src/notifications/notify-manager.c | 9 +-
- 1 file changed, 6 insertions(+), 3 deletions(-)
 
+diff --git a/src/notifications/notify-manager.c b/src/notifications/notify-manager.c
+index 87a1a98..4c145ae 100644
 --- a/src/notifications/notify-manager.c
 +++ b/src/notifications/notify-manager.c
-@@ -1160,8 +1160,11 @@
+@@ -1160,8 +1160,11 @@ phosh_notify_manager_add_shell_notification (PhoshNotifyManager *self,
  {
    g_autoptr (GDesktopAppInfo) info = NULL;
  
@@ -26,7 +26,7 @@ It now goes on without the app name and icon it would have taken from the deskto
  
    if (!id) {
      id = phosh_notify_manager_get_notification_id (self);
-@@ -1170,13 +1173,13 @@
+@@ -1170,13 +1173,13 @@ phosh_notify_manager_add_shell_notification (PhoshNotifyManager *self,
  
    /* We don't just set the app_info but name and icon separately to
     * not overwrite values set by the caller */

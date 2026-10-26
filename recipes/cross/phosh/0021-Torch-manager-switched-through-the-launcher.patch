@@ -1,18 +1,13 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@example.invalid>
 Date: Mon, 26 Oct 2026 12:00:00 +0000
-Subject: [PATCH 21/23] Torch manager: switched through the launcher
+Subject: [PATCH] Torch manager: switched through the launcher
 
 With -Dlauncherctl the torch manager (torch-manager-tl.c) switches the torch with POST /v1/torch
 {"on":...} when the quick setting is clicked, and takes the state from the launcher's reply. The
 torch is present while the watch stream is open; the launcher reports no torch state on the
 stream, so the state is the last one set and the torch is off at start. No brightness scale
 (can-scale is FALSE). torch-manager.c, which needs libgudev and logind, is not built then.
----
- src/meson.build        |   4 +-
- src/torch-manager-tl.c | 350 +++++++++++++++++++++++++++++++++++++++++
- 2 files changed, 352 insertions(+), 2 deletions(-)
- create mode 100644 src/torch-manager-tl.c
 
 diff --git a/src/meson.build b/src/meson.build
 index 44ad349..986cac1 100644

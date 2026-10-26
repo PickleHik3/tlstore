@@ -1,18 +1,11 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@example.invalid>
 Date: Mon, 26 Oct 2026 12:00:00 +0000
-Subject: [PATCH 06/16] Compile out the lock screen: -Dlockscreen=false
+Subject: [PATCH] Compile out the lock screen: -Dlockscreen=false
 
 No lock screen, shields, keypad, PIN entry, authentication (PAM) or lock-screen plugins. The
 lockscreen manager stays as the object the rest of phosh asks, and never locks: phosh starts
 unlocked and stays so. The lock buttons of the top panel and the power menu are gone.
----
- src/lockscreen-manager.c | 39 +++++++++++++++++++++++++++++++++++++--
- src/shell.c              |  4 ++++
- src/top-panel.c          |  4 ++++
- src/ui/power-menu.ui     |  2 ++
- src/ui/top-panel.ui      |  2 ++
- 5 files changed, 49 insertions(+), 2 deletions(-)
 
 diff --git a/src/lockscreen-manager.c b/src/lockscreen-manager.c
 index 0ee3fa6..b4cfc08 100644

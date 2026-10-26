@@ -1,12 +1,9 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@example.invalid>
 Date: Mon, 26 Oct 2026 12:00:00 +0000
-Subject: [PATCH 07/16] Compile out the polkit agent: -Dpolkit=false
+Subject: [PATCH] Compile out the polkit agent: -Dpolkit=false
 
 No polkit authentication agent and prompt.
----
- src/shell.c | 8 ++++++++
- 1 file changed, 8 insertions(+)
 
 diff --git a/src/shell.c b/src/shell.c
 index 31afe52..c30f31d 100644

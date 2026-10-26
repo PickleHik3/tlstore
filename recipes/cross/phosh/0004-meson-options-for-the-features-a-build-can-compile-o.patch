@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@example.invalid>
 Date: Mon, 26 Oct 2026 12:00:00 +0000
-Subject: [PATCH 04/16] meson: options for the features a build can compile out
+Subject: [PATCH] meson: options for the features a build can compile out
 
 New options, all true, which is upstream's build: lockscreen, polkit, logind, osk, eds,
 calls, bluetooth, location, vpn, hotspot, networkmanager, modemmanager and gudev. A disabled
@@ -9,18 +9,6 @@ feature has no dependency, no source files and no plugins in the build, defines
 PHOSH_HAVE_<FEATURE> as 0 in phosh-config.h, and takes its objects out of the GtkBuilder files
 that name them (tools/tl-ui-filter, between '<!-- tl-if FEATURE -->' markers). The C guards
 follow, one commit per feature.
----
- meson.build          | 123 +++++++++++++++++++++++++++++++++++--------
- meson.options        |  54 +++++++++++++++++++
- plugins/meson.build  |  42 ++++++++++-----
- src/meson.build      | 118 +++++++++++++++++++++++++++--------------
- src/ui/meson.build   |  28 ++++++++++
- src/wwan/meson.build |  12 ++++-
- tools/meson.build    |   4 +-
- tools/tl-ui-filter   |  61 +++++++++++++++++++++
- 8 files changed, 364 insertions(+), 78 deletions(-)
- create mode 100644 src/ui/meson.build
- create mode 100755 tools/tl-ui-filter
 
 diff --git a/meson.build b/meson.build
 index 55ac269..8bb8eff 100644

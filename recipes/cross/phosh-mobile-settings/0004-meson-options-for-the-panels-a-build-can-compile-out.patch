@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@example.invalid>
 Date: Mon, 26 Oct 2026 13:00:00 +0000
-Subject: [PATCH 04/14] meson: options for the panels a build can compile out
+Subject: [PATCH] meson: options for the panels a build can compile out
 
 New options, all true, which is upstream's build: welcome-panel, lang-panel, alerts-panel,
 lockscreen-panel, osk-panel, convergence-panel, sensors-panel, features-panel, updates-panel
@@ -13,11 +13,12 @@ the GtkBuilder file and the resource file that name them (tools/tl-ui-filter, be
 '<!-- tl-if PANEL -->' markers). libnm is needed only with gcc-panels, which it was written
 for. The overview, quick settings (top bar), compositor and feedback panels are always built.
 The markers and C guards follow, one commit per panel.
----
 
+diff --git a/meson.build b/meson.build
+index 94280cc..b4811f5 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -37,7 +37,29 @@
+@@ -37,7 +37,29 @@ adw_ver = '1.9'
  adw_ver_str = 'ADW_VERSION_@0@'.format(adw_ver.replace('.', '_'))
  adw_ver_cmp = '>=@0@'.format(adw_ver)
  
@@ -48,7 +49,7 @@ The markers and C guards follow, one commit per panel.
  glib_dep = dependency('glib-2.0', version: glib_ver_cmp)
  gio_dep = dependency('gio-2.0', version: glib_ver_cmp)
  gio_unix_dep = dependency('gio-unix-2.0', version: glib_ver_cmp)
-@@ -75,12 +97,15 @@
+@@ -75,12 +97,15 @@ gtk_dep = dependency('gtk4', version: gtk_ver_cmp)
  gtk_wayland_dep = dependency('gtk4-wayland', version: gtk_ver_cmp)
  json_glib_dep = dependency('json-glib-1.0', version: '>= 1.6.2')
  libfeedback_dep = dependency('libfeedback-0.0', version: '>= 0.8.0')
@@ -66,7 +67,7 @@ The markers and C guards follow, one commit per panel.
  wayland_client_dep = dependency('wayland-client', version: '>=1.14')
  wayland_protos_dep = dependency('wayland-protocols', version: '>=1.12')
  yaml_dep = dependency('yaml-0.1')
-@@ -92,12 +117,15 @@
+@@ -92,12 +117,15 @@ adwaita_dep = dependency(
    default_options: ['examples=false', 'introspection=disabled', 'tests=false'],
  )
  
@@ -88,7 +89,7 @@ The markers and C guards follow, one commit per panel.
  
  i18n = import('i18n')
  
-@@ -197,6 +225,18 @@
+@@ -197,6 +225,18 @@ config_h.set_quoted(
    datadir / 'phosh-osk-stevia' / 'completers',
  )
  config_h.set('MOBILE_SETTINGS_HAVE_GCC_PANELS', get_option('gcc-panels'))
@@ -107,7 +108,7 @@ The markers and C guards follow, one commit per panel.
  config_h.set('_PMS_EXTERN', '__attribute__((visibility("default"))) extern')
  
  configure_file(output: 'mobile-settings-config.h', configuration: config_h)
-@@ -205,10 +245,17 @@
+@@ -205,10 +245,17 @@ add_project_arguments(['-I' + meson.project_build_root()], language: 'c')
  
  subdir('data')
  subdir('protocols')
@@ -128,7 +129,7 @@ The markers and C guards follow, one commit per panel.
  subdir('po')
  subdir('docs')
  if get_option('examples')
-@@ -223,6 +270,18 @@
+@@ -223,6 +270,18 @@ summary(
      'Tweaks directory': get_option('tweaks-data-dir'),
      'Use GCC panels': get_option('gcc-panels'),
      'Use GCC po': get_option('gcc-po'),
@@ -147,9 +148,11 @@ The markers and C guards follow, one commit per panel.
    },
    bool_yn: true,
  )
+diff --git a/meson.options b/meson.options
+index 3a0b79c..20f9e6f 100644
 --- a/meson.options
 +++ b/meson.options
-@@ -19,3 +19,31 @@
+@@ -19,3 +19,31 @@ option('gcc-panels', type: 'boolean', value: false,
  
  option('gcc-po', type: 'boolean', value: false,
         description: 'Whether to include translations from GNOME Settings')
@@ -181,9 +184,11 @@ The markers and C guards follow, one commit per panel.
 +       description: 'Build the device plugins (librem5)')
 +option('tests', type: 'boolean', value: true,
 +       description: 'Build and run the tests')
+diff --git a/src/meson.build b/src/meson.build
+index 8978a6f..f829474 100644
 --- a/src/meson.build
 +++ b/src/meson.build
-@@ -11,10 +11,6 @@
+@@ -11,10 +11,6 @@ mobile_settings_plugin_sources = [
  ]
  
  mobile_settings_sources = [
@@ -194,7 +199,7 @@ The markers and C guards follow, one commit per panel.
    'ms-application.c',
    'ms-application.h',
    'ms-audio-device-row.c',
-@@ -23,20 +19,12 @@
+@@ -23,20 +19,12 @@ mobile_settings_sources = [
    'ms-audio-device.h',
    'ms-audio-devices.c',
    'ms-audio-devices.h',
@@ -215,7 +220,7 @@ The markers and C guards follow, one commit per panel.
    'ms-feedback-panel.c',
    'ms-feedback-panel.h',
    'ms-feedback-row.c',
-@@ -47,16 +35,8 @@
+@@ -47,16 +35,8 @@ mobile_settings_sources = [
    'ms-hidden-app-row.h',
    'ms-hidden-apps-dialog.c',
    'ms-hidden-apps-dialog.h',
@@ -232,7 +237,7 @@ The markers and C guards follow, one commit per panel.
    'ms-overview-panel.c',
    'ms-overview-panel.h',
    'ms-panel-switcher.c',
-@@ -71,24 +51,61 @@
+@@ -71,24 +51,61 @@ mobile_settings_sources = [
    'ms-plugin-row.h',
    'ms-scale-to-fit-row.c',
    'ms-scale-to-fit-row.h',
@@ -300,7 +305,7 @@ The markers and C guards follow, one commit per panel.
  mobile_settings_deps = [
    accountsservice_dep,
    adwaita_dep,
-@@ -122,9 +139,23 @@
+@@ -122,9 +139,23 @@ mobile_settings_deps = [
  
  gnome = import('gnome')
  
@@ -325,7 +330,10 @@ The markers and C guards follow, one commit per panel.
    extra_args: '--manual-register',
    c_name: 'mobile_settings',
  )
---- a/src/ui/meson.build
+diff --git a/src/ui/meson.build b/src/ui/meson.build
+new file mode 100644
+index 0000000..3f0d61c
+--- /dev/null
 +++ b/src/ui/meson.build
 @@ -0,0 +1,12 @@
 +# GtkBuilder files that name objects of panels the tl patch set can compile out are passed through
@@ -340,7 +348,10 @@ The markers and C guards follow, one commit per panel.
 +    command: [tl_ui_filter, '@INPUT@', '@OUTPUT@', tl_ui_off],
 +  )
 +endforeach
---- a/tools/tl-ui-filter
+diff --git a/tools/tl-ui-filter b/tools/tl-ui-filter
+new file mode 100644
+index 0000000..37027e7
+--- /dev/null
 +++ b/tools/tl-ui-filter
 @@ -0,0 +1,61 @@
 +#!/usr/bin/env python3

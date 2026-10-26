@@ -1,11 +1,12 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@example.invalid>
 Date: Mon, 26 Oct 2026 13:00:00 +0000
-Subject: [PATCH 09/14] Compile out the OS updates panel (-Dupdates-panel=false)
+Subject: [PATCH] Compile out the OS updates panel (-Dupdates-panel=false)
 
 Termux updates through its package manager, not systemd-sysupdate.
----
 
+diff --git a/src/mobile-settings.gresource.xml b/src/mobile-settings.gresource.xml
+index 2565c7e..a055c53 100644
 --- a/src/mobile-settings.gresource.xml
 +++ b/src/mobile-settings.gresource.xml
 @@ -36,7 +36,9 @@
@@ -18,6 +19,8 @@ Termux updates through its package manager, not systemd-sysupdate.
      <file>ui/ms-welcome-panel.ui</file>
      <file>ui/ms-window.ui</file>
      <file alias="shortcuts-dialog.ui">ui/shortcuts-dialog.ui</file>
+diff --git a/src/ms-main.c b/src/ms-main.c
+index 14890bc..fce075a 100644
 --- a/src/ms-main.c
 +++ b/src/ms-main.c
 @@ -32,7 +32,9 @@
@@ -30,7 +33,7 @@ Termux updates through its package manager, not systemd-sysupdate.
  #include "ms-welcome-panel.h"
  
  #include <glib/gi18n.h>
-@@ -60,7 +62,9 @@
+@@ -60,7 +62,9 @@ ms_init_types (void)
    g_type_ensure (MS_TYPE_OVERVIEW_PANEL);
    g_type_ensure (MS_TYPE_SENSOR_PANEL);
    g_type_ensure (MS_TYPE_TOPBAR_PANEL);
@@ -40,6 +43,8 @@ Termux updates through its package manager, not systemd-sysupdate.
    g_type_ensure (MS_TYPE_WELCOME_PANEL);
  }
  
+diff --git a/src/ui/ms-window.ui b/src/ui/ms-window.ui
+index 5227692..1554fd9 100644
 --- a/src/ui/ms-window.ui
 +++ b/src/ui/ms-window.ui
 @@ -365,6 +365,7 @@

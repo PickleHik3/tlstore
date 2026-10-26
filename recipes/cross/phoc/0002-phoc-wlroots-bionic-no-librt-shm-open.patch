@@ -1,17 +1,10 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@users.noreply.github.com>
 Date: Mon, 26 Oct 2026 11:13:49 +0300
-Subject: [PATCH 2/2] wlroots: build on Bionic (no librt, no shm_open)
+Subject: [PATCH] wlroots: build on Bionic (no librt, no shm_open)
 
 Two patches for the wlroots subproject, applied by its wrap: librt is optional (Bionic's libc has
 clock_gettime and friends), and util/shm.c uses memfd_create on Android, which has no shm_open.
----
- .../wlroots/tl/0001-bionic-no-librt.patch     | 14 +++++
- .../wlroots/tl/0002-bionic-no-shm-open.patch  | 53 +++++++++++++++++++
- subprojects/wlroots.wrap                      |  4 +-
- 3 files changed, 70 insertions(+), 1 deletion(-)
- create mode 100644 subprojects/packagefiles/wlroots/tl/0001-bionic-no-librt.patch
- create mode 100644 subprojects/packagefiles/wlroots/tl/0002-bionic-no-shm-open.patch
 
 diff --git a/subprojects/packagefiles/wlroots/tl/0001-bionic-no-librt.patch b/subprojects/packagefiles/wlroots/tl/0001-bionic-no-librt.patch
 new file mode 100644
@@ -104,6 +97,3 @@ index 16be50c..8192c1b 100644
 +  wlroots/0001-Revert-layer-shell-error-on-0-dimension-without-anch.patch,
 +  wlroots/tl/0001-bionic-no-librt.patch,
 +  wlroots/tl/0002-bionic-no-shm-open.patch
--- 
-2.56.0
-

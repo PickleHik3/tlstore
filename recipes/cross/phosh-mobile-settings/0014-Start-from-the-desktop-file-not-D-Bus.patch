@@ -1,17 +1,18 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@example.invalid>
 Date: Mon, 26 Oct 2026 13:00:00 +0000
-Subject: [PATCH 14/14] Start from the desktop file, not through D-Bus activation
+Subject: [PATCH] Start from the desktop file, not through D-Bus activation
 
 The desktop file asked for D-Bus activation, and the service file it installs has the
 absolute path of the binary at the build's prefix, which is / here. DBusActivatable=false makes
 the launcher run Exec=phosh-mobile-settings from the session's PATH; the service file is not
 installed.
----
 
+diff --git a/data/meson.build b/data/meson.build
+index f407e6b..4978416 100644
 --- a/data/meson.build
 +++ b/data/meson.build
-@@ -31,19 +31,6 @@
+@@ -31,19 +31,6 @@ if appstream_util.found()
    test('Validate appstream file', appstream_util, args: ['validate', '--no-net', appstream_file])
  endif
  
@@ -31,9 +32,11 @@ installed.
  schemas = ['mobi.phosh.MobileSettings.gschema.xml']
  compiled = gnome.compile_schemas(build_by_default: true, depend_files: schemas)
  
+diff --git a/data/mobi.phosh.MobileSettings.desktop.in b/data/mobi.phosh.MobileSettings.desktop.in
+index 7cd010a..9ceaa0a 100644
 --- a/data/mobi.phosh.MobileSettings.desktop.in
 +++ b/data/mobi.phosh.MobileSettings.desktop.in
-@@ -7,7 +7,7 @@
+@@ -7,7 +7,7 @@ Terminal=false
  Type=Application
  Categories=GNOME;GTK;Settings;
  StartupNotify=true

@@ -1,15 +1,10 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@example.invalid>
 Date: Mon, 26 Oct 2026 12:00:00 +0000
-Subject: [PATCH 15/16] Compile out libgudev: -Dgudev=false
+Subject: [PATCH] Compile out libgudev: -Dgudev=false
 
 No udev manager and no sysfs backlight, and the torch manager finds no torch device. Their
 D-Bus and sysfs look-ups need libgudev.
----
- src/monitor/monitor.c |  4 ++++
- src/shell.c           | 12 +++++++++++-
- src/torch-manager.c   | 32 ++++++++++++++++++++++++++++++--
- 3 files changed, 45 insertions(+), 3 deletions(-)
 
 diff --git a/src/monitor/monitor.c b/src/monitor/monitor.c
 index 413e700..e6f1722 100644

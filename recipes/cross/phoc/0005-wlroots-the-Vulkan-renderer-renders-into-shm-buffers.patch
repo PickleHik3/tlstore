@@ -1,4 +1,6 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@users.noreply.github.com>
+Date: Mon, 26 Oct 2026 23:52:06 +0300
 Subject: [PATCH] wlroots: the Vulkan renderer renders into shm buffers
 
 The X11 backend without DRI3 (termux-x11) takes shm buffers only, and wlroots' Vulkan renderer
@@ -7,7 +9,10 @@ copies each finished frame into the shm buffer the backend presents over MIT-SHM
 wlr_renderer_autocreate() tries it before pixman, falling back (and logging the choice) when no
 GPU renderer starts. Carried as a wlroots patch file that wlroots.wrap applies; the patch's own
 header says what it does.
----
+
+diff --git a/subprojects/packagefiles/wlroots/tl/0004-vulkan-render-into-shm.patch b/subprojects/packagefiles/wlroots/tl/0004-vulkan-render-into-shm.patch
+new file mode 100644
+index 0000000..0f0b15a
 --- /dev/null
 +++ b/subprojects/packagefiles/wlroots/tl/0004-vulkan-render-into-shm.patch
 @@ -0,0 +1,690 @@
@@ -701,14 +706,14 @@ header says what it does.
 + 			goto out;
 + 		} else {
 + 			log_creation_failure(is_auto, "Failed to create a pixman renderer");
+diff --git a/subprojects/wlroots.wrap b/subprojects/wlroots.wrap
+index d642031..7c1076d 100644
 --- a/subprojects/wlroots.wrap
 +++ b/subprojects/wlroots.wrap
-@@ -13,4 +13,5 @@
+@@ -13,4 +13,5 @@ diff_files =
    wlroots/0001-Revert-layer-shell-error-on-0-dimension-without-anch.patch,
    wlroots/tl/0001-bionic-no-librt.patch,
    wlroots/tl/0002-bionic-no-shm-open.patch,
 -  wlroots/tl/0003-x11-follow-root-window-size.patch
 +  wlroots/tl/0003-x11-follow-root-window-size.patch,
 +  wlroots/tl/0004-vulkan-render-into-shm.patch
--- 
-2.56.0

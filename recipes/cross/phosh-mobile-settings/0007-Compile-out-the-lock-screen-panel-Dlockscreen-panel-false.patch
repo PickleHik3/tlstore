@@ -1,11 +1,12 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: PickleHik3 <noreply@example.invalid>
 Date: Mon, 26 Oct 2026 13:00:00 +0000
-Subject: [PATCH 07/14] Compile out the lock screen panel (-Dlockscreen-panel=false)
+Subject: [PATCH] Compile out the lock screen panel (-Dlockscreen-panel=false)
 
 phosh is built without a lock screen (recipes/cross/phosh/0006), so there is nothing to set.
----
 
+diff --git a/src/mobile-settings.gresource.xml b/src/mobile-settings.gresource.xml
+index 72712ed..4c9f627 100644
 --- a/src/mobile-settings.gresource.xml
 +++ b/src/mobile-settings.gresource.xml
 @@ -19,7 +19,9 @@
@@ -18,6 +19,8 @@ phosh is built without a lock screen (recipes/cross/phosh/0006), so there is not
      <file>ui/ms-osk-add-shortcut-dialog.ui</file>
      <file>ui/ms-osk-panel.ui</file>
      <file>ui/ms-overview-panel.ui</file>
+diff --git a/src/ms-main.c b/src/ms-main.c
+index 84e9b99..59728e3 100644
 --- a/src/ms-main.c
 +++ b/src/ms-main.c
 @@ -23,7 +23,9 @@
@@ -30,7 +33,7 @@ phosh is built without a lock screen (recipes/cross/phosh/0006), so there is not
  #include "ms-osk-panel.h"
  #include "ms-overview-panel.h"
  #include "ms-sensor-panel.h"
-@@ -47,7 +49,9 @@
+@@ -47,7 +49,9 @@ ms_init_types (void)
  #if MOBILE_SETTINGS_HAVE_LANG_PANEL
    g_type_ensure (MS_TYPE_LANG_PANEL);
  #endif
@@ -40,6 +43,8 @@ phosh is built without a lock screen (recipes/cross/phosh/0006), so there is not
    g_type_ensure (MS_TYPE_OSK_PANEL);
    g_type_ensure (MS_TYPE_OVERVIEW_PANEL);
    g_type_ensure (MS_TYPE_SENSOR_PANEL);
+diff --git a/src/ui/ms-window.ui b/src/ui/ms-window.ui
+index a7267e1..21b35f6 100644
 --- a/src/ui/ms-window.ui
 +++ b/src/ui/ms-window.ui
 @@ -190,6 +190,7 @@
