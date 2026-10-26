@@ -66,6 +66,53 @@ phosh_pid() {
 
 watcher_open() { [ "$(fake_control_get /watchers)" = '{"watchers": 1}' ]; }
 
+# fake_last_body <method> <path> - the JSON body of the last such call, compact and key-sorted
+# (fails when there is none), so a test can compare it with a string.
+fake_last_body() {
+    fake_calls | python3 -I -c '
+import json, sys
+m, p = sys.argv[1:3]
+bodies = [c["body"] for c in json.load(sys.stdin) if c["method"] == m and c["path"] == p]
+if not bodies:
+    sys.exit(1)
+print(json.dumps(bodies[-1], sort_keys=True, separators=(",", ":")))' "$1" "$2"
+}
+
+# What phosh shows, read through mobi.phosh.Shell.DebugControl (the shell exports it on the session
+# bus; this build adds TlState and TlTile to it, patch 0023 of recipes/cross/phosh).
+# tl_state - the JSON of the backends' state: available, battery, wifi, wwan, rotation, torch and
+# tiles.<name>.{found,sensitive,visible,active}.
+tl_state() {
+    gdbus call --session --dest mobi.phosh.Shell.DebugControl --object-path /mobi/phosh/Shell/DebugControl \
+        --method mobi.phosh.Shell.DebugControl.TlState | python3 -I -c '
+import ast, sys
+print(ast.literal_eval(sys.stdin.read().strip())[0])'
+}
+
+# tl_get <path> - one value of tl_state by dotted path (battery.percent): strings as they are,
+# the rest as JSON (true, 87, null).
+tl_get() {
+    tl_state | python3 -I -c '
+import json, sys
+v = json.load(sys.stdin)
+for k in sys.argv[1].split("."):
+    v = v[k]
+print(v if isinstance(v, str) else json.dumps(v))' "$1"
+}
+
+# tl_is <path> <value> - succeeds when tl_get prints exactly that (for wait_for).
+tl_is() { [ "$(tl_get "$1" 2>/dev/null)" = "$2" ]; }
+
+# tl_tile <wifi|wwan|battery|rotation|torch> <click|long-press> - do to a quick setting what a tap or
+# a long-press does.
+tl_tile() {
+    gdbus call --session --dest mobi.phosh.Shell.DebugControl --object-path /mobi/phosh/Shell/DebugControl \
+        --method mobi.phosh.Shell.DebugControl.TlTile "$1" "$2" >/dev/null
+}
+
+# fake_body_is <method> <path> <json> - the last such call had exactly that body (for wait_for).
+fake_body_is() { [ "$(fake_last_body "$1" "$2" 2>/dev/null)" = "$3" ]; }
+
 # fake_self_test - run-headless.sh --self-test: the fake alone, over curl.
 fake_self_test() {
     local code out stream cpid n

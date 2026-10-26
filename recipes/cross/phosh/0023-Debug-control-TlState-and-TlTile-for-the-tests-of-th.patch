@@ -1,0 +1,355 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PickleHik3 <noreply@example.invalid>
+Date: Mon, 26 Oct 2026 12:00:00 +0000
+Subject: [PATCH 23/23] Debug control: TlState and TlTile, for the tests of the
+ launcherctl build
+
+mobi.phosh.Shell.DebugControl, the interface phosh always exports on the session bus for its log
+domains, gets two methods the headless tests use:
+  TlState () -> s   JSON of what the backends and the quick settings show: available (the watch
+                    stream is open), battery {present, percent, icon}, wifi {present, enabled,
+                    ssid, icon}, wwan {present, signal, tec, data}, rotation {mode, locked,
+                    orientation}, torch {present, enabled}, tiles.<name> {found, sensitive,
+                    visible, active}
+  TlTile (s tile, s gesture)  click or long-press of the wifi, wwan, battery, rotation or torch
+                    quick setting, as the tap or the long-press would (the signal, or the
+                    long-press action)
+Both answer an error in a build without -Dlauncherctl. phosh_quick_setting_long_press() is the
+quick setting's long-press, public for this.
+---
+ src/dbus/mobi.phosh.Shell.DebugControl.xml |  25 +++
+ src/debug-control.c                        | 237 +++++++++++++++++++++
+ src/quick-setting.c                        |  15 ++
+ src/quick-setting.h                        |   1 +
+ 4 files changed, 278 insertions(+)
+
+diff --git a/src/dbus/mobi.phosh.Shell.DebugControl.xml b/src/dbus/mobi.phosh.Shell.DebugControl.xml
+index dfc033e..fe87dde 100644
+--- a/src/dbus/mobi.phosh.Shell.DebugControl.xml
++++ b/src/dbus/mobi.phosh.Shell.DebugControl.xml
+@@ -17,5 +17,30 @@
+     -->
+     <property name="LogDomains" type="as" access="readwrite"/>
+ 
++    <!--
++        TlState:
++        @state: JSON
++
++        What the launcherctl backends and their quick settings show: an object with `available`
++        (the watch stream is open) and `battery`, `wifi`, `wwan`, `rotation`, `torch` and `tiles`.
++        For the tests of the Termux Launcher build; an error in any other build.
++    -->
++    <method name="TlState">
++      <arg name="state" type="s" direction="out"/>
++    </method>
++
++    <!--
++        TlTile:
++        @tile: wifi, wwan, battery, rotation or torch
++        @gesture: click or long-press
++
++        Does to the quick setting what a tap or a long-press would. For the tests of the
++        Termux Launcher build; an error in any other build.
++    -->
++    <method name="TlTile">
++      <arg name="tile" type="s" direction="in"/>
++      <arg name="gesture" type="s" direction="in"/>
++    </method>
++
+   </interface>
+ </node>
+diff --git a/src/debug-control.c b/src/debug-control.c
+index 5a8257b..5dc5564 100644
+--- a/src/debug-control.c
++++ b/src/debug-control.c
+@@ -16,6 +16,20 @@
+ 
+ #include <gio/gio.h>
+ 
++#if PHOSH_HAVE_LAUNCHERCTL
++# include "battery-manager.h"
++# include "quick-setting.h"
++# include "rotation-manager.h"
++# include "tl-launcherctl.h"
++# include "torch-manager.h"
++# include "wifi-manager.h"
++# include "wwan/phosh-wwan-iface.h"
++# include "wwan/wwan-manager.h"
++
++# include <gtk/gtk.h>
++# include <json-glib/json-glib.h>
++#endif
++
+ #define DEBUG_CONTROL_DBUS_PATH "/mobi/phosh/Shell/DebugControl"
+ #define DEBUG_CONTROL_DBUS_NAME "mobi.phosh.Shell.DebugControl"
+ 
+@@ -46,9 +60,232 @@ G_DEFINE_TYPE_WITH_CODE (PhoshDebugControl, phosh_debug_control,
+                          G_IMPLEMENT_INTERFACE (PHOSH_DBUS_TYPE_DEBUG_CONTROL,
+                                                 phosh_dbus_debug_control_iface_init))
+ 
++#if PHOSH_HAVE_LAUNCHERCTL
++/* The tiles of TlState and TlTile: the name, and the status icon that tells which it is */
++static const struct {
++  const char *name;
++  const char *icon_type;
++} tl_tiles[] = {
++  { "wifi", "PhoshWifiInfo" },
++  { "wwan", "PhoshWWanInfo" },
++  { "battery", "PhoshBatteryInfo" },
++  { "rotation", "PhoshRotateInfo" },
++  { "torch", "PhoshTorchInfo" },
++};
++
++typedef struct {
++  const char *icon_type;
++  GtkWidget  *found;
++} FindTile;
++
++
++static void
++find_tile_cb (GtkWidget *widget, gpointer data)
++{
++  FindTile *find = data;
++
++  if (find->found)
++    return;
++
++  if (PHOSH_IS_QUICK_SETTING (widget)) {
++    PhoshStatusIcon *icon = phosh_quick_setting_get_status_icon (PHOSH_QUICK_SETTING (widget));
++
++    if (icon && !g_strcmp0 (G_OBJECT_TYPE_NAME (icon), find->icon_type)) {
++      find->found = widget;
++      return;
++    }
++  }
++
++  if (GTK_IS_CONTAINER (widget))
++    gtk_container_foreach (GTK_CONTAINER (widget), find_tile_cb, find);
++}
++
++
++static GtkWidget *
++find_tile (const char *name)
++{
++  g_autoptr (GList) windows = g_list_copy (gtk_window_list_toplevels ());
++
++  for (guint i = 0; i < G_N_ELEMENTS (tl_tiles); i++) {
++    FindTile find = { tl_tiles[i].icon_type, NULL };
++
++    if (g_strcmp0 (name, tl_tiles[i].name))
++      continue;
++
++    for (GList *l = windows; l; l = l->next) {
++      find_tile_cb (l->data, &find);
++      if (find.found)
++        return find.found;
++    }
++  }
++
++  return NULL;
++}
++
++
++static void
++add_string (JsonBuilder *b, const char *name, const char *value)
++{
++  json_builder_set_member_name (b, name);
++  if (value)
++    json_builder_add_string_value (b, value);
++  else
++    json_builder_add_null_value (b);
++}
++
++
++static void
++add_bool (JsonBuilder *b, const char *name, gboolean value)
++{
++  json_builder_set_member_name (b, name);
++  json_builder_add_boolean_value (b, value);
++}
++
++
++static void
++add_int (JsonBuilder *b, const char *name, gint64 value)
++{
++  json_builder_set_member_name (b, name);
++  json_builder_add_int_value (b, value);
++}
++
++
++static char *
++build_tl_state (void)
++{
++  PhoshShell *shell = phosh_shell_get_default ();
++  PhoshBatteryManager *battery = phosh_shell_get_battery_manager (shell);
++  PhoshWifiManager *wifi = phosh_shell_get_wifi_manager (shell);
++  PhoshWWan *wwan = phosh_shell_get_wwan (shell);
++  PhoshRotationManager *rotation = phosh_shell_get_rotation_manager (shell);
++  PhoshTorchManager *torch = phosh_shell_get_torch_manager (shell);
++  g_autoptr (JsonBuilder) b = json_builder_new ();
++  g_autoptr (JsonGenerator) gen = json_generator_new ();
++  g_autoptr (JsonNode) root = NULL;
++  g_autofree char *icon = NULL;
++  g_autofree char *orientation = NULL;
++  gboolean present;
++  guint percent;
++
++  json_builder_begin_object (b);
++  add_bool (b, "available", tl_launcherctl_get_available (tl_launcherctl_get_default ()));
++
++  g_object_get (battery, "present", &present, "percent", &percent, "icon-name", &icon, NULL);
++  json_builder_set_member_name (b, "battery");
++  json_builder_begin_object (b);
++  add_bool (b, "present", present);
++  add_int (b, "percent", percent);
++  add_string (b, "icon", icon);
++  json_builder_end_object (b);
++
++  json_builder_set_member_name (b, "wifi");
++  json_builder_begin_object (b);
++  add_bool (b, "present", phosh_wifi_manager_get_present (wifi));
++  add_bool (b, "enabled", phosh_wifi_manager_get_enabled (wifi));
++  add_string (b, "ssid", phosh_wifi_manager_get_ssid (wifi));
++  add_string (b, "icon", phosh_wifi_manager_get_icon_name (wifi));
++  json_builder_end_object (b);
++
++  json_builder_set_member_name (b, "wwan");
++  json_builder_begin_object (b);
++  add_bool (b, "present", phosh_wwan_is_present (wwan));
++  add_int (b, "signal", phosh_wwan_get_signal_quality (wwan));
++  add_string (b, "tec", phosh_wwan_get_access_tec (wwan));
++  add_bool (b, "data", phosh_wwan_manager_get_data_enabled (PHOSH_WWAN_MANAGER (wwan)));
++  json_builder_end_object (b);
++
++  g_object_get (rotation, "orientation", &orientation, NULL);
++  json_builder_set_member_name (b, "rotation");
++  json_builder_begin_object (b);
++  add_string (b, "mode",
++              phosh_rotation_manager_get_mode (rotation) == PHOSH_ROTATION_MANAGER_MODE_SENSOR ?
++              "sensor" : "off");
++  add_bool (b, "locked", phosh_rotation_manager_get_orientation_locked (rotation));
++  add_string (b, "orientation", orientation);
++  json_builder_end_object (b);
++
++  json_builder_set_member_name (b, "torch");
++  json_builder_begin_object (b);
++  add_bool (b, "present", phosh_torch_manager_get_present (torch));
++  add_bool (b, "enabled", phosh_torch_manager_get_enabled (torch));
++  json_builder_end_object (b);
++
++  json_builder_set_member_name (b, "tiles");
++  json_builder_begin_object (b);
++  for (guint i = 0; i < G_N_ELEMENTS (tl_tiles); i++) {
++    GtkWidget *tile = find_tile (tl_tiles[i].name);
++
++    json_builder_set_member_name (b, tl_tiles[i].name);
++    json_builder_begin_object (b);
++    add_bool (b, "found", tile != NULL);
++    add_bool (b, "sensitive", tile && gtk_widget_get_sensitive (tile));
++    add_bool (b, "visible", tile && gtk_widget_get_visible (tile));
++    add_bool (b, "active", tile && phosh_quick_setting_get_active (PHOSH_QUICK_SETTING (tile)));
++    json_builder_end_object (b);
++  }
++  json_builder_end_object (b);
++
++  json_builder_end_object (b);
++
++  root = json_builder_get_root (b);
++  json_generator_set_root (gen, root);
++  return json_generator_to_data (gen, NULL);
++}
++#endif
++
++
++static gboolean
++on_handle_tl_state (PhoshDBusDebugControl *object, GDBusMethodInvocation *invocation)
++{
++#if PHOSH_HAVE_LAUNCHERCTL
++  g_autofree char *state = build_tl_state ();
++
++  phosh_dbus_debug_control_complete_tl_state (object, invocation, state);
++#else
++  g_dbus_method_invocation_return_error_literal (invocation, G_DBUS_ERROR,
++                                                 G_DBUS_ERROR_NOT_SUPPORTED,
++                                                 "Built without launcherctl");
++#endif
++  return TRUE;
++}
++
++
++static gboolean
++on_handle_tl_tile (PhoshDBusDebugControl *object,
++                   GDBusMethodInvocation *invocation,
++                   const char            *tile,
++                   const char            *gesture)
++{
++#if PHOSH_HAVE_LAUNCHERCTL
++  GtkWidget *widget = find_tile (tile);
++
++  if (!widget) {
++    g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
++                                           "No quick setting '%s'", tile);
++  } else if (!g_strcmp0 (gesture, "click")) {
++    g_signal_emit_by_name (widget, "clicked");
++    phosh_dbus_debug_control_complete_tl_tile (object, invocation);
++  } else if (!g_strcmp0 (gesture, "long-press")) {
++    phosh_quick_setting_long_press (PHOSH_QUICK_SETTING (widget));
++    phosh_dbus_debug_control_complete_tl_tile (object, invocation);
++  } else {
++    g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
++                                           "No gesture '%s', click or long-press", gesture);
++  }
++#else
++  g_dbus_method_invocation_return_error_literal (invocation, G_DBUS_ERROR,
++                                                 G_DBUS_ERROR_NOT_SUPPORTED,
++                                                 "Built without launcherctl");
++#endif
++  return TRUE;
++}
++
++
+ static void
+ phosh_dbus_debug_control_iface_init (PhoshDBusDebugControlIface *iface)
+ {
++  iface->handle_tl_state = on_handle_tl_state;
++  iface->handle_tl_tile = on_handle_tl_tile;
+ }
+ 
+ 
+diff --git a/src/quick-setting.c b/src/quick-setting.c
+index e68cf87..3d5fbd0 100644
+--- a/src/quick-setting.c
++++ b/src/quick-setting.c
+@@ -208,6 +208,21 @@ launch_action_else_emit (PhoshQuickSetting *self)
+ }
+ 
+ 
++/**
++ * phosh_quick_setting_long_press:
++ * @self: The quick setting
++ *
++ * Does what a long-press does: launches the long-press action, else emits `long-pressed`.
++ */
++void
++phosh_quick_setting_long_press (PhoshQuickSetting *self)
++{
++  g_return_if_fail (PHOSH_IS_QUICK_SETTING (self));
++
++  launch_action_else_emit (self);
++}
++
++
+ static void
+ on_long_pressed (PhoshQuickSetting *self, GtkGesture *gesture)
+ {
+diff --git a/src/quick-setting.h b/src/quick-setting.h
+index ac02472..e3b2ee4 100644
+--- a/src/quick-setting.h
++++ b/src/quick-setting.h
+@@ -46,5 +46,6 @@ void             phosh_quick_setting_set_long_press_action_name (PhoshQuickSetti
+ const char      *phosh_quick_setting_get_long_press_action_name (PhoshQuickSetting *self);
+ void             phosh_quick_setting_set_long_press_action_target (PhoshQuickSetting *self, const char *action_target);
+ const char      *phosh_quick_setting_get_long_press_action_target (PhoshQuickSetting *self);
++void             phosh_quick_setting_long_press (PhoshQuickSetting *self);
+ 
+ G_END_DECLS

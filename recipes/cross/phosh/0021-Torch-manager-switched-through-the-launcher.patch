@@ -1,0 +1,396 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PickleHik3 <noreply@example.invalid>
+Date: Mon, 26 Oct 2026 12:00:00 +0000
+Subject: [PATCH 21/23] Torch manager: switched through the launcher
+
+With -Dlauncherctl the torch manager (torch-manager-tl.c) switches the torch with POST /v1/torch
+{"on":...} when the quick setting is clicked, and takes the state from the launcher's reply. The
+torch is present while the watch stream is open; the launcher reports no torch state on the
+stream, so the state is the last one set and the torch is off at start. No brightness scale
+(can-scale is FALSE). torch-manager.c, which needs libgudev and logind, is not built then.
+---
+ src/meson.build        |   4 +-
+ src/torch-manager-tl.c | 350 +++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 352 insertions(+), 2 deletions(-)
+ create mode 100644 src/torch-manager-tl.c
+
+diff --git a/src/meson.build b/src/meson.build
+index 44ad349..986cac1 100644
+--- a/src/meson.build
++++ b/src/meson.build
+@@ -404,7 +404,6 @@ phosh_sources = files(
+   'toplevel-thumbnail.c',
+   'toplevel.c',
+   'torch-info.c',
+-  'torch-manager.c',
+   'wwan-info.c',
+ ) + [
+   phosh_settings_sources,
+@@ -489,9 +488,10 @@ if have_launcherctl
+     'battery-manager-tl.c',
+     'rotation-manager-tl.c',
+     'tl-launcherctl.c',
++    'torch-manager-tl.c',
+   )
+ else
+-  phosh_tool_sources += files('battery-manager.c', 'rotation-manager.c')
++  phosh_tool_sources += files('battery-manager.c', 'rotation-manager.c', 'torch-manager.c')
+ endif
+ 
+ # Headers are bundled as they're not shipped by gnome-bluetooth
+diff --git a/src/torch-manager-tl.c b/src/torch-manager-tl.c
+new file mode 100644
+index 0000000..01feb77
+--- /dev/null
++++ b/src/torch-manager-tl.c
+@@ -0,0 +1,350 @@
++/*
++ * Copyright (C) 2020 Purism SPC
++ *               2025 Phosh.mobi e.V.
++ *               2025 Termux Launcher
++ *
++ * SPDX-License-Identifier: GPL-3.0-or-later
++ *
++ * Author: Guido Günther <agx@sigxcpu.org>
++ */
++
++#define G_LOG_DOMAIN "phosh-torch-manager"
++
++#include "phosh-config.h"
++
++#include "torch-manager.h"
++#include "tl-launcherctl.h"
++
++#include <math.h>
++
++#define TORCH_DISABLED_ICON "torch-disabled-symbolic"
++#define TORCH_ENABLED_ICON  "torch-enabled-symbolic"
++
++/**
++ * PhoshTorchManager:
++ *
++ * Switches the torch through the launcher
++ *
++ * This is the torch manager of a build with `-Dlauncherctl`: it switches the torch with
++ * `POST /v1/torch` and has no brightness to scale. The launcher does not report the torch on
++ * the watch stream, so the state is the last one this manager set (and the torch is off when
++ * phosh starts). The torch is present while the launcher is there.
++ */
++
++enum {
++  PROP_0,
++  PROP_ICON_NAME,
++  PROP_ENABLED,
++  PROP_PRESENT,
++  PROP_CAN_SCALE,
++  PROP_BRIGHTNESS,
++  PROP_LAST_PROP
++};
++static GParamSpec *props[PROP_LAST_PROP];
++
++struct _PhoshTorchManager {
++  PhoshManager   parent;
++
++  TlLauncherctl *client;
++  GCancellable  *cancel;
++
++  gboolean       present;
++  const char    *icon_name;
++  int            brightness;
++};
++G_DEFINE_TYPE (PhoshTorchManager, phosh_torch_manager, PHOSH_TYPE_MANAGER);
++
++
++static void
++set_enabled_state (PhoshTorchManager *self, gboolean enabled)
++{
++  const char *icon_name = enabled ? TORCH_ENABLED_ICON : TORCH_DISABLED_ICON;
++  int brightness = enabled ? 1 : 0;
++
++  g_object_freeze_notify (G_OBJECT (self));
++
++  if (self->brightness != brightness) {
++    self->brightness = brightness;
++    g_object_notify_by_pspec (G_OBJECT (self), props[PROP_BRIGHTNESS]);
++    g_object_notify_by_pspec (G_OBJECT (self), props[PROP_ENABLED]);
++  }
++
++  if (icon_name != self->icon_name) {
++    self->icon_name = icon_name;
++    g_object_notify_by_pspec (G_OBJECT (self), props[PROP_ICON_NAME]);
++  }
++
++  g_object_thaw_notify (G_OBJECT (self));
++}
++
++
++static void
++on_torch_posted (GObject *source, GAsyncResult *res, gpointer data)
++{
++  TlLauncherctl *client = TL_LAUNCHERCTL (source);
++  g_autoptr (GError) err = NULL;
++  g_autoptr (JsonObject) reply = tl_launcherctl_post_finish (client, res, &err);
++
++  if (!reply) {
++    if (!g_error_matches (err, G_IO_ERROR, G_IO_ERROR_CANCELLED))
++      g_warning ("Failed to switch the torch: %s", err->message);
++    return;
++  }
++
++  set_enabled_state (PHOSH_TORCH_MANAGER (data),
++                     json_object_get_boolean_member_with_default (reply, "on", FALSE));
++}
++
++
++static void
++set_enabled (PhoshTorchManager *self, gboolean enabled)
++{
++  g_autofree char *body = g_strdup_printf ("{\"on\":%s}", enabled ? "true" : "false");
++
++  g_debug ("%s torch", enabled ? "Enabling" : "Disabling");
++  tl_launcherctl_post_async (self->client, "/v1/torch", body, self->cancel,
++                             on_torch_posted, self);
++}
++
++
++static void
++update_present (PhoshTorchManager *self)
++{
++  gboolean present = tl_launcherctl_get_available (self->client);
++
++  if (self->present == present)
++    return;
++
++  self->present = present;
++  g_object_notify_by_pspec (G_OBJECT (self), props[PROP_PRESENT]);
++}
++
++
++static void
++on_available_changed (PhoshTorchManager *self, GParamSpec *pspec, TlLauncherctl *client)
++{
++  update_present (self);
++}
++
++
++static void
++phosh_torch_manager_idle_init (PhoshManager *manager)
++{
++  PhoshTorchManager *self = PHOSH_TORCH_MANAGER (manager);
++
++  self->client = g_object_ref (tl_launcherctl_get_default ());
++  g_signal_connect_object (self->client, "notify::available",
++                           G_CALLBACK (on_available_changed), self, G_CONNECT_SWAPPED);
++  update_present (self);
++}
++
++
++static void
++phosh_torch_manager_get_property (GObject    *object,
++                                  guint       property_id,
++                                  GValue     *value,
++                                  GParamSpec *pspec)
++{
++  PhoshTorchManager *self = PHOSH_TORCH_MANAGER (object);
++
++  switch (property_id) {
++  case PROP_ICON_NAME:
++    g_value_set_string (value, self->icon_name);
++    break;
++  case PROP_ENABLED:
++    g_value_set_boolean (value, !!self->brightness);
++    break;
++  case PROP_PRESENT:
++    g_value_set_boolean (value, self->present);
++    break;
++  case PROP_CAN_SCALE:
++    g_value_set_boolean (value, FALSE);
++    break;
++  case PROP_BRIGHTNESS:
++    g_value_set_int (value, self->brightness);
++    break;
++  default:
++    G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
++    break;
++  }
++}
++
++
++static void
++phosh_torch_manager_dispose (GObject *object)
++{
++  PhoshTorchManager *self = PHOSH_TORCH_MANAGER (object);
++
++  g_cancellable_cancel (self->cancel);
++  g_clear_object (&self->cancel);
++  g_clear_object (&self->client);
++
++  G_OBJECT_CLASS (phosh_torch_manager_parent_class)->dispose (object);
++}
++
++
++static void
++phosh_torch_manager_class_init (PhoshTorchManagerClass *klass)
++{
++  GObjectClass *object_class = G_OBJECT_CLASS (klass);
++  PhoshManagerClass *manager_class = PHOSH_MANAGER_CLASS (klass);
++
++  object_class->get_property = phosh_torch_manager_get_property;
++  object_class->dispose = phosh_torch_manager_dispose;
++
++  manager_class->idle_init = phosh_torch_manager_idle_init;
++
++  /**
++   * PhoshTorchManager:icon-name:
++   *
++   * The icon-name of torch
++   */
++  props[PROP_ICON_NAME] =
++    g_param_spec_string ("icon-name", "", "",
++                         TORCH_DISABLED_ICON,
++                         G_PARAM_READABLE | G_PARAM_EXPLICIT_NOTIFY | G_PARAM_STATIC_STRINGS);
++  /**
++   * PhoshTorchManager:enabled:
++   *
++   * Whether torch is enabled
++   */
++  props[PROP_ENABLED] =
++    g_param_spec_boolean ("enabled", "", "",
++                          FALSE,
++                          G_PARAM_READABLE | G_PARAM_EXPLICIT_NOTIFY | G_PARAM_STATIC_STRINGS);
++  /**
++   * PhoshTorchManager:present:
++   *
++   * Whether a torch is present
++   */
++  props[PROP_PRESENT] =
++    g_param_spec_boolean ("present", "", "",
++                          FALSE,
++                          G_PARAM_READABLE | G_PARAM_EXPLICIT_NOTIFY | G_PARAM_STATIC_STRINGS);
++  /**
++   * PhoshTorchManager:can-scale:
++   *
++   * Whether the brightness can be scaled: never here
++   */
++  props[PROP_CAN_SCALE] =
++    g_param_spec_boolean ("can-scale", "", "",
++                          FALSE,
++                          G_PARAM_READABLE | G_PARAM_EXPLICIT_NOTIFY | G_PARAM_STATIC_STRINGS);
++  /**
++   * PhoshTorchManager:brightness:
++   *
++   * The brightness of torch: 0 or 1
++   */
++  props[PROP_BRIGHTNESS] =
++    g_param_spec_int ("brightness", "", "",
++                      0, G_MAXINT, 0,
++                      G_PARAM_READABLE | G_PARAM_EXPLICIT_NOTIFY | G_PARAM_STATIC_STRINGS);
++
++  g_object_class_install_properties (object_class, PROP_LAST_PROP, props);
++}
++
++
++static void
++phosh_torch_manager_init (PhoshTorchManager *self)
++{
++  self->icon_name = TORCH_DISABLED_ICON;
++  self->cancel = g_cancellable_new ();
++}
++
++
++PhoshTorchManager *
++phosh_torch_manager_new (void)
++{
++  return PHOSH_TORCH_MANAGER (g_object_new (PHOSH_TYPE_TORCH_MANAGER, NULL));
++}
++
++
++const char *
++phosh_torch_manager_get_icon_name (PhoshTorchManager *self)
++{
++  g_return_val_if_fail (PHOSH_IS_TORCH_MANAGER (self), NULL);
++
++  return self->icon_name;
++}
++
++
++gboolean
++phosh_torch_manager_get_enabled (PhoshTorchManager *self)
++{
++  g_return_val_if_fail (PHOSH_IS_TORCH_MANAGER (self), FALSE);
++
++  return !!self->brightness;
++}
++
++
++gboolean
++phosh_torch_manager_get_present (PhoshTorchManager *self)
++{
++  g_return_val_if_fail (PHOSH_IS_TORCH_MANAGER (self), FALSE);
++
++  return self->present;
++}
++
++
++gboolean
++phosh_torch_manager_get_can_scale (PhoshTorchManager *self)
++{
++  g_return_val_if_fail (PHOSH_IS_TORCH_MANAGER (self), FALSE);
++
++  return FALSE;
++}
++
++
++int
++phosh_torch_manager_get_brightness (PhoshTorchManager *self)
++{
++  g_return_val_if_fail (PHOSH_IS_TORCH_MANAGER (self), 0);
++
++  return self->brightness;
++}
++
++
++/* On or off: 1.0 or the least non-zero value, as the torch is never fully off when enabled */
++double
++phosh_torch_manager_get_scaled_brightness (PhoshTorchManager *self)
++{
++  g_return_val_if_fail (PHOSH_IS_TORCH_MANAGER (self), 0);
++
++  return self->brightness ? 1.0 : 0.01;
++}
++
++
++void
++phosh_torch_manager_set_scaled_brightness (PhoshTorchManager *self, double frac)
++{
++  g_return_if_fail (PHOSH_IS_TORCH_MANAGER (self));
++  g_return_if_fail (frac >= 0.0 && frac <= 1.0);
++
++  if (!self->present)
++    return;
++
++  set_enabled (self, frac > 0.0);
++}
++
++
++int
++phosh_torch_manager_get_max_brightness (PhoshTorchManager *self)
++{
++  g_return_val_if_fail (PHOSH_IS_TORCH_MANAGER (self), 0);
++
++  return 1;
++}
++
++
++void
++phosh_torch_manager_toggle (PhoshTorchManager *self)
++{
++  g_return_if_fail (PHOSH_IS_TORCH_MANAGER (self));
++
++  if (!self->present) {
++    g_debug ("No launcher, no torch");
++    return;
++  }
++
++  set_enabled (self, !self->brightness);
++}

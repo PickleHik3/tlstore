@@ -1,0 +1,768 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PickleHik3 <noreply@example.invalid>
+Date: Mon, 26 Oct 2026 12:00:00 +0000
+Subject: [PATCH 19/23] Wi-Fi and mobile managers: from the launcher's network
+ events
+
+With -Dlauncherctl, wifi-manager-tl.c (PhoshWifiManager) and PhoshWWanTl (the PhoshWWan
+implementation the shell picks) show the watch stream's network event: Wi-Fi on or off,
+connected, SSID, signal level 0 to 4 as the usual signal icons; cellular present, signal level,
+network type as 2G to 5G, mobile data on or off for the no-data icons. Both only show: they
+cannot switch Wi-Fi, scan, connect, switch the radio or mobile data. Without a launcher both are
+not present, like the managers of a build without a backend, and their tiles stay insensitive.
+
+wwan-manager-none.c's get_data_enabled and has_data now ask the object's property, which is
+FALSE for the base class and the launcher's value for PhoshWWanTl, which overrides it.
+---
+ src/meson.build              |   3 +
+ src/shell.c                  |   7 +
+ src/wifi-manager-tl.c        | 299 ++++++++++++++++++++++++++++++++++
+ src/wwan/meson.build         |   5 +
+ src/wwan/phosh-wwan-tl.c     | 306 +++++++++++++++++++++++++++++++++++
+ src/wwan/phosh-wwan-tl.h     |  20 +++
+ src/wwan/wwan-manager-none.c |  11 +-
+ 7 files changed, 649 insertions(+), 2 deletions(-)
+ create mode 100644 src/wifi-manager-tl.c
+ create mode 100644 src/wwan/phosh-wwan-tl.c
+ create mode 100644 src/wwan/phosh-wwan-tl.h
+
+diff --git a/src/meson.build b/src/meson.build
+index 4795073..b1b66a0 100644
+--- a/src/meson.build
++++ b/src/meson.build
+@@ -472,6 +472,9 @@ if have_networkmanager
+     'network-auth-manager.c',
+     'network-auth-prompt.c',
+   )
++elif have_launcherctl
++  # Wi-Fi without NetworkManager, from the launcher
++  phosh_tool_sources += files('wifi-manager-tl.c')
+ else
+   # Wi-Fi without NetworkManager: a manager that has no hardware to report
+   phosh_tool_sources += files('wifi-manager-none.c')
+diff --git a/src/shell.c b/src/shell.c
+index f05b9a1..ec06606 100644
+--- a/src/shell.c
++++ b/src/shell.c
+@@ -114,6 +114,9 @@
+ #include "wifi-info.h"
+ #include "wwan-info.h"
+ #include "wwan/phosh-wwan-ofono.h"
++#if PHOSH_HAVE_LAUNCHERCTL
++# include "wwan/phosh-wwan-tl.h"
++#endif
+ #if PHOSH_HAVE_MODEMMANAGER
+ # include "wwan/phosh-wwan-mm.h"
+ #endif
+@@ -2383,6 +2386,9 @@ phosh_shell_get_wwan (PhoshShell *self)
+   priv = phosh_shell_get_instance_private (self);
+ 
+   if (!priv->wwan) {
++#if PHOSH_HAVE_LAUNCHERCTL
++    priv->wwan = PHOSH_WWAN (phosh_wwan_tl_new ());
++#else
+     PhoshWWanBackend backend = g_settings_get_enum (priv->settings, WWAN_BACKEND_KEY);
+ 
+     switch (backend) {
+@@ -2397,6 +2403,7 @@ phosh_shell_get_wwan (PhoshShell *self)
+         priv->wwan = PHOSH_WWAN (phosh_wwan_ofono_new());
+         break;
+     }
++#endif
+   }
+ 
+   g_return_val_if_fail (PHOSH_IS_WWAN (priv->wwan), NULL);
+diff --git a/src/wifi-manager-tl.c b/src/wifi-manager-tl.c
+new file mode 100644
+index 0000000..ca221d8
+--- /dev/null
++++ b/src/wifi-manager-tl.c
+@@ -0,0 +1,299 @@
++/*
++ * Copyright (C) 2019 Purism SPC
++ *               2025 Termux Launcher
++ *
++ * SPDX-License-Identifier: GPL-3.0-or-later
++ *
++ * Author: Guido Günther <agx@sigxcpu.org>
++ */
++#define G_LOG_DOMAIN "phosh-wifi-manager"
++
++#include "phosh-config.h"
++
++#include "wifi-manager.h"
++
++#include "tl-launcherctl.h"
++#include "util.h"
++
++/**
++ * PhoshWifiManager:
++ *
++ * Tracks the Wi-Fi status, from the launcher
++ *
++ * This is the Wi-Fi manager of a build with `-Dlauncherctl`. It shows what the `network`
++ * events of the launcher's watch stream say about Wi-Fi (on or off, connected, the SSID, the
++ * signal level 0 to 4) and only shows it: it cannot switch Wi-Fi, scan or connect. The Wi-Fi
++ * quick setting's long-press opens Android's Wi-Fi settings (see [class@PhoshTopPanel]).
++ * Without a launcher there is no Wi-Fi hardware to show, as with the manager of a build
++ * without a backend.
++ */
++
++enum {
++  PROP_0,
++  PROP_ICON_NAME,
++  PROP_SSID,
++  PROP_ENABLED,
++  PROP_PRESENT,
++  PROP_IS_HOTSPOT_MASTER,
++  PROP_LAST_PROP
++};
++static GParamSpec *props[PROP_LAST_PROP];
++
++struct _PhoshWifiManager {
++  GObject        parent;
++
++  TlLauncherctl *client;
++
++  const char    *icon_name;
++  char          *ssid;
++  gboolean       enabled;
++  gboolean       present;
++  guint8         strength;
++};
++G_DEFINE_TYPE (PhoshWifiManager, phosh_wifi_manager, G_TYPE_OBJECT);
++
++
++static void
++update (PhoshWifiManager *self)
++{
++  JsonObject *network = NULL;
++  JsonObject *wifi = NULL;
++  gboolean present, enabled, connected;
++  const char *icon_name;
++  const char *ssid = NULL;
++  int level = 0;
++
++  if (tl_launcherctl_get_available (self->client))
++    network = tl_launcherctl_get_last (self->client, "network");
++  wifi = tl_json_get_object (network, "wifi");
++
++  present = wifi != NULL;
++  enabled = present && json_object_get_boolean_member_with_default (wifi, "enabled", FALSE);
++  connected = enabled && json_object_get_boolean_member_with_default (wifi, "connected", FALSE);
++  if (connected) {
++    ssid = json_object_get_string_member_with_default (wifi, "ssid", NULL);
++    level = CLAMP (json_object_get_int_member_with_default (wifi, "signal_level", 0), 0, 4);
++  }
++
++  if (!enabled)
++    icon_name = "network-wireless-disabled-symbolic";
++  else if (!connected)
++    icon_name = "network-wireless-offline-symbolic";
++  else
++    icon_name = phosh_util_get_icon_by_wifi_strength (level * 25, FALSE);
++
++  g_object_freeze_notify (G_OBJECT (self));
++
++  self->strength = connected ? level * 25 : 0;
++
++  if (self->icon_name != icon_name) {
++    self->icon_name = icon_name;
++    g_object_notify_by_pspec (G_OBJECT (self), props[PROP_ICON_NAME]);
++  }
++
++  if (g_strcmp0 (self->ssid, ssid)) {
++    g_free (self->ssid);
++    self->ssid = g_strdup (ssid);
++    g_object_notify_by_pspec (G_OBJECT (self), props[PROP_SSID]);
++  }
++
++  if (self->enabled != enabled) {
++    self->enabled = enabled;
++    g_object_notify_by_pspec (G_OBJECT (self), props[PROP_ENABLED]);
++  }
++
++  if (self->present != present) {
++    self->present = present;
++    g_object_notify_by_pspec (G_OBJECT (self), props[PROP_PRESENT]);
++  }
++
++  g_object_thaw_notify (G_OBJECT (self));
++}
++
++
++static void
++on_network_event (PhoshWifiManager *self, JsonObject *data, TlLauncherctl *client)
++{
++  update (self);
++}
++
++
++static void
++on_available_changed (PhoshWifiManager *self, GParamSpec *pspec, TlLauncherctl *client)
++{
++  update (self);
++}
++
++
++static void
++phosh_wifi_manager_get_property (GObject    *object,
++                                 guint       property_id,
++                                 GValue     *value,
++                                 GParamSpec *pspec)
++{
++  PhoshWifiManager *self = PHOSH_WIFI_MANAGER (object);
++
++  switch (property_id) {
++  case PROP_ICON_NAME:
++    g_value_set_string (value, self->icon_name);
++    break;
++  case PROP_SSID:
++    g_value_set_string (value, self->ssid);
++    break;
++  case PROP_ENABLED:
++    g_value_set_boolean (value, self->enabled);
++    break;
++  case PROP_PRESENT:
++    g_value_set_boolean (value, self->present);
++    break;
++  case PROP_IS_HOTSPOT_MASTER:
++    g_value_set_boolean (value, FALSE);
++    break;
++  default:
++    G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
++    break;
++  }
++}
++
++
++static void
++phosh_wifi_manager_constructed (GObject *object)
++{
++  PhoshWifiManager *self = PHOSH_WIFI_MANAGER (object);
++
++  G_OBJECT_CLASS (phosh_wifi_manager_parent_class)->constructed (object);
++
++  self->client = g_object_ref (tl_launcherctl_get_default ());
++  g_signal_connect_object (self->client, "event::network",
++                           G_CALLBACK (on_network_event), self, G_CONNECT_SWAPPED);
++  g_signal_connect_object (self->client, "notify::available",
++                           G_CALLBACK (on_available_changed), self, G_CONNECT_SWAPPED);
++  update (self);
++}
++
++
++static void
++phosh_wifi_manager_dispose (GObject *object)
++{
++  PhoshWifiManager *self = PHOSH_WIFI_MANAGER (object);
++
++  g_clear_object (&self->client);
++  g_clear_pointer (&self->ssid, g_free);
++
++  G_OBJECT_CLASS (phosh_wifi_manager_parent_class)->dispose (object);
++}
++
++
++static void
++phosh_wifi_manager_class_init (PhoshWifiManagerClass *klass)
++{
++  GObjectClass *object_class = G_OBJECT_CLASS (klass);
++
++  object_class->constructed = phosh_wifi_manager_constructed;
++  object_class->dispose = phosh_wifi_manager_dispose;
++  object_class->get_property = phosh_wifi_manager_get_property;
++
++  props[PROP_ICON_NAME] =
++    g_param_spec_string ("icon-name", "", "", NULL,
++                         G_PARAM_READABLE | G_PARAM_EXPLICIT_NOTIFY | G_PARAM_STATIC_STRINGS);
++  props[PROP_SSID] =
++    g_param_spec_string ("ssid", "", "", NULL,
++                         G_PARAM_READABLE | G_PARAM_EXPLICIT_NOTIFY | G_PARAM_STATIC_STRINGS);
++  props[PROP_ENABLED] =
++    g_param_spec_boolean ("enabled", "", "", FALSE,
++                          G_PARAM_READABLE | G_PARAM_EXPLICIT_NOTIFY | G_PARAM_STATIC_STRINGS);
++  props[PROP_PRESENT] =
++    g_param_spec_boolean ("present", "", "", FALSE,
++                          G_PARAM_READABLE | G_PARAM_EXPLICIT_NOTIFY | G_PARAM_STATIC_STRINGS);
++  props[PROP_IS_HOTSPOT_MASTER] =
++    g_param_spec_boolean ("is-hotspot-master", "", "", FALSE,
++                          G_PARAM_READABLE | G_PARAM_EXPLICIT_NOTIFY | G_PARAM_STATIC_STRINGS);
++
++  g_object_class_install_properties (object_class, PROP_LAST_PROP, props);
++}
++
++
++static void
++phosh_wifi_manager_init (PhoshWifiManager *self)
++{
++  self->icon_name = "network-wireless-disabled-symbolic";
++}
++
++
++PhoshWifiManager *
++phosh_wifi_manager_new (void)
++{
++  return g_object_new (PHOSH_TYPE_WIFI_MANAGER, NULL);
++}
++
++
++guint8
++phosh_wifi_manager_get_strength (PhoshWifiManager *self)
++{
++  g_return_val_if_fail (PHOSH_IS_WIFI_MANAGER (self), 0);
++
++  return self->strength;
++}
++
++
++const char *
++phosh_wifi_manager_get_icon_name (PhoshWifiManager *self)
++{
++  g_return_val_if_fail (PHOSH_IS_WIFI_MANAGER (self), NULL);
++
++  return self->icon_name;
++}
++
++
++const char *
++phosh_wifi_manager_get_ssid (PhoshWifiManager *self)
++{
++  g_return_val_if_fail (PHOSH_IS_WIFI_MANAGER (self), NULL);
++
++  return self->ssid;
++}
++
++
++gboolean
++phosh_wifi_manager_get_enabled (PhoshWifiManager *self)
++{
++  g_return_val_if_fail (PHOSH_IS_WIFI_MANAGER (self), FALSE);
++
++  return self->enabled;
++}
++
++
++void
++phosh_wifi_manager_set_enabled (PhoshWifiManager *self, gboolean enabled)
++{
++  g_return_if_fail (PHOSH_IS_WIFI_MANAGER (self));
++
++  g_debug ("Wi-Fi is read-only here, not switching it %s", enabled ? "on" : "off");
++}
++
++
++gboolean
++phosh_wifi_manager_get_present (PhoshWifiManager *self)
++{
++  g_return_val_if_fail (PHOSH_IS_WIFI_MANAGER (self), FALSE);
++
++  return self->present;
++}
++
++
++gboolean
++phosh_wifi_manager_is_hotspot_master (PhoshWifiManager *self)
++{
++  g_return_val_if_fail (PHOSH_IS_WIFI_MANAGER (self), FALSE);
++
++  return FALSE;
++}
++
++
++void
++phosh_wifi_manager_set_hotspot_master (PhoshWifiManager *self, gboolean is_hotspot_master)
++{
++  g_return_if_fail (PHOSH_IS_WIFI_MANAGER (self));
++
++  g_debug ("No hotspot, not %s one", is_hotspot_master ? "starting" : "stopping");
++}
+diff --git a/src/wwan/meson.build b/src/wwan/meson.build
+index 18371c0..0486397 100644
+--- a/src/wwan/meson.build
++++ b/src/wwan/meson.build
+@@ -4,6 +4,7 @@ phosh_wwan_headers = files(
+   'phosh-wwan-iface.h',
+   'phosh-wwan-mm.h',
+   'phosh-wwan-ofono.h',
++  'phosh-wwan-tl.h',
+   'wwan-manager.h',
+ )
+ 
+@@ -21,3 +22,7 @@ endif
+ if have_modemmanager
+   phosh_wwan_sources += files('phosh-wwan-mm.c')
+ endif
++
++if have_launcherctl
++  phosh_wwan_sources += files('phosh-wwan-tl.c')
++endif
+diff --git a/src/wwan/phosh-wwan-tl.c b/src/wwan/phosh-wwan-tl.c
+new file mode 100644
+index 0000000..5dd934d
+--- /dev/null
++++ b/src/wwan/phosh-wwan-tl.c
+@@ -0,0 +1,306 @@
++/*
++ * Copyright (C) 2025 Termux Launcher
++ *
++ * SPDX-License-Identifier: GPL-3.0-or-later
++ */
++
++#define G_LOG_DOMAIN "phosh-wwan-tl"
++
++#include "phosh-config.h"
++
++#include "phosh-wwan-iface.h"
++#include "phosh-wwan-tl.h"
++#include "tl-launcherctl.h"
++
++/**
++ * PhoshWWanTl:
++ *
++ * Implementation of the [iface@Phosh.WWan] interface for the launcher
++ *
++ * It shows what the `network` events of the launcher's watch stream say about the cellular
++ * connection (present, signal level 0 to 4, network type, mobile data on or off) and only shows
++ * it: the radio and the mobile data cannot be switched from here. The mobile quick setting's
++ * long-press opens Android's mobile-network settings.
++ */
++
++enum {
++  PROP_0,
++  PROP_SIGNAL_QUALITY,
++  PROP_ACCESS_TEC,
++  PROP_UNLOCKED,
++  PROP_SIM,
++  PROP_PRESENT,
++  PROP_ENABLED,
++  PROP_OPERATOR,
++  PROP_DATA_ENABLED,
++  PROP_HAS_DATA,
++  PROP_LAST_PROP,
++};
++
++struct _PhoshWWanTl {
++  PhoshWWanManager parent;
++
++  TlLauncherctl   *client;
++
++  guint            signal_quality;
++  const char      *access_tec;
++  gboolean         present;
++  gboolean         data_enabled;
++};
++
++static void phosh_wwan_tl_interface_init (PhoshWWanInterface *iface);
++G_DEFINE_TYPE_WITH_CODE (PhoshWWanTl, phosh_wwan_tl, PHOSH_TYPE_WWAN_MANAGER,
++                         G_IMPLEMENT_INTERFACE (PHOSH_TYPE_WWAN,
++                                                phosh_wwan_tl_interface_init))
++
++
++/* The launcher says what Android says (LTE, NR, HSPA, ...); phosh shows 2G to 5G. */
++static const char *
++access_tec_from_network_type (const char *type)
++{
++  static const struct {
++    const char *type;
++    const char *tec;
++  } map[] = {
++    { "NR", "5G" },
++    { "LTE", "4G" },
++    { "LTE_CA", "4G" },
++    { "UMTS", "3G" },
++    { "HSDPA", "3G" },
++    { "HSUPA", "3G" },
++    { "HSPA", "3G" },
++    { "HSPAP", "3G" },
++    { "TD_SCDMA", "3G" },
++    { "EVDO_0", "3G" },
++    { "EVDO_A", "3G" },
++    { "EVDO_B", "3G" },
++    { "GPRS", "2G" },
++    { "EDGE", "2G" },
++    { "GSM", "2G" },
++    { "CDMA", "2G" },
++    { "1XRTT", "2G" },
++    { "IDEN", "2G" },
++  };
++
++  if (!type)
++    return NULL;
++
++  for (guint i = 0; i < G_N_ELEMENTS (map); i++) {
++    if (!g_ascii_strcasecmp (type, map[i].type))
++      return map[i].tec;
++  }
++
++  return NULL;
++}
++
++
++static void
++update (PhoshWWanTl *self)
++{
++  JsonObject *network = NULL;
++  JsonObject *cellular = NULL;
++  gboolean present, data_enabled;
++  guint quality = 0;
++  const char *tec = NULL;
++
++  if (tl_launcherctl_get_available (self->client))
++    network = tl_launcherctl_get_last (self->client, "network");
++  cellular = tl_json_get_object (network, "cellular");
++
++  present = cellular && json_object_get_boolean_member_with_default (cellular, "present", FALSE);
++  data_enabled = present && json_object_get_boolean_member_with_default (cellular, "data_enabled",
++                                                                          FALSE);
++  if (present) {
++    quality = CLAMP (json_object_get_int_member_with_default (cellular, "signal_level", 0),
++                     0, 4) * 25;
++    tec = access_tec_from_network_type (
++      json_object_get_string_member_with_default (cellular, "network_type", NULL));
++  }
++
++  g_object_freeze_notify (G_OBJECT (self));
++
++  if (self->signal_quality != quality) {
++    self->signal_quality = quality;
++    g_object_notify (G_OBJECT (self), "signal-quality");
++  }
++  if (self->access_tec != tec) {
++    self->access_tec = tec;
++    g_object_notify (G_OBJECT (self), "access-tec");
++  }
++  if (self->data_enabled != data_enabled) {
++    self->data_enabled = data_enabled;
++    g_object_notify (G_OBJECT (self), "data-enabled");
++    g_object_notify (G_OBJECT (self), "has-data");
++  }
++  if (self->present != present) {
++    self->present = present;
++    /* A modem with a SIM that is unlocked, and the radio on: that is all Android lets us see */
++    g_object_notify (G_OBJECT (self), "present");
++    g_object_notify (G_OBJECT (self), "sim");
++    g_object_notify (G_OBJECT (self), "unlocked");
++    g_object_notify (G_OBJECT (self), "enabled");
++  }
++
++  g_object_thaw_notify (G_OBJECT (self));
++}
++
++
++static void
++on_network_event (PhoshWWanTl *self, JsonObject *data, TlLauncherctl *client)
++{
++  update (self);
++}
++
++
++static void
++on_available_changed (PhoshWWanTl *self, GParamSpec *pspec, TlLauncherctl *client)
++{
++  update (self);
++}
++
++
++static void
++phosh_wwan_tl_get_property (GObject    *object,
++                            guint       property_id,
++                            GValue     *value,
++                            GParamSpec *pspec)
++{
++  PhoshWWanTl *self = PHOSH_WWAN_TL (object);
++
++  switch (property_id) {
++  case PROP_SIGNAL_QUALITY:
++    g_value_set_int (value, self->signal_quality);
++    break;
++  case PROP_ACCESS_TEC:
++    g_value_set_string (value, self->access_tec);
++    break;
++  case PROP_UNLOCKED:
++  case PROP_SIM:
++  case PROP_PRESENT:
++  case PROP_ENABLED:
++    g_value_set_boolean (value, self->present);
++    break;
++  case PROP_OPERATOR:
++    g_value_set_string (value, NULL);
++    break;
++  case PROP_DATA_ENABLED:
++  case PROP_HAS_DATA:
++    g_value_set_boolean (value, self->data_enabled);
++    break;
++  default:
++    G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
++    break;
++  }
++}
++
++
++static void
++phosh_wwan_tl_constructed (GObject *object)
++{
++  PhoshWWanTl *self = PHOSH_WWAN_TL (object);
++
++  G_OBJECT_CLASS (phosh_wwan_tl_parent_class)->constructed (object);
++
++  self->client = g_object_ref (tl_launcherctl_get_default ());
++  g_signal_connect_object (self->client, "event::network",
++                           G_CALLBACK (on_network_event), self, G_CONNECT_SWAPPED);
++  g_signal_connect_object (self->client, "notify::available",
++                           G_CALLBACK (on_available_changed), self, G_CONNECT_SWAPPED);
++  update (self);
++}
++
++
++static void
++phosh_wwan_tl_dispose (GObject *object)
++{
++  PhoshWWanTl *self = PHOSH_WWAN_TL (object);
++
++  g_clear_object (&self->client);
++
++  G_OBJECT_CLASS (phosh_wwan_tl_parent_class)->dispose (object);
++}
++
++
++static void
++phosh_wwan_tl_class_init (PhoshWWanTlClass *klass)
++{
++  GObjectClass *object_class = G_OBJECT_CLASS (klass);
++
++  object_class->constructed = phosh_wwan_tl_constructed;
++  object_class->dispose = phosh_wwan_tl_dispose;
++  object_class->get_property = phosh_wwan_tl_get_property;
++
++  g_object_class_override_property (object_class, PROP_SIGNAL_QUALITY, "signal-quality");
++  g_object_class_override_property (object_class, PROP_ACCESS_TEC, "access-tec");
++  g_object_class_override_property (object_class, PROP_UNLOCKED, "unlocked");
++  g_object_class_override_property (object_class, PROP_SIM, "sim");
++  g_object_class_override_property (object_class, PROP_PRESENT, "present");
++  g_object_class_override_property (object_class, PROP_ENABLED, "enabled");
++  g_object_class_override_property (object_class, PROP_OPERATOR, "operator");
++  /* The base class has no data connection of its own to ask: it asks the object */
++  g_object_class_override_property (object_class, PROP_DATA_ENABLED, "data-enabled");
++  g_object_class_override_property (object_class, PROP_HAS_DATA, "has-data");
++}
++
++
++static void
++phosh_wwan_tl_init (PhoshWWanTl *self)
++{
++}
++
++
++static guint
++phosh_wwan_tl_get_signal_quality (PhoshWWan *wwan)
++{
++  g_return_val_if_fail (PHOSH_IS_WWAN_TL (wwan), 0);
++
++  return PHOSH_WWAN_TL (wwan)->signal_quality;
++}
++
++
++static const char *
++phosh_wwan_tl_get_access_tec (PhoshWWan *wwan)
++{
++  g_return_val_if_fail (PHOSH_IS_WWAN_TL (wwan), NULL);
++
++  return PHOSH_WWAN_TL (wwan)->access_tec;
++}
++
++
++static gboolean
++phosh_wwan_tl_is_present (PhoshWWan *wwan)
++{
++  g_return_val_if_fail (PHOSH_IS_WWAN_TL (wwan), FALSE);
++
++  return PHOSH_WWAN_TL (wwan)->present;
++}
++
++
++static const char *
++phosh_wwan_tl_get_operator (PhoshWWan *wwan)
++{
++  g_return_val_if_fail (PHOSH_IS_WWAN_TL (wwan), NULL);
++
++  return NULL;
++}
++
++
++static void
++phosh_wwan_tl_interface_init (PhoshWWanInterface *iface)
++{
++  iface->get_signal_quality = phosh_wwan_tl_get_signal_quality;
++  iface->get_access_tec = phosh_wwan_tl_get_access_tec;
++  /* The SIM is there, unlocked and the radio on whenever the modem is */
++  iface->is_unlocked = phosh_wwan_tl_is_present;
++  iface->has_sim = phosh_wwan_tl_is_present;
++  iface->is_present = phosh_wwan_tl_is_present;
++  iface->is_enabled = phosh_wwan_tl_is_present;
++  iface->get_operator = phosh_wwan_tl_get_operator;
++}
++
++
++PhoshWWanTl *
++phosh_wwan_tl_new (void)
++{
++  return g_object_new (PHOSH_TYPE_WWAN_TL, NULL);
++}
+diff --git a/src/wwan/phosh-wwan-tl.h b/src/wwan/phosh-wwan-tl.h
+new file mode 100644
+index 0000000..8f077a8
+--- /dev/null
++++ b/src/wwan/phosh-wwan-tl.h
+@@ -0,0 +1,20 @@
++/*
++ * Copyright (C) 2025 Termux Launcher
++ *
++ * SPDX-License-Identifier: GPL-3.0-or-later
++ */
++#pragma once
++
++#include <glib-object.h>
++#include "phosh-wwan-iface.h"
++#include "wwan-manager.h"
++
++G_BEGIN_DECLS
++
++#define PHOSH_TYPE_WWAN_TL (phosh_wwan_tl_get_type())
++
++G_DECLARE_FINAL_TYPE (PhoshWWanTl, phosh_wwan_tl, PHOSH, WWAN_TL, PhoshWWanManager)
++
++PhoshWWanTl *phosh_wwan_tl_new (void);
++
++G_END_DECLS
+diff --git a/src/wwan/wwan-manager-none.c b/src/wwan/wwan-manager-none.c
+index 02dfef9..d07ad72 100644
+--- a/src/wwan/wwan-manager-none.c
++++ b/src/wwan/wwan-manager-none.c
+@@ -130,9 +130,13 @@ phosh_wwan_manager_set_enabled (PhoshWWanManager *self, gboolean enabled)
+ gboolean
+ phosh_wwan_manager_get_data_enabled (PhoshWWanManager *self)
+ {
++  gboolean enabled = FALSE;
++
+   g_return_val_if_fail (PHOSH_IS_WWAN_MANAGER (self), FALSE);
+ 
+-  return FALSE;
++  /* This class has none; a subclass that has one (PhoshWWanTl) overrides the property */
++  g_object_get (self, "data-enabled", &enabled, NULL);
++  return enabled;
+ }
+ 
+ 
+@@ -148,7 +152,10 @@ phosh_wwan_manager_set_data_enabled (PhoshWWanManager *self, gboolean enabled)
+ gboolean
+ phosh_wwan_manager_has_data (PhoshWWanManager *self)
+ {
++  gboolean has_data = FALSE;
++
+   g_return_val_if_fail (PHOSH_IS_WWAN_MANAGER (self), FALSE);
+ 
+-  return FALSE;
++  g_object_get (self, "has-data", &has_data, NULL);
++  return has_data;
+ }

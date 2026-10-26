@@ -1,0 +1,273 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PickleHik3 <noreply@example.invalid>
+Date: Mon, 26 Oct 2026 12:00:00 +0000
+Subject: [PATCH 18/23] Battery manager: from the launcher's battery events
+
+With -Dlauncherctl the battery manager (battery-manager-tl.c) takes the percentage and the
+status (CHARGING, FULL, ...) of the watch stream's battery event instead of UPower's display
+device, with the same properties (present, icon-name, percent) and the same icons. It is
+present while the stream is open and has delivered a battery event. battery-manager.c is not
+built then, and upower-glib is not a dependency.
+---
+ src/battery-manager-tl.c | 228 +++++++++++++++++++++++++++++++++++++++
+ src/meson.build          |   5 +-
+ 2 files changed, 231 insertions(+), 2 deletions(-)
+ create mode 100644 src/battery-manager-tl.c
+
+diff --git a/src/battery-manager-tl.c b/src/battery-manager-tl.c
+new file mode 100644
+index 0000000..bd891b4
+--- /dev/null
++++ b/src/battery-manager-tl.c
+@@ -0,0 +1,228 @@
++/*
++ * Copyright (C) 2025 Phosh.mobi e.V.
++ *               2025 Termux Launcher
++ *
++ * SPDX-License-Identifier: GPL-3.0-or-later
++ *
++ * Author: Guido Günther <agx@sigxcpu.org>
++ */
++
++#define G_LOG_DOMAIN "phosh-battery-manager"
++
++#include "phosh-config.h"
++#include "battery-manager.h"
++
++#include "tl-launcherctl.h"
++
++#include <math.h>
++
++/**
++ * PhoshBatteryManager:
++ *
++ * Track the battery and its charging state
++ *
++ * This is the battery manager of a build with `-Dlauncherctl`: it reads the launcher's
++ * `battery` events (percentage and status) from [class@TlLauncherctl] instead of UPower, and
++ * has the same properties.
++ */
++
++enum {
++  PROP_0,
++  PROP_PRESENT,
++  PROP_ICON_NAME,
++  PROP_PERCENT,
++  PROP_LAST_PROP
++};
++static GParamSpec *props[PROP_LAST_PROP];
++
++struct _PhoshBatteryManager {
++  PhoshManager   parent;
++
++  TlLauncherctl *client;
++
++  gboolean       present;
++  char          *icon_name;
++  uint           percent;
++};
++G_DEFINE_TYPE (PhoshBatteryManager, phosh_battery_manager, PHOSH_TYPE_MANAGER)
++
++
++static void
++update (PhoshBatteryManager *self)
++{
++  JsonObject *battery = NULL;
++  gboolean present;
++  const char *status;
++  double percentage;
++  int smallest_ten;
++  uint percent;
++  gboolean is_charging;
++  gboolean is_charged;
++  g_autofree char *icon_name = NULL;
++
++  if (tl_launcherctl_get_available (self->client))
++    battery = tl_launcherctl_get_last (self->client, "battery");
++
++  present = battery && json_object_has_member (battery, "percentage");
++
++  g_object_freeze_notify (G_OBJECT (self));
++
++  if (present) {
++    status = json_object_get_string_member_with_default (battery, "status", "");
++    percentage = CLAMP (json_object_get_double_member_with_default (battery, "percentage", 0.0),
++                        0.0, 100.0);
++
++    is_charging = !g_ascii_strcasecmp (status, "CHARGING");
++    smallest_ten = floor (percentage / 10.0) * 10;
++    is_charged = !g_ascii_strcasecmp (status, "FULL") || (is_charging && smallest_ten == 100);
++
++    if (is_charged)
++      icon_name = g_strdup ("battery-level-100-charged-symbolic");
++    else if (is_charging)
++      icon_name = g_strdup_printf ("battery-level-%d-charging-symbolic", smallest_ten);
++    else
++      icon_name = g_strdup_printf ("battery-level-%d-symbolic", smallest_ten);
++
++    if (g_strcmp0 (self->icon_name, icon_name)) {
++      g_free (self->icon_name);
++      self->icon_name = g_steal_pointer (&icon_name);
++      g_debug ("New icon: %s", self->icon_name);
++      g_object_notify_by_pspec (G_OBJECT (self), props[PROP_ICON_NAME]);
++    }
++
++    percent = (int) (percentage + 0.5);
++    if (self->percent != percent) {
++      self->percent = percent;
++      g_object_notify_by_pspec (G_OBJECT (self), props[PROP_PERCENT]);
++    }
++  }
++
++  if (self->present != present) {
++    self->present = present;
++    g_object_notify_by_pspec (G_OBJECT (self), props[PROP_PRESENT]);
++  }
++
++  g_object_thaw_notify (G_OBJECT (self));
++}
++
++
++static void
++on_battery_event (PhoshBatteryManager *self, JsonObject *data, TlLauncherctl *client)
++{
++  update (self);
++}
++
++
++static void
++on_available_changed (PhoshBatteryManager *self, GParamSpec *pspec, TlLauncherctl *client)
++{
++  update (self);
++}
++
++
++static void
++phosh_battery_manager_idle_init (PhoshManager *manager)
++{
++  PhoshBatteryManager *self = PHOSH_BATTERY_MANAGER (manager);
++
++  self->client = g_object_ref (tl_launcherctl_get_default ());
++
++  g_signal_connect_object (self->client, "event::battery",
++                           G_CALLBACK (on_battery_event), self, G_CONNECT_SWAPPED);
++  g_signal_connect_object (self->client, "notify::available",
++                           G_CALLBACK (on_available_changed), self, G_CONNECT_SWAPPED);
++  update (self);
++}
++
++
++static void
++phosh_battery_manager_get_property (GObject    *object,
++                                    guint       property_id,
++                                    GValue     *value,
++                                    GParamSpec *pspec)
++{
++  PhoshBatteryManager *self = PHOSH_BATTERY_MANAGER (object);
++
++  switch (property_id) {
++  case PROP_PRESENT:
++    g_value_set_boolean (value, self->present);
++    break;
++  case PROP_ICON_NAME:
++    g_value_set_string (value, self->icon_name);
++    break;
++  case PROP_PERCENT:
++    g_value_set_uint (value, self->percent);
++    break;
++  default:
++    G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
++    break;
++  }
++}
++
++
++static void
++phosh_battery_manager_dispose (GObject *object)
++{
++  PhoshBatteryManager *self = PHOSH_BATTERY_MANAGER (object);
++
++  g_clear_object (&self->client);
++  g_clear_pointer (&self->icon_name, g_free);
++
++  G_OBJECT_CLASS (phosh_battery_manager_parent_class)->dispose (object);
++}
++
++
++static void
++phosh_battery_manager_class_init (PhoshBatteryManagerClass *klass)
++{
++  GObjectClass *object_class = G_OBJECT_CLASS (klass);
++  PhoshManagerClass *manager_class = PHOSH_MANAGER_CLASS (klass);
++
++  object_class->get_property = phosh_battery_manager_get_property;
++  object_class->dispose = phosh_battery_manager_dispose;
++
++  manager_class->idle_init = phosh_battery_manager_idle_init;
++
++  /**
++   * PhoshBatteryManager:present
++   *
++   * Whether battery information is present
++   */
++  props[PROP_PRESENT] =
++    g_param_spec_boolean ("present", "", "",
++                          FALSE,
++                          G_PARAM_READABLE | G_PARAM_EXPLICIT_NOTIFY | G_PARAM_STATIC_STRINGS);
++  /**
++   * PhoshBatteryManager:icon-name:
++   *
++   * The battery indicator icon name
++   */
++  props[PROP_ICON_NAME] =
++    g_param_spec_string ("icon-name", "", "",
++                         NULL,
++                         G_PARAM_READABLE | G_PARAM_EXPLICIT_NOTIFY | G_PARAM_STATIC_STRINGS);
++  /**
++   * PhoshBatteryManager:percent:
++   *
++   * The charge percentage of the main battery
++   */
++  props[PROP_PERCENT] =
++    g_param_spec_uint ("percent", "", "",
++                       0, G_MAXUINT, 0,
++                       G_PARAM_READABLE | G_PARAM_EXPLICIT_NOTIFY | G_PARAM_STATIC_STRINGS);
++
++  g_object_class_install_properties (object_class, PROP_LAST_PROP, props);
++}
++
++
++static void
++phosh_battery_manager_init (PhoshBatteryManager *self)
++{
++}
++
++
++PhoshBatteryManager *
++phosh_battery_manager_new (void)
++{
++  return g_object_new (PHOSH_TYPE_BATTERY_MANAGER, NULL);
++}
+diff --git a/src/meson.build b/src/meson.build
+index 16c4387..4795073 100644
+--- a/src/meson.build
++++ b/src/meson.build
+@@ -216,7 +216,6 @@ phosh_tool_sources = files(
+   'background-image.c',
+   'background.c',
+   'backlight.c',
+-  'battery-manager.c',
+   'bidi.c',
+   'brightness-manager.c',
+   'brightness-settings.c',
+@@ -484,7 +483,9 @@ endif
+ 
+ # The client of the launcher's API; the backends that use it come with their own commits.
+ if have_launcherctl
+-  phosh_tool_sources += files('tl-launcherctl.c')
++  phosh_tool_sources += files('battery-manager-tl.c', 'tl-launcherctl.c')
++else
++  phosh_tool_sources += files('battery-manager.c')
+ endif
+ 
+ # Headers are bundled as they're not shipped by gnome-bluetooth
