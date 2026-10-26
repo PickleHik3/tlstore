@@ -86,7 +86,7 @@ if [ "$self_test" = 0 ]; then
     missing=()
     for mod in gtk+-3.0 libhandy-1 gnome-desktop-3.0 json-glib-1.0 gcr-3 libpulse-mainloop-glib \
                upower-glib wayland-server wayland-client xkbcommon pixman-1 libdrm egl glesv2 \
-               xcb xcb-icccm xcb-composite xcb-xfixes xcb-xinput xcb-render-util xcb-shm xcb-present \
+               xcb xcb-icccm xcb-composite xcb-xfixes xcb-xinput xcb-shm xcb-present \
                xcb-dri3 xcb-ewmh xcb-res xcb-renderutil x11-xcb gsettings-desktop-schemas; do
         pkg-config --exists "$mod" 2>/dev/null || missing+=("$mod")
     done
