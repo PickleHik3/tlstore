@@ -19,6 +19,7 @@ tmp="${TERMUX_TMP_PREFIX:-$PREFIX/tmp}"
 
 if [ "${1:-}" = stop ]; then
     pkill -x phoc 2>/dev/null || true
+    pkill -x tl-feedbackd 2>/dev/null || true
     # The launcher's own session: its Desktops entry records the shell it runs us in.
     if [ -r "$tmp/termux-x11-session.pid" ]; then
         pid=$(cat "$tmp/termux-x11-session.pid" 2>/dev/null || true)
@@ -107,8 +108,14 @@ if [ -z "${PHOSH_SCALE:-}" ]; then
 fi
 [ -z "${PHOSH_SCALE:-}" ] || export PHOSH_SCALE
 
-# tl-feedbackd (#13): start it here, before phoc, once it is in the archive.
-#   [ ! -x "$app/bin/tl-feedbackd" ] || "$app/bin/tl-feedbackd" &
+# tl-feedbackd (#13): answers org.sigxcpu.Feedback on the session bus, so phosh's and the apps'
+# feedback events (libfeedback) become launcherctl vibrate calls. Started before phoc; if one is
+# already on the bus it loses the name and exits. Its D-Bus activation file is in the archive's
+# share/dbus-1/services/, found through XDG_DATA_DIRS, for a libfeedback that asks before this runs.
+if [ -x "$app/bin/tl-feedbackd" ]; then
+    "$app/bin/tl-feedbackd" 2>>"${XDG_STATE_HOME:-$HOME/.local/state}/phosh/tl-feedbackd.log" &
+    fbd=$!
+fi
 
 # phoc runs as a child so that a connection failure can be told apart and explained; a TERM (the
 # launcher's stop) is passed on to it.
@@ -120,6 +127,7 @@ rc=0
 wait "$pid" || rc=$?
 # A signal interrupts the first wait; wait again for the child to be gone.
 while kill -0 "$pid" 2>/dev/null; do wait "$pid" || rc=$?; done
+[ -z "${fbd:-}" ] || kill "$fbd" 2>/dev/null || true
 cat "$log" >&2
 if [ "$rc" -ne 0 ] && grep -q 'xcb connection' "$log" 2>/dev/null; then
     echo "phosh-session: open Display in the launcher first, or tap Phosh under Desktops" >&2

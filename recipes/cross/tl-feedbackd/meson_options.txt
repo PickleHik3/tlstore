@@ -1,0 +1,2 @@
+option('service_exec', type: 'string', value: '',
+  description: 'Exec= line of the D-Bus activation file (default: the installed binary)')

@@ -293,6 +293,15 @@ build_phosh() {
     touch "$TL_TEST_DIR/.installed-phosh"
 }
 
+# tl-feedbackd (#13), this repository's own daemon: built into the prefix every run (it is small),
+# started below before phoc.
+build_tl_feedbackd() {
+    meson setup --reconfigure "$TL_TEST_DIR/tl-feedbackd-build" "$RECIPES/tl-feedbackd" \
+        --prefix="$prefix" --buildtype=release >/dev/null
+    ninja -C "$TL_TEST_DIR/tl-feedbackd-build" >/dev/null
+    meson install -C "$TL_TEST_DIR/tl-feedbackd-build" >/dev/null
+}
+
 if [ "$deps_only" = 1 ]; then
     build_deps
     echo "run-headless: dependencies built into $prefix"
@@ -302,6 +311,7 @@ if [ "$self_test" = 0 ]; then
     build_deps
     build_phoc
     build_phosh
+    build_tl_feedbackd
 fi
 
 # --- run ---------------------------------------------------------------------------------------
@@ -365,6 +375,10 @@ export NO_AT_BRIDGE=1 GTK_A11Y=none GDK_BACKEND=wayland G_MESSAGES_DEBUG=
 # wlroots: the headless backend, one output, the pixman renderer.
 export WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1 WLR_RENDERER=pixman
 unset WAYLAND_DISPLAY DISPLAY
+
+# tl-feedbackd, as phosh-session starts it: before phoc, on the same bus.
+"$prefix/bin/tl-feedbackd" >"$run_dir/tl-feedbackd.log" 2>&1 &
+pids+=($!)
 
 # phoc starts phosh itself, as phosh-session does (phoc -E phosh).
 "$prefix/bin/phoc" -E "$prefix/bin/phosh" >"$run_dir/phoc.log" 2>&1 &

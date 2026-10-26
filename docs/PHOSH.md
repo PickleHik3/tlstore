@@ -191,7 +191,7 @@ The `phosh` row carries `min-launcher=` set to the first launcher release with a
 
 - `phosh-session` (the archive's `exe=`, wrapper `~/.local/bin/phosh-session`) finds its archive
   through the wrapper's symlink (fallback `~/.local/lib/phosh`), runs `phoc -E phosh` on the
-  launcher's display and starts `tl-feedbackd` once it is in the archive. It never starts the
+  launcher's display and starts `tl-feedbackd` before phoc. It never starts the
   display: the launcher opens the Display window and starts the server before it runs a Desktops
   entry, and nothing from a shell can open that window. From a terminal with no Display window
   open, phoc fails to connect and the script says "open Display in the launcher first, or tap Phosh
@@ -301,7 +301,10 @@ M2 can run alongside M0–M1. M5 can start after M0.
    ever lose kgsl, building Mesa here would take `-Dvulkan-drivers=freedreno -Dfreedreno-kmds=kgsl`
    (about 14 MB for `libvulkan_freedreno.so`, as Termux builds it), as a separate hidden part of the package.
 4. Where `tl-feedbackd` lives if other Linux desktops on the display want haptics too: inside the
-   phosh archive (now) or as its own hidden item (later).
+   phosh archive (now) or as its own hidden item (later). Answered (#13): inside the phosh archive
+   for now (`bin/tl-feedbackd`, source in `recipes/cross/tl-feedbackd/`, built by `build-phosh.sh`).
+   It is self-contained (GLib and GIO) and owns `org.sigxcpu.Feedback` on the session bus, so
+   splitting it into its own hidden item later is a recipe move, not a code change.
 
 ## Background: the proot trial (2026-10-25)
 

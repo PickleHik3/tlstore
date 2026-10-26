@@ -383,7 +383,7 @@ the sysroot's `vulkan-headers` and `vulkan-loader-generic` (already in `phosh-de
 to pixman, logging `Renderer: ...`; `WLR_RENDERER=pixman|vulkan` forces one. The patch cannot be
 exercised off a phone: the Pong (Adreno) check is owed.
 
-M1 adds phosh 0.58.0 (`TL_PHOSH_TREES` defaults to `phoc phosh phosh-mobile-settings` from M4). `phosh/` is its patch set: the
+M1 adds phosh 0.58.0 (`TL_PHOSH_TREES` defaults to `phoc phosh phosh-mobile-settings tl-feedbackd` from M3). `phosh/` is its patch set: the
 wraps' revisions, the Bionic fixes (a `libintl.h` stand-in as a global argument so that the
 subprojects see it, `memfd_create` by system call, no `exp10`), and meson options that compile out
 what the launcher does not ship (`lockscreen`, `polkit`, `logind`, `osk`, `eds`, `calls`,
@@ -422,3 +422,13 @@ scale). Nothing writes `phoc.ini` and nothing sets phoc's environment from insid
 session script that starts phoc (`phosh-session`, #8) reads the key and exports `PHOSH_SCALE=<value>`
 when it is not `0.0`, which phoc reads when it starts (`phoc/0004`); a change applies the next time
 the display starts. A scale in `phoc.ini` still wins over both.
+
+M3 adds `tl-feedbackd/` (#13), this repository's own daemon: C with GLib and GIO only, a meson project
+(`main.c`, `feedback-theme.{c,h}`, the D-Bus activation file). It owns `org.sigxcpu.Feedback` and
+answers what libfeedback 0.8.1 asks of feedbackd (`TriggerFeedback`, `EndFeedback`, `Profile`,
+`FeedbackEnded`, and `Feedback.Haptic.Vibrate`); each event of feedbackd's quiet (haptics) theme becomes
+`POST /v1/vibrate` calls to launcherctl, one per pulse because the route takes a duration only, at most
+28 a minute (launcherctl's limit is 30). `silent` suppresses haptics; without launcherctl events still end,
+and the first failure is logged once. `build-phosh.sh` builds it last (`tl-feedbackd` in `TL_PHOSH_TREES`)
+into `bin/tl-feedbackd` and `share/dbus-1/services/`; `phosh-session` starts it before phoc. The activation
+file's `Exec=` is a shell line that finds the archive under `$HOME/.local/lib/phosh` (or `$PHOSH_APP`).
