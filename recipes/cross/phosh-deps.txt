@@ -1,0 +1,49 @@
+# Termux packages for the phosh sysroot, M0: what phoc needs to configure and link.
+# Read by `termux-sysroot.sh -f` with TL_TERMUX_X11=1 (the x11-repo ones are marked). phosh's and
+# phosh-mobile-settings' libraries are added by the M1 tickets. termux-sysroot.sh does not
+# resolve Depends, so every library a listed one links against is named here too.
+# Names checked against both Packages indexes (aarch64 and x86_64) on 2026-10-26.
+# Not in Termux under any name: xcb-util-errors (phoc's X11 backend uses it; M1 builds it from
+# source or drops the use). "wayland", "wayland-protocols" and "pixman" are not Termux names;
+# they are libwayland, libwayland-protocols and libpixman.
+
+# Wayland
+libwayland
+libwayland-protocols
+libffi
+libexpat
+
+# Input and pixels
+libxkbcommon            # x11-repo
+xkeyboard-config        # x11-repo
+libpixman
+libdrm
+
+# X11 backend of phoc, and xwayland
+xorgproto
+libx11
+libxcb
+libxau
+libxdmcp
+xcb-util-wm             # x11-repo
+xcb-util-renderutil     # x11-repo
+xcb-util                # x11-repo
+xwayland                # x11-repo
+
+# GL and Vulkan headers
+mesa
+mesa-dev
+libglvnd
+libglvnd-dev
+vulkan-headers
+vulkan-loader-generic
+
+# glib and what it pulls in
+glib
+pcre2
+libiconv
+zlib
+
+# Bionic gaps (glob and friends) that Termux's libraries link against
+libandroid-support
+libandroid-glob

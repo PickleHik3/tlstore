@@ -338,3 +338,12 @@ These scripts build from upstream sources on the machine that runs them, which i
 repository ships patches rather than binaries. Publishing the resulting binaries is a different
 act with obligations attached — `kitten` is GPLv3 and requires an offer of corresponding source,
 and Chafa is LGPLv3. See [`../../THIRD_PARTY_NOTICES.md`](../../THIRD_PARTY_NOTICES.md).
+
+## phosh sysroot and meson cross files
+
+`phosh-deps.txt` lists the Termux packages phoc needs at M0. `TL_TERMUX_X11=1 TL_TERMUX_ARCH=<arch>
+./termux-sysroot.sh -f phosh-deps.txt` assembles them, taking each from the main repository or,
+failing that, Termux's x11-repo (`TL_TERMUX_X11_REPO`, `TL_TERMUX_X11_DIST`). `TL_ARCH=<arch>
+./phosh-cross-file.sh [out]` writes the meson cross file (NDK clang, API 26, pkg-config on the
+sysroot through `sys_root`). `TL_ARCH=<arch> ./phosh-smoke.sh` does both and links
+`phosh-smoke/` against wayland-client and pixman; it needs meson, ninja and pkg-config on the host.
