@@ -37,9 +37,8 @@ jobs:
         run: cargo test --locked
 
   # phoc and phosh built natively with the recipes' patch sets, run headless against a fake
-  # launcherctl (tests/phosh/, docs/PHOSH.md "Testing"). UNVERIFIED: written without a host that
-  # has the dev packages, so it was seen green on 2026-10-26 (run 40335453739) and is required
-  # it has been seen green.
+  # launcherctl (tests/phosh/, docs/PHOSH.md "Testing"). Seen green on 2026-10-26 (run
+  # 40335453739); required since then. tests/phosh/README.md lists the dependencies it builds.
   phosh-headless:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
