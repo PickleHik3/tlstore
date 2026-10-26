@@ -9,7 +9,9 @@
 # Usage:
 #   ./termux-sysroot.sh [package ...]
 #
-# With no arguments it installs the default set needed by the recipes in this directory. The
+# With no arguments it installs the default set needed by the recipes in this directory.
+# "-f FILE" reads package names from FILE instead (whitespace separated, "#" comments), as
+# phosh-deps.txt does; names after the options are added to them. The
 # sysroot is written to $TL_SYSROOT (default ./sysroot) and keeps the packages' absolute layout,
 # so the prefix inside it is $TL_SYSROOT/data/data/com.termux/files/usr.
 #
@@ -30,6 +32,13 @@ TL_SYSROOT=${TL_SYSROOT:-"$PWD/sysroot"}
 TL_TERMUX_REPO=${TL_TERMUX_REPO:-"https://packages.termux.dev/apt/termux-main"}
 TL_TERMUX_ARCH=${TL_TERMUX_ARCH:-aarch64}
 TL_CACHE=${TL_CACHE:-"$PWD/debs"}
+# Termux's x11-repo (libxkbcommon, xwayland, xcb-util-*, ...) is a separate repository with its
+# own index. TL_TERMUX_X11=1 makes it a second source after the main one; a package is taken from
+# the first repository that has it. Off by default, so the recipes that need only the main
+# repository, and other editions' repositories, behave as before.
+TL_TERMUX_X11=${TL_TERMUX_X11:-0}
+TL_TERMUX_X11_REPO=${TL_TERMUX_X11_REPO:-"https://packages.termux.dev/apt/termux-x11"}
+TL_TERMUX_X11_DIST=${TL_TERMUX_X11_DIST:-x11}
 
 # Enough to configure and link Fastfetch with ImageMagick 7, Chafa and zlib. Most of these are
 # header-only from the compiler's point of view: Fastfetch dlopens the image libraries at runtime.
@@ -58,20 +67,45 @@ fi
 
 mkdir -p "$TL_SYSROOT" "$TL_CACHE"
 
-index="$TL_CACHE/Packages.gz"
-if [ ! -f "$index" ]; then
-    echo "Fetching package index for $TL_TERMUX_ARCH..."
-    curl -fsS --max-time 120 \
-        "$TL_TERMUX_REPO/dists/stable/main/binary-$TL_TERMUX_ARCH/Packages.gz" -o "$index"
+# Each source is "<repo url> <dist> <index file>". The main repository keeps the index name it
+# always had, so an existing cache still works.
+repos=("$TL_TERMUX_REPO stable $TL_CACHE/Packages.gz")
+if [ "$TL_TERMUX_X11" = 1 ]; then
+    repos+=("$TL_TERMUX_X11_REPO $TL_TERMUX_X11_DIST $TL_CACHE/Packages-x11.gz")
 fi
+for entry in "${repos[@]}"; do
+    read -r url dist index <<<"$entry"
+    if [ ! -f "$index" ]; then
+        echo "Fetching package index $url ($dist) for $TL_TERMUX_ARCH..."
+        curl -fsS --max-time 120 \
+            "$url/dists/$dist/main/binary-$TL_TERMUX_ARCH/Packages.gz" -o "$index"
+    fi
+done
 
-packages=("$@")
+packages=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -f)
+            [ $# -ge 2 ] || { echo "error: -f needs a file" >&2; exit 2; }
+            # shellcheck disable=SC2207
+            packages+=($(sed 's/#.*//' "$2"))
+            shift 2
+            ;;
+        *)
+            packages+=("$1")
+            shift
+            ;;
+    esac
+done
 if [ ${#packages[@]} -eq 0 ]; then
     packages=("${DEFAULT_PACKAGES[@]}")
 fi
 
 for package in "${packages[@]}"; do
-    filename=$(python3 - "$index" "$package" <<'PY'
+    found=""
+    for entry in "${repos[@]}"; do
+        read -r url dist index <<<"$entry"
+        filename=$(python3 -I - "$index" "$package" <<'PY'
 import gzip, sys
 index, want = sys.argv[1], sys.argv[2]
 text = gzip.open(index, 'rt', errors='replace').read()
@@ -82,12 +116,17 @@ for block in text.split('\n\n'):
         break
 PY
 )
-    if [ -z "$filename" ]; then
+        if [ -n "$filename" ]; then
+            found=1
+            break
+        fi
+    done
+    if [ -z "$found" ]; then
         echo "warning: $package is not in the index; skipping" >&2
         continue
     fi
     deb="$TL_CACHE/$(basename "$filename")"
-    [ -f "$deb" ] || curl -fsS --max-time 300 "$TL_TERMUX_REPO/$filename" -o "$deb"
+    [ -f "$deb" ] || curl -fsS --max-time 300 "$url/$filename" -o "$deb"
     extract_deb "$deb" "$TL_SYSROOT"
     echo "installed $package"
 done
