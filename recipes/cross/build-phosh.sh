@@ -33,8 +33,7 @@
 #         $TERMUX_PREFIX/tmp, where Termux's libxcb looks (Android has no /tmp), Xwayland's device
 #         path compiled in (not the sysroot's copy pkg-config answers), and a display whose
 #         socket answers (the launcher's own, :0) is never taken over
-# and, from the recipe, not a patch: org.gnome.mutter.keybindings (phoc/*.gschema.xml) and the
-# archive's compiled share/glib-2.0/schemas/gschemas.compiled.
+# and, from the recipe, not a patch: org.gnome.mutter.keybindings (phoc/*.gschema.xml).
 #
 # M1 builds phosh 0.58.0 the same way: the tag, plus the numbered patches in recipes/cross/phosh/
 # (commits on the tag too, exported with `git format-patch`). They are of three kinds:
@@ -66,9 +65,12 @@
 #     UPower, iio-sensor-proxy and the torch manager stay: they only look for their D-Bus names.
 #     -Dtl-debug stays false (its default): the TlState and TlTile test hooks on DebugControl
 #     (patches 0023 and 0033) are for tests/phosh/run-headless.sh only, never in the archive.
-# Not in the archive yet: the session script, the session files and the compiled gschemas, which
-# are the "session-file step" of docs/PHOSH.md ("Packaging"). The schemas are checked here, with
-# the overrides of data/90_tl.gschema.override, not compiled into the archive.
+# The archive also has the launcher's session script, bin/phosh-session (its exe=; the Desktops
+# session file is a catalog file item of its own, recipes/cross/phosh-session.desktop), and one
+# share/glib-2.0/schemas/gschemas.compiled, compiled once after every tree is in the stage (the
+# archive's schemas and overrides only). The session compiles its own copy at every start, with
+# Termux's org.gnome.desktop schemas next to them, so that the overrides of those apply; the
+# archive's compiled file is its fallback. check_phosh_schemas compiles that same set here.
 #
 # What is built in:
 #   - wlroots 0.20.2, the subproject phoc's wlroots.wrap names, linked statically: backends=x11
@@ -87,9 +89,11 @@
 #   - phoc's own xwayland option on, with wlroots': phoc sets DISPLAY for phosh and the apps it
 #     starts to the Xwayland display (the first free one after the launcher's :0);
 #   - for phosh: gmobile (static), libgvc (static, over Termux's libpulse), feedbackd's libfeedback
-#     (a shared library, because its meson says so: lib/libfeedback-0.0.so in the archive, found
-#     through the binary's $ORIGIN/../lib), and everything else from the Termux sysroot (gtk3,
-#     libhandy, gcr, gnome-desktop3, appstream, libsoup3, upower's client library, libpulse).
+#     (a shared library whatever build_phosh's -Dlibfeedback:default_library=static says:
+#     feedbackd's meson builds it with target_type 'shared_library', so that option changes nothing. It is
+#     lib/libfeedback-0.0.so in the archive, found by phosh and phosh-mobile-settings through
+#     their $ORIGIN/../lib), and everything else from the Termux sysroot (gtk3, libhandy, gcr,
+#     gnome-desktop3, appstream, libsoup3, upower's client library, libpulse).
 # The subprojects are fetched by meson from the wraps the trees ship; their commits are pinned
 # below and checked.
 #
@@ -265,13 +269,10 @@ build_phoc() {
     DESTDIR="$stage" meson install -C "$build" --no-rebuild --strip >/dev/null
 
     # phoc opens org.gnome.mutter.keybindings, which no Termux package ships; the schemas it opens
-    # besides (org.gnome.desktop.*) come from Termux's gsettings-desktop-schemas. The archive
-    # carries its own compiled set (phoc's schema and the mutter one), self-contained.
-    local schemas="$stage/share/glib-2.0/schemas"
-    mkdir -p "$schemas"
-    cp "$SCRIPT_DIR/phoc/org.gnome.mutter.keybindings.gschema.xml" "$schemas/"
-    rm -f "$schemas/gschemas.compiled"
-    glib-compile-schemas --strict "$schemas"
+    # besides (org.gnome.desktop.*) come from Termux's gsettings-desktop-schemas. Compiled with
+    # the other trees' schemas once they are all in (the app tree, below).
+    mkdir -p "$stage/share/glib-2.0/schemas"
+    cp "$SCRIPT_DIR/phoc/org.gnome.mutter.keybindings.gschema.xml" "$stage/share/glib-2.0/schemas/"
 }
 
 # phosh's options: every feature the launcher does not ship is off (see the top of this file).
@@ -310,8 +311,7 @@ build_phosh() {
     DESTDIR="$stage" meson install -C "$build" --no-rebuild --strip >/dev/null
 
     # What upstream installs for a systemd and gnome-session desktop. The launcher's own session
-    # script and session file are a later step (docs/PHOSH.md, "Packaging"), and a script of the
-    # same name from here would be taken for it.
+    # script is installed in the app tree below, and its session file is a catalog item of its own.
     rm -rf "$stage/lib/systemd" "$stage/share/gnome-session" "$stage/share/wayland-sessions" \
         "$stage/bin/phosh-session"
 
@@ -334,12 +334,22 @@ build_phosh() {
 # libfeedback, which the stage still has before the app tree below drops include/ and
 # lib/pkgconfig. They are copied to $TL_SYSROOT/tl-phosh-dev, with .pc files in the sysroot's
 # pkgconfig directory, because the cross file's pkg-config takes every path to be inside the sysroot;
-# both go away after the build. The compositor panel's display scale is the gsettings key
+# both go away after the build, and on any exit before that (an EXIT trap), so that a failed build
+# does not leave them in a sysroot that is reused or cached. The compositor panel's display scale is the gsettings key
 # mobi.phosh.MobileSettings display-scale, which the session script turns into PHOSH_SCALE for phoc
 # (recipes/cross/phosh-mobile-settings/0013).
 PMS_PANELS_OFF=(
     welcome lang alerts lockscreen osk convergence sensors features updates about
 )
+
+# pms_dev_clean — remove what build_phosh_mobile_settings put into the sysroot.
+pms_dev_clean() {
+    local pc
+    rm -rf "$TL_SYSROOT/tl-phosh-dev"
+    for pc in phosh-plugins phosh-settings libfeedback-0.0; do
+        rm -f "$TL_SYSROOT$TERMUX_PREFIX/lib/pkgconfig/$pc.pc"
+    done
+}
 
 build_phosh_mobile_settings() {
     fetch_tree phosh-mobile-settings "$PMS_URL" "$PMS_SHA256" "$PMS_VERSION" "$PMS_COMMIT"
@@ -353,7 +363,8 @@ build_phosh_mobile_settings() {
         echo "error: phosh-mobile-settings is built after phosh (TL_PHOSH_TREES), in the same stage" >&2
         exit 1
     }
-    rm -rf "$dev"
+    trap pms_dev_clean EXIT
+    pms_dev_clean
     mkdir -p "$dev/include" "$dev/lib"
     cp -a "$stage/include/phosh" "$stage/include/libfeedback-0.0" "$dev/include/"
     cp -a "$stage"/lib/libfeedback-0.0.so* "$dev/lib/"
@@ -378,8 +389,8 @@ build_phosh_mobile_settings() {
     echo "Installing phosh-mobile-settings into the stage..."
     DESTDIR="$stage" meson install -C "$build" --no-rebuild --strip >/dev/null
 
-    rm -rf "$dev"
-    for pc in phosh-plugins phosh-settings libfeedback-0.0; do rm -f "$prefix/lib/pkgconfig/$pc.pc"; done
+    pms_dev_clean
+    trap - EXIT
 }
 # tl-feedbackd (M3, #13): this repository's own daemon, GLib and GIO only; it owns
 # org.sigxcpu.Feedback and turns feedback events into launcherctl vibrate calls. It goes to
@@ -420,6 +431,22 @@ find "$stage" -mindepth 1 -type d -empty -delete
 # The launcher's session script (upstream's own was dropped in build_phosh): the archive's exe=.
 mkdir -p "$stage/bin"
 install -m 755 "$SCRIPT_DIR/phosh-session" "$stage/bin/phosh-session"
+# Every tree's schemas and overrides, compiled once now that all are in: the session's fallback
+# (phosh-session compiles its own copy with Termux's desktop schemas). The overrides of schemas
+# that are not in the archive (org.gnome.desktop.*, which Termux's gsettings-desktop-schemas
+# ships) are skipped here, as glib-compile-schemas says; anything else it reports fails the build.
+if [ -d "$stage/share/glib-2.0/schemas" ]; then
+    rm -f "$stage/share/glib-2.0/schemas/gschemas.compiled"
+    schema_log=$(glib-compile-schemas "$stage/share/glib-2.0/schemas" 2>&1) || {
+        printf '%s\n' "$schema_log" >&2
+        echo "error: the archive's schemas do not compile" >&2
+        exit 1
+    }
+    if printf '%s\n' "$schema_log" | grep -v '^$' | grep -v 'non-existent schema\|ignoring override'; then
+        echo "error: glib-compile-schemas reported the above on the archive's schemas" >&2
+        exit 1
+    fi
+fi
 
 # --- checks ---------------------------------------------------------------------------------
 readelf="$NDK_BIN/llvm-readelf"
