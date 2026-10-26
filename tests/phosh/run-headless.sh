@@ -105,8 +105,8 @@ skipped_patch() {
 
 # fetch_tree <name> <url> <sha256> <version>: tarball, checksum, patch stack in file-name order.
 fetch_tree() {
-    local name="$1" url="$2" sha="$3" version="$4" src="$TL_TEST_DIR/$name-src" p
-    local tarball="$TL_TEST_DIR/$name-$version.tar.gz" patches=()
+    local name="$1" url="$2" sha="$3" version="$4" p
+    local src="$TL_TEST_DIR/$name-src" tarball="$TL_TEST_DIR/$name-$version.tar.gz" patches=()
     for p in "$RECIPES/$name"/*.patch; do
         skipped_patch "$name/$(basename "$p")" || patches+=("$p")
     done
