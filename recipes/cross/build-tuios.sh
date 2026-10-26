@@ -22,7 +22,7 @@ set -euo pipefail
 
 TUIOS_URL="https://github.com/Gaurav-Gosain/tuios.git"
 # scripts/upstream-watch.sh moves the pin below to upstream's latest release; keep its shape.
-TUIOS_TAG=${TUIOS_TAG:-v0.10.1}
+TUIOS_TAG=${TUIOS_TAG:-v0.11.0}
 
 TL_OUT=${TL_OUT:-"$PWD/out"}
 TL_BUILD_DIR=${TL_BUILD_DIR:-"$PWD/build-tuios"}
