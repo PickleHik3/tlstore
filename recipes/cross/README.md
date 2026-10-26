@@ -20,7 +20,7 @@ NDK plus a sysroot assembled with `dpkg-deb -x`.
 | `build-btop.sh` | patched btop, fully static, for the launcher's Shizuku lane | NDK + GNU make |
 | `build-tl-priv.sh` | `tl-priv`, the lane's client (`tl-priv/tl-priv.c`), fully static | NDK |
 | `build-herdr.sh` | herdr, built from source for bionic (Rust, plus Zig 0.16.0 for libghostty-vt, which the script downloads and verifies itself), as a `.tar.gz` app tree behind a launcher script that turns its terminal notifications on in Termux Launcher; `0001-herdr-android.patch` | rustup (`<arch>-linux-android`), NDK, git, curl, xz, GNU tar, gzip |
-| `build-phosh.sh` | the native phosh desktop as a `.tar.gz` archive tree (`bin/`, `share/`), built against the Termux sysroot of `phosh-deps.txt`. M0 builds only phoc 0.58.0 with its bundled wlroots 0.20.2 (X11 backend, pixman renderer, no libinput, udev or session); one function per upstream tree, each with its own patch directory (`phoc/`; `phosh/` and `phosh-mobile-settings/` come with their milestones); `TL_PHOSH_TREES` picks the trees | meson, ninja, pkg-config, wayland-scanner, glib's host tools, gettext, NDK, curl, git, GNU tar, gzip |
+| `build-phosh.sh` | the native phosh desktop as a `.tar.gz` archive tree (`bin/`, `share/`), built against the Termux sysroot of `phosh-deps.txt`. builds phoc 0.58.0 with its bundled wlroots 0.20.2 (X11 backend, pixman renderer, no libinput, udev or session) and, from M1, phosh 0.58.0 with the dropped features compiled out; one function per upstream tree, each with its own patch directory (`phoc/`, `phosh/`; `phosh-mobile-settings/` comes with its milestone); `TL_PHOSH_TREES` picks the trees | meson, ninja, pkg-config, wayland-scanner, glib's host tools, gettext, NDK, curl, git, GNU tar, gzip |
 | `fetch-launcher-skills.sh` | the launcher's agent skills, one `.tar.gz` each, packed by the launcher's own `scripts/pack-agent-skills.sh` at a pinned commit (not built; the same on every processor) | git, GNU tar, gzip |
 | `build-terminal-browser.sh` | terminal-browser as a `.tar.gz` app tree, from our fork: its JavaScript built as upstream releases it, `pixel.node` and `agent-browser` built for Android, Termux's `electron42` in place of upstream's Electron | rustup `<arch>-linux-android` + NDK, Node 22 + pnpm 10.13.1, GNU tar |
 
@@ -357,4 +357,19 @@ device"), and also supplies `libintl.h` (glib's `gi18n.h`), which neither Bionic
 patch files its wrap applies. xcb-util-errors is not built: `-Dwlroots:xcb-errors=disabled`, it
 only names X11 errors. On a host whose glib tools are missing where its `.pc` files say (Arch
 without `glib2-devel`), `TL_NATIVE_FILE=<meson native file>` points meson's build-machine
-`pkg_config_path` at a copy of the `.pc` files that names the tools in the sysroot instead.
+`pkg_config_path` at a copy of the `.pc` files that names the tools in the sysroot instead;
+`build-phosh.sh` makes that file itself when the host has no `glib-mkenums` or `gdbus-codegen`.
+
+M1 adds phosh 0.58.0 (`TL_PHOSH_TREES` defaults to `phoc phosh`). `phosh/` is its patch set: the
+wraps' revisions, the Bionic fixes (a `libintl.h` stand-in as a global argument so that the
+subprojects see it, `memfd_create` by system call, no `exp10`), and meson options that compile out
+what the launcher does not ship (`lockscreen`, `polkit`, `logind`, `osk`, `eds`, `calls`,
+`bluetooth`, `location`, `vpn`, `hotspot`, `networkmanager`, `modemmanager`, `gudev`, all on in
+upstream's build; the build turns them all off, plus upstream's `searchd` and the plugins). Termux
+has no libnm, mm-glib, libgudev, polkit, libsystemd/elogind, PAM, evolution-data-server,
+gnome-bluetooth or libcall-ui: `phosh-deps.txt` lists what it does have. The patches are commits on
+the `v0.58.0` tag exported with `git format-patch --zero-commit --no-signature`; to move them to a
+new tag, apply them to the old tag as commits (`git am`), `git rebase --onto <new tag>`, and export
+again. `data/90_tl.gschema.override` (app-filter-mode `[]`, no screensaver lock, no screen
+keyboard) is checked by the build against the sysroot's `org.gnome.desktop` schemas; compiling the
+schemas into the session's `GSETTINGS_SCHEMA_DIR` is the session-file step, not done here.
