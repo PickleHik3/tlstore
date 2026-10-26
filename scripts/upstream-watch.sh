@@ -12,7 +12,9 @@
 #
 # Theirs is the tag of the upstream's latest release as GitHub's releases/latest names it: the
 # newest release that is neither a draft nor a prerelease, so herdr's "Preview build" releases
-# never count. A tag that does not read as a plain version (v1.2.3, 4.4.8) is reported as an error
+# never count. A GitLab upstream (gitlab:<group>/<project>, phosh's) is read from its
+# repository/tags API, no token needed: theirs is the highest tag that reads as a plain version,
+# so v0.58.0 counts and v0.59.alpha1 or v0.58.0-rc1 never do. A tag that does not read as a plain version (v1.2.3, 4.4.8) is reported as an error
 # rather than followed. An item is behind when theirs sorts after ours (sort -V); an upstream that
 # went backwards is reported, never followed.
 #
@@ -47,7 +49,7 @@ released_catalog="$repo/dist/catalog.tsv"
 # item's row in items.tsv and (for a built one) its recipe in recipes/cross and scripts/bins-plan.sh.
 #
 #   item       its name in items.tsv
-#   upstream   owner/repo on GitHub
+#   upstream   owner/repo on GitHub, or gitlab:<group>/<project> on gitlab.gnome.org
 #   style      how the recipe pins it:
 #     commit     <VAR>_COMMIT="<sha>"   # v<version>   and   <VAR>_VERSION="<version>"
 #                (the tag's commit is pinned, so a moved tag never changes a build silently)
@@ -57,6 +59,14 @@ released_catalog="$repo/dist/catalog.tsv"
 #                `<arch>) <VAR>_SHA256=<hex> ;;` line per processor; <name> is the release asset,
 #                {arch} standing for aarch64 and x86_64. The digests come from the download and
 #                must equal the ones GitHub publishes for the asset
+#     group      phosh, phoc and phosh-mobile-settings, which share one version and are pinned
+#                together in recipes/cross/build-phosh.sh: <VAR>_VERSION, <VAR>_SHA256 (of the
+#                GitLab tag tarball) and <VAR>_COMMIT (with its # v<version> comment) for each of
+#                PHOC, PHOSH and PMS. The upstream column is gitlab:World/Phosh/phosh and the
+#                other two are its siblings. A bump moves all three or none; a recipe whose
+#                three versions disagree reads as a mismatch. Whether the tl patches still apply
+#                is the trial build's to say: build.yml builds the tool, a patch that no longer
+#                applies fails it, and the Upstream watch issue reports that bump as failed
 #     url        nothing to build: the items.tsv source is a URL with the tag as one path segment
 #   file       the recipe, from the repository root (- for url)
 #   var        the variable prefix or name above (- for url)
@@ -72,8 +82,14 @@ fastfetch  fastfetch-cli/fastfetch  commit                    recipes/cross/buil
 kitten     kovidgoyal/kitty         tag                       recipes/cross/build-kitten.sh     KITTY_TAG  kitten
 tuios      Gaurav-Gosain/tuios      tag                       recipes/cross/build-tuios.sh      TUIOS_TAG  tuios
 sigye      am2rican5/sigye          commit                    recipes/cross/build-sigye.sh      SIGYE      sigye
+phosh      gitlab:World/Phosh/phosh group                    recipes/cross/build-phosh.sh      PHOSH      phosh
 fisher     jorgebucaran/fisher      url                       -                                 -          -
 '
+
+# The components of the group style, <project>:<recipe variable prefix>: projects of
+# https://gitlab.gnome.org/World/Phosh/.
+GROUP='phoc:PHOC phosh:PHOSH phosh-mobile-settings:PMS'
+GITLAB=https://gitlab.gnome.org
 
 # The processors an asset-style item is pinned for (build.yml builds every tool for both).
 ARCHS='aarch64 x86_64'
@@ -100,8 +116,19 @@ is_version() { [[ "$1" =~ ^v?[0-9]+(\.[0-9]+)*$ ]]; }
 # Exit 0 when $2 is a later version than $1.
 newer() { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)" = "$2" ]; }
 
+# The highest plain-version tag of a GitLab project ($1: group/project), v prefix kept.
+gitlab_latest_tag() {
+    local path="${1//\//%2F}" tags
+    tags="$(curl -fsS --retry 3 "$GITLAB/api/v4/projects/$path/repository/tags?per_page=100&order_by=version&sort=desc")" || return 1
+    printf '%s\n' "$tags" | grep -o '"name":"[^"]*"' | sed 's/^"name":"//; s/"$//' |
+        grep -E '^v?[0-9]+(\.[0-9]+)*$' | sort -V | tail -1 | grep .
+}
+
 # The tag of the upstream's latest release (never a draft or a prerelease).
 latest_tag() {
+    case "$1" in
+        gitlab:*) gitlab_latest_tag "${1#gitlab:}"; return ;;
+    esac
     gh api "repos/$1/releases/latest" --jq .tag_name
 }
 
@@ -125,7 +152,7 @@ row_field() {
 ours() {
     local v=""
     case "$style" in
-        commit) v="$(sed -n "s/^${var}_VERSION=\"\\([^\"]*\\)\".*/\\1/p" "$repo/$file")" ;;
+        commit|group) v="$(sed -n "s/^${var}_VERSION=\"\\([^\"]*\\)\".*/\\1/p" "$repo/$file")" ;;
         tag)    v="$(sed -n "s/^${var}=\\\${${var}:-\\([^}]*\\)}.*/\\1/p" "$repo/$file")" ;;
         asset=*) v="$(sed -n "s/^${var}_VERSION=\\\${${var}_VERSION:-\\([^}]*\\)}.*/\\1/p" "$repo/$file")" ;;
         url)    v="$(upstream_of "$(row_version "$item")")" ;;
@@ -154,7 +181,7 @@ check() {
             status=error
         else
             theirs="${tag#v}"
-            if [ "$(upstream_of "$row")" != "$our" ]; then status=mismatch
+            if [ "$(upstream_of "$row")" != "$our" ] || ! group_agrees; then status=mismatch
             elif newer "$our" "$theirs"; then status=behind
             elif [ "$our" = "$theirs" ]; then status=current
             else status=ahead
@@ -181,6 +208,16 @@ check() {
             [ "$owed" = no ] || note="$note, release owed: $owed (released $released)"
             printf '%-10s ours %-9s theirs %-9s %s%s\n' "$item" "$our" "$theirs" "$status" "$note"
         fi
+    done
+}
+
+# Exit 0 unless the item is a group whose components do not all pin the same version.
+group_agrees() {
+    local c v
+    [ "$style" = group ] || return 0
+    for c in $GROUP; do
+        v="$(sed -n "s/^${c#*:}_VERSION=\"\([^\"]*\)\".*/\1/p" "$repo/$file")"
+        [ "$v" = "$our" ] || return 1
     done
 }
 
@@ -218,7 +255,8 @@ bump() {
     [ -z "$suffix" ] || row_ver="$ver+tl.0"
 
     # Everything is resolved and verified before the first write.
-    declare -A sums=()
+    declare -A sums=() commits=()
+    local comp name
     case "$style" in
         commit)
             commit="$(git ls-remote "https://github.com/$upstream.git" "refs/tags/$tag" "refs/tags/$tag^{}" |
@@ -244,6 +282,23 @@ bump() {
                 sums[$arch]="$got"
             done
             ;;
+        group)
+            group_agrees || die "$item: the components of $file pin different versions; settle that by hand first"
+            dir="$(mktemp -d)"
+            # shellcheck disable=SC2064
+            trap "rm -rf '$dir'" EXIT
+            for comp in $GROUP; do
+                name="${comp%:*}"
+                commit="$(git ls-remote "$GITLAB/World/Phosh/$name.git" "refs/tags/$tag" "refs/tags/$tag^{}" |
+                    awk '$2 ~ /\^\{\}$/ { peeled = $1 } { plain = $1 } END { print (peeled != "" ? peeled : plain) }')"
+                [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || die "$item: tag $tag not found in World/Phosh/$name"
+                url="$GITLAB/World/Phosh/$name/-/archive/$tag/$name-$tag.tar.gz"
+                curl -fsSL --retry 3 -o "$dir/$name.tar.gz" "$url" || die "$item: could not download $url"
+                sums[$name]="$(sha256sum "$dir/$name.tar.gz" | cut -d' ' -f1)"
+                commits[$name]="$commit"
+            done
+            url=""
+            ;;
         tag) ;;
         url)
             url="$(row_field "$items" "$item" 5)"
@@ -263,6 +318,15 @@ bump() {
             rewrite "$repo/$file" "^${var}_COMMIT=\"" \
                 "s/^${var}_COMMIT=\"[0-9a-f]*\".*/${var}_COMMIT=\"$commit\"   # v$ver/"
             rewrite "$repo/$file" "^${var}_VERSION=\"" "s/^${var}_VERSION=\"[^\"]*\"/${var}_VERSION=\"$ver\"/"
+            ;;
+        group)
+            for comp in $GROUP; do
+                name="${comp%:*}"; var="${comp#*:}"
+                rewrite "$repo/$file" "^${var}_VERSION=\"" "s/^${var}_VERSION=\"[^\"]*\"/${var}_VERSION=\"$ver\"/"
+                rewrite "$repo/$file" "^${var}_SHA256=" "s/^${var}_SHA256=[0-9a-f]*/${var}_SHA256=${sums[$name]}/"
+                rewrite "$repo/$file" "^${var}_COMMIT=\"" \
+                    "s/^\(${var}_COMMIT=\"\)[0-9a-f]*\(\".*# v\)[0-9][0-9.]*/\1${commits[$name]}\2$ver/"
+            done
             ;;
         tag)
             rewrite "$repo/$file" "^${var}=\\\${${var}:-" "s/^${var}=\\\${${var}:-[^}]*}/${var}=\${${var}:-$tag}/"

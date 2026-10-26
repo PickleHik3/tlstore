@@ -1,6 +1,7 @@
 # Keeps the catalog's upstream-pinned items on their upstream's latest stable release, with no
 # human step: once a day it checks every item scripts/upstream-watch.sh lists (herdr, btop,
-# fastfetch, kitten, sigye, fisher), moves each one that is behind, builds it with build.yml and,
+# fastfetch, kitten, sigye, fisher, and phosh with phoc and phosh-mobile-settings as one group read
+# from GitLab's tags), moves each one that is behind, builds it with build.yml and,
 # when at least one bump landed, cuts a store release with release.yml, so phones get it on their
 # next `tlstore upgrade`. All upstream tracking lives here; adding an item is a line in the script.
 #

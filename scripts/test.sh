@@ -4833,7 +4833,7 @@ case "$TL_ARCH" in
     x86_64)  HERDR_SHA256=1111111111111111111111111111111111111111111111111111111111111111 ;;
 esac
 EOF
-for uw_r in build-btop build-fastfetch build-kitten build-sigye build-tuios; do
+for uw_r in build-btop build-fastfetch build-kitten build-sigye build-tuios build-phosh; do
     cp "$repo/recipes/cross/$uw_r.sh" "$UW/recipes/cross/"
 done
 uw_herdr="$(sed -n 's/^HERDR_VERSION=\${HERDR_VERSION:-v\([^}]*\)}$/\1/p' "$UW/recipes/cross/fetch-herdr.sh")"
@@ -4956,6 +4956,70 @@ expect_status "--bump herdr, commit style" 0
 if grep -qx 'HERDR_COMMIT="0123456789abcdef0123456789abcdef01234567"   # v99.0.0' "$UW/recipes/cross/build-herdr.sh" &&
     grep -qx 'HERDR_VERSION="99.0.0"' "$UW/recipes/cross/build-herdr.sh"; then pass; else fail "the commit and version pins move"; fi
 if [ "$(uw_ver herdr)" = "99.0.0+tl.0" ]; then pass; else fail "and the row goes to 99.0.0+tl.0" "$(uw_ver herdr)"; fi
+rm -rf "$UW"
+
+# The group style, with the real phosh recipe: upstream is GitLab (the tags API, plain versions
+# only), and a bump moves phoc's, phosh's and phosh-mobile-settings' version, tarball digest and
+# commit together, keeping the # v<tag> comments. curl and git answer from stubs.
+UW="$(mktemp -d)"
+mkdir -p "$UW/scripts" "$UW/recipes/cross" "$UW/dist" "$UW/bin" "$UW/fx"
+# only the phosh line: the other watched items have their own fixtures above
+sed '/^\(herdr\|btop\|fastfetch\|kitten\|tuios\|sigye\|fisher\) /d' "$repo/scripts/upstream-watch.sh" > "$UW/scripts/upstream-watch.sh"
+cp "$repo/recipes/cross/build-phosh.sh" "$UW/recipes/cross/"
+uw_phosh="$(sed -n 's/^PHOSH_VERSION="\([^"]*\)".*/\1/p' "$UW/recipes/cross/build-phosh.sh")"
+cat > "$UW/bin/gh" <<'STUB'
+#!/bin/sh
+exit 1
+STUB
+cat > "$UW/bin/curl" <<'STUB'
+#!/bin/sh
+# the tags API answers from fx/tags; a tag archive is its own file name
+out=""; url=""
+while [ $# -gt 0 ]; do
+    case "$1" in -o) out="$2"; shift ;; -*) ;; *) url="$1" ;; esac
+    shift
+done
+case "$url" in
+    */api/v4/projects/World%2FPhosh%2Fphosh/repository/tags*) cat "$UW_FX/tags" ;;
+    */-/archive/v99.0.0/*) printf '%s\n' "${url##*/}" > "$out" ;;
+    *) exit 22 ;;
+esac
+STUB
+cat > "$UW/bin/git" <<'STUB'
+#!/bin/sh
+# git ls-remote <url> <refs...>: a peeled commit per project
+case "$2" in
+    */phoc.git) c=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ;;
+    */phosh.git) c=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb ;;
+    */phosh-mobile-settings.git) c=cccccccccccccccccccccccccccccccccccccccc ;;
+    *) exit 1 ;;
+esac
+printf '%s\trefs/tags/v99.0.0^{}\n' "$c"
+STUB
+chmod 755 "$UW/bin/gh" "$UW/bin/curl" "$UW/bin/git"
+printf '[{"name":"v99.0.0","commit":{"author_name":"x"}},{"name":"v99.1.alpha1"},{"name":"v98.0.0-rc1"},{"name":"v0.58.0"}]\n' > "$UW/fx/tags"
+printf 'phosh\tarchive\t%s+tl.3\t*\tbinaries:phosh@bins-1\t-\t-\t-\tTools\t-\n' "$uw_phosh" > "$UW/scripts/items.tsv"
+uw --check --tsv
+if [ "$(uw_col phosh 5)" = behind ] && [ "$(uw_col phosh 4)" = v99.0.0 ] && [ "$(uw_col phosh 8)" = phosh ]; then pass; else fail "phosh reads GitLab's highest plain-version tag (not the alpha or the rc)" "$(uw_col phosh 0)"; fi
+uw --bump phosh
+expect_status "--bump phosh, group style" 0
+uw_rec="$UW/recipes/cross/build-phosh.sh"
+uw_ok=1
+for uw_c in PHOC:a:phoc PHOSH:b:phosh PMS:c:phosh-mobile-settings; do
+    uw_v="${uw_c%%:*}"; uw_n="${uw_c##*:}"; uw_h="$(printf '%s' "${uw_c#*:}" | cut -c1)"
+    uw_r="$(printf '%040d' 0 | tr 0 "$uw_h")"
+    uw_d="$(printf '%s-v99.0.0.tar.gz\n' "$uw_n" | sha256sum | cut -d' ' -f1)"
+    grep -qx "${uw_v}_VERSION=\"99.0.0\"" "$uw_rec" || uw_ok=0
+    grep -qx "${uw_v}_SHA256=$uw_d" "$uw_rec" || uw_ok=0
+    grep -q "^${uw_v}_COMMIT=\"$uw_r\" .*# v99.0.0" "$uw_rec" || uw_ok=0
+done
+if [ "$uw_ok" = 1 ]; then pass; else fail "all three components move together: version, tarball digest, commit and its comment"; fi
+if [ "$(uw_ver phosh)" = "99.0.0+tl.0" ]; then pass; else fail "and the row goes to 99.0.0+tl.0" "$(uw_ver phosh)"; fi
+uw --check --tsv
+if [ "$(uw_col phosh 5)" = current ]; then pass; else fail "after the bump phosh is current" "$(uw_col phosh 0)"; fi
+sed -i 's/^PMS_VERSION="99.0.0"/PMS_VERSION="0.58.0"/' "$uw_rec"
+uw --check --tsv
+if [ "$(uw_col phosh 5)" = mismatch ]; then pass; else fail "a component pinned at another version is a mismatch" "$(uw_col phosh 0)"; fi
 rm -rf "$UW"
 
 echo
