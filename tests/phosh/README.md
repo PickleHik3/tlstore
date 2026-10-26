@@ -21,7 +21,7 @@ below are built from pinned tarballs into `$TL_TEST_DIR/prefix` by `build_dep` b
 | name | required (by) | noble has | action |
 |---|---|---|---|
 | wayland (server, client, scanner) | >= 1.24.0 (wlroots), >= 1.23.1 (phoc) | 1.22.0 | build 1.24.0 |
-| wayland-protocols | >= 1.47 (wlroots) | 1.34 (1.45 in -updates) | build 1.47 |
+| wayland-protocols | >= 1.49 (text-input v3 version 2, as the Termux sysroot has) | 1.34 (1.45 in -updates) | build 1.49 |
 | pixman | >= 0.46.0 (wlroots pixman renderer), >= 0.43.4 (phoc) | 0.42.2 | build 0.46.4 |
 | libdrm | >= 2.4.129 (wlroots) | 2.4.120 (2.4.125 in -updates) | build 2.4.129, no drivers |
 | libxkbcommon | >= 1.8.0 (wlroots) | 1.6.0 | build 1.8.1, keymaps from /usr/share/X11 |

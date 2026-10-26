@@ -178,9 +178,9 @@ build_deps() {
         82892487a01ad67b334eca83b54317a7c86a03a89cfadacfef5211f11a5d0536 \
         -Dlibraries=true -Dscanner=true -Dtests=false -Ddocumentation=false -Ddtd_validation=false
     # wlroots >= 1.47 (noble 1.34, 1.45 in -updates)
-    want_dep wayland-protocols && build_dep wayland-protocols 1.47 \
-        https://gitlab.freedesktop.org/wayland/wayland-protocols/-/releases/1.47/downloads/wayland-protocols-1.47.tar.xz \
-        5fd4349bcbc9bab9a46f8cf77d1f434296a7a052c87440a094f63fcf62a58e20 \
+    want_dep wayland-protocols && build_dep wayland-protocols 1.49 \
+        https://gitlab.freedesktop.org/wayland/wayland-protocols/-/releases/1.49/downloads/wayland-protocols-1.49.tar.xz \
+        ec4c8f74942d6dff7ace8b4ce4764f0ef9ff618a935d974ea77edee2ad240b14 \
         -Dtests=false
     # phoc >= 0.43.4, wlroots >= 0.43.0 (noble 0.42.2)
     want_dep pixman && build_dep pixman 0.46.4 \
