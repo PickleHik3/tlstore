@@ -46,7 +46,7 @@ wlr_keyboard_set_keymap() instead of ignoring it.
  
 --- /dev/null
 +++ b/subprojects/packagefiles/wlroots/tl/0005-bionic-sealed-memfd-pair.patch
-@@ -0,0 +1,99 @@
+@@ -0,0 +1,158 @@
 +Termux Launcher: the read-only side of allocate_shm_file_pair() on Android without /proc.
 +
 +Bionic has no shm_open(), and re-opening the memfd through /proc/self/fd (the previous version of
@@ -57,6 +57,14 @@ wlr_keyboard_set_keymap() instead of ignoring it.
 +libwayland and xkbcommon recommend for keymaps). The two callers of allocate_shm_file_pair()
 +(wlr_keyboard_set_keymap() and the linux-dmabuf feedback table) call it after munmap(); a failure
 +returns an error through their existing error paths. Elsewhere seal_shm_file() does nothing.
++
++Why fchmod() is skipped on Android: allocate_shm_file_pair() calls fchmod(rw_fd, 0) right after
++opening the read-only side, so the file cannot be re-opened read-write through /proc/self/fd, and
++gives up when it fails. SELinux denies fchmod() on a memfd to app processes, so the keymap pair
++never got past it (the cursor buffer's single memfd, which has no fchmod, was fine). The call is
++compiled out under __ANDROID__: the F_SEAL_WRITE seal makes the read-only dup read-only for good, and
++/proc re-opens are denied anyway. Every failing step of the pair (memfd_create, dup, ftruncate,
++the seal) now logs through wlr_log_errno().
 +
 +--- a/include/util/shm.h
 ++++ b/include/util/shm.h
@@ -103,7 +111,13 @@ wlr_keyboard_set_keymap() instead of ignoring it.
 + 	if (compiled == NULL) {
 +--- a/util/shm.c
 ++++ b/util/shm.c
-+@@ -11,21 +11,21 @@
++@@ -6,26 +6,27 @@
++ #include <time.h>
++ #include <unistd.h>
++ #include <wlr/config.h>
+++#include <wlr/util/log.h>
++ #include "util/shm.h"
++ 
 + #define RANDNAME_PATTERN "/wlroots-XXXXXX"
 + 
 + #ifdef __ANDROID__
@@ -131,7 +145,48 @@ wlr_keyboard_set_keymap() instead of ignoring it.
 + }
 + 
 + #define shm_unlink(name) ((void)(name))
-+@@ -121,3 +121,14 @@
++@@ -86,12 +87,14 @@
++ 	char name[] = RANDNAME_PATTERN;
++ 	int rw_fd = excl_shm_open(name);
++ 	if (rw_fd < 0) {
+++		wlr_log_errno(WLR_ERROR, "Failed to create the shm file pair");
++ 		return false;
++ 	}
++ 
++ 	// CLOEXEC is guaranteed to be set by shm_open
++ 	int ro_fd = shm_open_ro(name, rw_fd);
++ 	if (ro_fd < 0) {
+++		wlr_log_errno(WLR_ERROR, "Failed to open the read-only side of the shm file pair");
++ 		shm_unlink(name);
++ 		close(rw_fd);
++ 		return false;
++@@ -99,19 +102,24 @@
++ 
++ 	shm_unlink(name);
++ 
+++#ifndef __ANDROID__
++ 	// Make sure the file cannot be re-opened in read-write mode (e.g. via
++-	// "/proc/self/fd/" on Linux)
+++	// "/proc/self/fd/" on Linux). Not on Android: SELinux denies fchmod() on a memfd to app
+++	// processes, and seal_shm_file() (F_SEAL_WRITE) makes the read-only fd read-only for good.
++ 	if (fchmod(rw_fd, 0) != 0) {
+++		wlr_log_errno(WLR_ERROR, "Failed to fchmod the shm file pair");
++ 		close(rw_fd);
++ 		close(ro_fd);
++ 		return false;
++ 	}
+++#endif
++ 
++ 	int ret;
++ 	do {
++ 		ret = ftruncate(rw_fd, size);
++ 	} while (ret < 0 && errno == EINTR);
++ 	if (ret < 0) {
+++		wlr_log_errno(WLR_ERROR, "Failed to size the shm file pair");
++ 		close(rw_fd);
++ 		close(ro_fd);
++ 		return false;
++@@ -121,3 +129,18 @@
 + 	*ro_fd_ptr = ro_fd;
 + 	return true;
 + }
@@ -140,7 +195,11 @@ wlr_keyboard_set_keymap() instead of ignoring it.
 ++#ifdef __ANDROID__
 ++	// Nothing may write, grow or shrink the file after this; F_SEAL_WRITE needs every writable
 ++	// mapping to be gone (munmap the data first).
-++	return fcntl(fd, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_WRITE) == 0;
+++	if (fcntl(fd, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_WRITE) != 0) {
+++		wlr_log_errno(WLR_ERROR, "Failed to seal the shm file");
+++		return false;
+++	}
+++	return true;
 ++#else
 ++	(void)fd;
 ++	return true;
