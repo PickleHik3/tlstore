@@ -397,6 +397,18 @@ again. `data/90_tl.gschema.override` (app-filter-mode `[]`, no screensaver lock,
 keyboard) is checked by the build against the sysroot's `org.gnome.desktop` schemas; compiling the
 schemas into the session's `GSETTINGS_SCHEMA_DIR` is the session-file step, not done here.
 
+M3 (`phosh/0017` to `0023`) puts the launcher behind the battery, Wi-Fi, mobile, rotation and torch
+backends: a `tl-launcherctl` client (libsoup 3, json-glib) reads `~/.launcherctl/endpoint` and
+`token`, holds one `GET /v1/watch` stream and POSTs `/v1/rotation`, `/v1/torch` and
+`/v1/settings/open`. The feature option `launcherctl` (auto: on when `networkmanager` and
+`modemmanager` are off, an error when enabled with either on) swaps in `battery-manager-tl.c`,
+`wifi-manager-tl.c`, `wwan/phosh-wwan-tl.c`, `rotation-manager-tl.c` and `torch-manager-tl.c` for the
+UPower, NetworkManager, ModemManager, iio-sensor-proxy and gudev/logind ones, which are not built
+then, and upower-glib is no dependency; `build-phosh.sh` and `tests/phosh/run-headless.sh` need no
+new `-D` flag. `0023` adds `TlState` and `TlTile` to `mobi.phosh.Shell.DebugControl` for the tests in
+`tests/phosh/test-1*.sh`. Without an endpoint file the client does nothing and the tiles stay
+insensitive. Patch numbers 0030 and up are for `tl-feedbackd` and the notifications.
+
 M4 adds phosh-mobile-settings 0.58.0, built after phosh in the same stage. `phosh-mobile-settings/` is
 its patch set, made like phosh's: the gmobile wrap's revision, the Bionic fixes (the `libintl.h`
 stand-in, no `GLOB_PERIOD`, `libandroid-glob` and `libandroid-wordexp` from Termux), libfeedback
