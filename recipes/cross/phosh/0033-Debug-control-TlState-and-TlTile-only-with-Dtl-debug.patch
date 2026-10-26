@@ -1,0 +1,134 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PickleHik3 <noreply@example.invalid>
+Date: Mon, 26 Oct 2026 12:00:00 +0000
+Subject: [PATCH 33/34] Debug control: TlState and TlTile only with -Dtl-debug
+
+The two test hooks of 0023 read the launcherctl managers' state and press their quick settings
+for any client of the session bus, which is the launcher's, shared with the rest of its desktop.
+They are for the headless tests only, so a meson option, tl-debug (a boolean, off by default),
+now builds them in; it needs launcherctl. Without it both methods stay in the interface (the
+introspection XML is one file for every build) and answer NotSupported, as they did in a build
+without launcherctl. The release build leaves the option off; tests/phosh/run-headless.sh turns
+it on.
+---
+diff --git a/meson.build b/meson.build
+--- a/meson.build
++++ b/meson.build
+@@ -159,6 +159,10 @@
+   error_message: '-Dlauncherctl needs -Dnetworkmanager=false and -Dmodemmanager=false',
+ ).allowed()
+ 
++# The test hooks on DebugControl (TlState, TlTile) read and press the launcherctl quick settings;
++# only a test build has them.
++have_tl_debug = get_option('tl-debug') and have_launcherctl
++
+ # VPN and the hotspot setting are NetworkManager's.
+ if not have_networkmanager
+   have_vpn = false
+@@ -310,6 +314,7 @@
+ config_h.set10('PHOSH_HAVE_GUDEV', have_gudev)
+ config_h.set10('PHOSH_HAVE_HOTSPOT', have_hotspot)
+ config_h.set10('PHOSH_HAVE_LAUNCHERCTL', have_launcherctl)
++config_h.set10('PHOSH_HAVE_TL_DEBUG', have_tl_debug)
+ config_h.set10('PHOSH_HAVE_LOCATION', have_location)
+ config_h.set10('PHOSH_HAVE_LOCKSCREEN', have_lockscreen)
+ config_h.set10('PHOSH_HAVE_LOGIND', have_logind)
+@@ -392,6 +397,7 @@
+     'ModemManager (mm-glib)': have_modemmanager,
+     'libgudev': have_gudev,
+     'launcherctl (battery, network, rotation, torch)': have_launcherctl,
++    'TlState and TlTile test hooks (tl-debug)': have_tl_debug,
+   },
+   bool_yn: true,
+   section: 'Build',
+diff --git a/meson.options b/meson.options
+--- a/meson.options
++++ b/meson.options
+@@ -118,6 +118,10 @@
+        type: 'feature', value: 'auto',
+        description: 'Take battery, Wi-Fi, mobile, rotation and torch from the launcher (tl-launcherctl, its HTTP API) instead of UPower, NetworkManager, ModemManager and iio-sensor-proxy. auto: on when networkmanager and modemmanager are off, which it needs')
+ 
++option('tl-debug',
++       type: 'boolean', value: false,
++       description: 'The TlState and TlTile methods of mobi.phosh.Shell.DebugControl, for the headless tests of the launcherctl build; off in a build that ships')
++
+ option('gudev',
+        type: 'boolean', value: true,
+        description: 'Build against libgudev: udev monitoring, sysfs torch and backlight discovery')
+diff --git a/src/dbus/mobi.phosh.Shell.DebugControl.xml b/src/dbus/mobi.phosh.Shell.DebugControl.xml
+--- a/src/dbus/mobi.phosh.Shell.DebugControl.xml
++++ b/src/dbus/mobi.phosh.Shell.DebugControl.xml
+@@ -23,7 +23,7 @@
+ 
+         What the launcherctl backends and their quick settings show: an object with `available`
+         (the watch stream is open) and `battery`, `wifi`, `wwan`, `rotation`, `torch` and `tiles`.
+-        For the tests of the Termux Launcher build; an error in any other build.
++        For the tests of the Termux Launcher build (-Dtl-debug=true); an error in any other build.
+     -->
+     <method name="TlState">
+       <arg name="state" type="s" direction="out"/>
+@@ -35,7 +35,7 @@
+         @gesture: click or long-press
+ 
+         Does to the quick setting what a tap or a long-press would. For the tests of the
+-        Termux Launcher build; an error in any other build.
++        Termux Launcher build (-Dtl-debug=true); an error in any other build.
+     -->
+     <method name="TlTile">
+       <arg name="tile" type="s" direction="in"/>
+diff --git a/src/debug-control.c b/src/debug-control.c
+--- a/src/debug-control.c
++++ b/src/debug-control.c
+@@ -16,7 +16,7 @@
+ 
+ #include <gio/gio.h>
+ 
+-#if PHOSH_HAVE_LAUNCHERCTL
++#if PHOSH_HAVE_TL_DEBUG
+ # include "battery-manager.h"
+ # include "quick-setting.h"
+ # include "rotation-manager.h"
+@@ -60,7 +60,7 @@
+                          G_IMPLEMENT_INTERFACE (PHOSH_DBUS_TYPE_DEBUG_CONTROL,
+                                                 phosh_dbus_debug_control_iface_init))
+ 
+-#if PHOSH_HAVE_LAUNCHERCTL
++#if PHOSH_HAVE_TL_DEBUG
+ /* The tiles of TlState and TlTile: the name, and the status icon that tells which it is */
+ static const struct {
+   const char *name;
+@@ -237,14 +237,14 @@
+ static gboolean
+ on_handle_tl_state (PhoshDBusDebugControl *object, GDBusMethodInvocation *invocation)
+ {
+-#if PHOSH_HAVE_LAUNCHERCTL
++#if PHOSH_HAVE_TL_DEBUG
+   g_autofree char *state = build_tl_state ();
+ 
+   phosh_dbus_debug_control_complete_tl_state (object, invocation, state);
+ #else
+   g_dbus_method_invocation_return_error_literal (invocation, G_DBUS_ERROR,
+                                                  G_DBUS_ERROR_NOT_SUPPORTED,
+-                                                 "Built without launcherctl");
++                                                 "Built without -Dtl-debug");
+ #endif
+   return TRUE;
+ }
+@@ -256,7 +256,7 @@
+                    const char            *tile,
+                    const char            *gesture)
+ {
+-#if PHOSH_HAVE_LAUNCHERCTL
++#if PHOSH_HAVE_TL_DEBUG
+   GtkWidget *widget = find_tile (tile);
+ 
+   if (!widget) {
+@@ -275,7 +275,7 @@
+ #else
+   g_dbus_method_invocation_return_error_literal (invocation, G_DBUS_ERROR,
+                                                  G_DBUS_ERROR_NOT_SUPPORTED,
+-                                                 "Built without launcherctl");
++                                                 "Built without -Dtl-debug");
+ #endif
+   return TRUE;
+ }

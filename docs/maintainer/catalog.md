@@ -98,6 +98,13 @@ rows, `mode=755`, sourced as `binaries:<path>@<ref>` with their digests in `SHA2
 visible `bundle`. `termux-api-shims` is the model, including `conflicts=<pkg>` for an item that
 owns commands a Termux package owns: `docs/maintainer/termux-api-shims.md`.
 
+A `file` row's target may start with `$PREFIX` as well as `~`: the engine expands it to the
+Termux prefix on the phone, for a file that only works in a place under `$PREFIX`, as
+`phosh-session-file` does with `$PREFIX/local/share/xsessions/phosh.desktop`, where the launcher
+looks for Desktops entries (`docs/adr/0006-phosh-session-file.md`). An engine from before that change
+would read `$PREFIX` as a directory name, so such a row also carries a `min-launcher=` new enough
+to have shipped an engine that knows it.
+
 A bundle that is a shell and its setup carries `login-shell=<shell>` (`fish-shell` is the model):
 once its members are in, the engine runs `chsh -s <shell>`, so new sessions start in it, and says
 so; a missing shell or `chsh` is reported with the command to run, and the install still stands.
@@ -253,6 +260,14 @@ version, and a bump writes `<new>+tl.0`. The bins tag and `SHA256SUMS` stay `bui
 move. So the plain upstream versions in "Rebuilding a binary" above are moved for these items by
 the bump itself, and `bins-record.sh`'s "bump it by hand" note on the run that lands one can be
 ignored.
+
+A row of the watch table names its upstream as `owner/repo` on GitHub or, for phosh,
+`gitlab:<group>/<project>` on gitlab.gnome.org (the highest plain-version tag, no prereleases). Its
+style is `group` when several upstream projects move as one: phosh, phoc and phosh-mobile-settings
+share one version and are pinned side by side in `recipes/cross/build-phosh.sh` (`PHOSH_*`,
+`PHOC_*`, `PMS_*`). A group is behind when its lead project is, a bump moves every component's
+version, commit and tarball digest together, and the watch refuses to bump (reports a mismatch)
+while the components do not all pin the same version, which is a hand fix first.
 
 One run, in the order the jobs go:
 

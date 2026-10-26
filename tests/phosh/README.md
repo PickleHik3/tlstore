@@ -10,6 +10,14 @@ Writing a bridge test, in three lines:
 2. Drive the bridge with `fake_push battery '{"percentage":9,...}'` (an SSE event on `/v1/watch`) or `fake_control_post /state/rotation '{...}'`, and check what phosh did with `wait_for 10 "what" <command>`, `on_bus <name>` and `gdbus`.
 3. Check what phosh sent back with `fake_calls`, `fake_call_count POST /v1/vibrate` and `fake_unexpected`; call `fake_reset` first to start from an empty log.
 
+## Test hooks
+
+`tl_get` and `tl_tile` (lib.sh) call two methods on `mobi.phosh.Shell.DebugControl`, `TlState`
+and `TlTile` (recipes/cross/phosh/0023). They exist only in a phosh configured with
+`-Dtl-debug=true` (recipes/cross/phosh/0033), which `run-headless.sh` passes; `build-phosh.sh`
+leaves the option off and checks that the phone's binary does not have them, so no other client of
+the launcher's shared session bus can read the managers or press a quick setting through them.
+
 ## Dependencies below noble's versions
 
 phoc 0.58.0, its wlroots 0.20.2 subproject and phosh 0.58.0 (with the recipes' patches applied, the
@@ -39,7 +47,8 @@ below are built from pinned tarballs into `$TL_TEST_DIR/prefix` by `build_dep` b
 | upower-glib | >= 1.90 | 1.90.3 | ok |
 | gtk+-3.0 | >= 3.22 | 3.24 | ok |
 | libpulse | >= 12.99.3 (libgvc) | 16.1 | ok |
-| vulkan, glslang, lcms2, gbm, egl | wlroots renderers, color management | n/a | not needed: `renderers=` is empty, color-management disabled |
+| vulkan, glslang | wlroots' Vulkan renderer | libvulkan-dev, glslang-tools | installed by CI (`ci.yml` apt list) and `glslangValidator` is one of the tools `run-headless.sh` checks for, but nothing here compiles against them: `renderers=` is empty |
+| lcms2, gbm, egl | wlroots renderers, color management | n/a | not needed: `renderers=` is empty, color-management disabled |
 | sysprof-capture-4 | >= 48 (phoc) | n/a | optional, not requested |
 | gmobile (v0.6.0_beta1), gvdb, libfeedback (v0.8.1), gvc | meson subprojects | n/a | built by meson, static; need only glib >= 2.78, json-glib >= 1.6.2 |
 
@@ -52,6 +61,8 @@ pixman and wayland without a fallback, so a subproject build would not satisfy i
 
 ## Status
 
-The `phosh-headless` job in `.github/workflows/ci.yml` is unverified until it has been seen green:
-the harness was written on a host without the GTK development packages, so only `--self-test` and
-the pixman step of `--deps-only` have been run. `continue-on-error` stays until then.
+The `phosh-headless` job in `.github/workflows/ci.yml` was seen green on 2026-10-26 (run
+40335453739) and is a required job since then: it has no `continue-on-error`. The `phoc-xvfb` job
+beside it (`recipes/cross/phoc-xvfb-test.sh`, phoc following the X root window's size and scale
+on Xvfb) reuses `run-headless.sh --deps-only` for the libraries noble lacks; it keeps
+`continue-on-error: true` until it has been seen green.

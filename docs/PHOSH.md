@@ -31,10 +31,12 @@ Not goals:
    with phosh full-size on it, unlocked.
 3. The app grid lists every Termux app that ships a `.desktop` file, without the mobile-only
    filter (Q15). Tapping one opens it as a phosh window; X11-only apps run through Xwayland
-   inside phoc (Q7).
+   inside phoc (Q7): phoc starts Termux's Xwayland when the first X client connects, on the first
+   free display after the launcher's `:0` (phoc patch 0007).
 4. The top bar shows battery, Wi-Fi and mobile signal from Android (Q5). Quick settings has
-   Wi-Fi and mobile status, battery, rotation lock, torch, dark style, screenshot and docked mode
-   (Q23). Long-pressing Wi-Fi, mobile or battery opens that Android Settings page (Q19).
+   Wi-Fi and mobile status, battery, rotation lock, torch, screenshot and docked mode (Q23).
+   Long-pressing Wi-Fi, mobile or battery opens that Android Settings page (Q19). Not in v1: the
+   dark-style tile and rearranging the tiles (stories 27 and 41; see "Not in v1" below).
 5. Text input uses Android's keyboard, through the display (Q6).
 6. A Linux app's notification shows in phosh and in Android's shade; tapping the Android one
    brings the display, with phosh, to the front (Q16).
@@ -112,10 +114,22 @@ libraries and no fake system services.
 | Volume, media-player widget | keep | libgvc over the launcher's PulseAudio; MPRIS on the shared session bus (Q22) |
 | Screenshot | keep (Q23) | phosh's own; saved under `~/Pictures` |
 | Docked mode | keep (Q23) | phosh's convergence mode; matters most on the Surface |
-| Dark style tile | keep (Q23) | gsettings `color-scheme`, independent of Android's theme |
-| Xwayland | keep (Q7) | from Termux's x11 repository |
+| Dark style tile | keep (Q23), not in v1 | a quick-setting plugin, and plugins are compiled out (see "Not in v1") |
+| Xwayland | keep (Q7) | Termux's `xwayland` (x11 repository), started by phoc on demand; phoc and wlroots built with Xwayland, sockets in `$PREFIX/tmp/.X11-unix` (phoc patch 0007) |
 | Settings app | port phosh-mobile-settings (Q13) | panels in Q17; gnome-control-center does not exist in Termux |
 | App filter | change (Q15) | `app-filter-mode` default `[]` in our build |
+
+### Not in v1: the dark-style tile and tile arrangement
+
+Decided in #17 (2026-10-26). phosh's dark-style tile and the quick-settings page of Mobile
+Settings that arranges the tiles (stories 27 and 41) are both phosh *quick-setting plugins*:
+shared objects phosh loads from `PHOSH_PLUGINS_DIR`, a path compiled into the binary. The archive
+unpacks under the user's home, which the build does not know, so the build compiles the plugins out
+(`-Dquick-setting-plugins=false`) and Mobile Settings' quick-settings page lists none. v1 ships
+without both; the dark style can still be set with `gsettings set org.gnome.desktop.interface
+color-scheme prefer-dark`. Bringing them back needs phosh to find its plugins relative to its own
+binary (a patch in the manner of phosh/0003, libfeedback found in `../lib`), which is left for
+later.
 
 ## Bridges
 
@@ -208,25 +222,32 @@ The `phosh` row carries `min-launcher=` set to the first launcher release with a
   and the launcher's `sh -c` expands `$HOME` when it runs it). A new file shows without a launcher
   restart: the catalogue compares the directories' modification times when it is next shown.
 - **Stopping.** Closing the display window from the launcher stops phoc, and phoc's children
-  with it. `phosh-session stop` does the same from a terminal, and also ends the launcher's own
-  session shell (`$TERMUX_TMP_PREFIX/termux-x11-session.pid`) if there is one.
+  with it. `phosh-session stop` does the same from a terminal: it ends phoc, phosh and
+  tl-feedbackd, and nothing else (the launcher's session shell and display stay).
 - **Settings defaults.** Our build's gschema overrides: `app-filter-mode []`, screensaver lock
-  off, no OSK. Users' own dconf settings win.
+  off, no OSK. `phosh-session` compiles the archive's schemas and overrides together with
+  `$PREFIX`'s `org.gnome.desktop` schemas into `~/.local/state/phosh/schemas` at every start (the
+  overrides name those), and points `GSETTINGS_SCHEMA_DIR` there. Users' own settings win; they
+  are kept by dconf (`dconf`, a part of `phosh-deps`), without which GSettings would fall back to
+  its memory backend and forget them at every restart.
 
 ## Packaging
 
 - One `archive` row, `phosh`, `prefixes com.termux`, `source binaries:phosh@bins-…`,
-  `x86_64:digest=` for the x86_64 build, `exe=bin/phosh-session`, version
-  `0.58.0+<commit>.<N>` as for other store-built archives (`docs/maintainer/catalog.md`).
+  `x86_64:digest=` for the x86_64 build, `exe=bin/phosh-session`, version `0.58.0+tl.<N>`: the
+  upstream version, and the number of this repository's build of it (`+tl.0` first, one more for
+  each rebuild that changes the archive). The `+<commit>.<N>` shape of other store-built archives
+  (`docs/maintainer/catalog.md`) does not fit: phosh is three upstream trees and this repository's
+  patch sets, not one commit.
 - `requires`: a hidden `pkg` part, `phosh-deps`, naming the Termux packages above, with
   `pkg-size=` computed by `scripts/pkg-weight.py` and `repo=1` handling for `x11-repo`. Plus the
   session-file part (open question 1).
 - `min-launcher=` as above. `host=launcher`: the bridges need launcherctl.
 - The archive holds: `bin/` (phoc, phosh, phosh-session, tl-feedbackd, phosh-mobile-settings),
-  `lib/` (gmobile, libfeedback, phoc's static wlroots needs nothing at run time), `libexec/`,
-  `share/` (gschemas compiled at build, pointed at by `GSETTINGS_SCHEMA_DIR`; icons, the phosh and
-  phosh-mobile-settings `.desktop` files, locale). The wrapper exports `XDG_DATA_DIRS` and
-  `GSETTINGS_SCHEMA_DIR` to include the archive's `share/`.
+  `lib/` (libfeedback; gmobile and wlroots are linked in statically), `share/` (the schemas and
+  overrides, with a `gschemas.compiled` built once from all of them as the session's fallback;
+  icons, the phosh and phosh-mobile-settings `.desktop` files, locale). The session script exports
+  `XDG_DATA_DIRS` to include the archive's `share/`, and `GSETTINGS_SCHEMA_DIR` (see "Session").
 - Size, measured in M1 (2026-10-26): the archive is 1.34 MB (aarch64) and 1.39 MB (x86_64) as a
   `.tar.gz`, about 4 MB unpacked. The Termux packages `phosh-deps` pulls in beyond a stock Termux
   are 123 packages, 87 MB to download and 535 MB on disk (`pkg-size=87,535`; the libllvm that mesa
@@ -293,8 +314,10 @@ M2 can run alongside M0–M1. M5 can start after M0.
 1. ~~How the session file reaches `$PREFIX/local/share/xsessions`.~~ Settled in M1 (2026-10-26): a
    hidden `file` part with a `$PREFIX` target; the engine's target column takes `$PREFIX` now
    (`docs/adr/0006-phosh-session-file.md`). No `post=`.
-2. The watch stream's wire format (NDJSON over a held HTTP response, or SSE). Decided in M2 with
-   the launcher's API conventions.
+2. ~~The watch stream's wire format (NDJSON over a held HTTP response, or SSE).~~ Settled in M2
+   (2026-10-26): server-sent events. `GET /v1/watch` answers `text/event-stream`, one event per
+   topic (`battery`, `network`, `rotation`) at the start and one more on each change, with a
+   comment line as keep-alive; phosh's `tl-launcherctl.c` reads it (phosh/0017).
 3. ~~Whether Termux's mesa has a kgsl-enabled Turnip or the archive ships its own Vulkan
    driver.~~ Settled in M5 (2026-10-26): Termux's `mesa-vulkan-icd-freedreno` 26.2.5 (main,
    aarch64) is built with the kgsl backend, so the archive ships no driver. Should that package

@@ -1,0 +1,121 @@
+From: PickleHik3 <noreply@users.noreply.github.com>
+Subject: [PATCH] wlroots: Xwayland on Android (sockets under the prefix's tmp/)
+
+Story 18 of docs/PHOSH.md wants X11-only apps inside phosh, so phoc and wlroots are built with
+Xwayland (recipes/cross/build-phosh.sh). wlroots' xwayland/ assumes /tmp/.X11-unix, which Android
+does not have, and takes the Xwayland path from pkg-config, which in a cross build answers the
+sysroot's copy. The wlroots patch file tl/0006 puts the sockets and lock files in the tmp/ of
+Xwayland's prefix ($PREFIX/tmp, where Termux's libxcb looks), compiles in the device path of
+Xwayland, and skips a display whose socket answers (the launcher's display is :0 and may keep no
+lock file; wlroots would otherwise unlink its socket). Carried as a wlroots patch file that
+wlroots.wrap applies; the patch's own header says what it does.
+---
+--- /dev/null
++++ b/subprojects/packagefiles/wlroots/tl/0006-xwayland-android-paths.patch
+@@ -0,0 +1,97 @@
++Termux Launcher: Xwayland on Android. The X11 sockets and lock files live in <prefix>/tmp (Android
++has no /tmp; Termux's libxcb looks there), the Xwayland path is the one on the device (a cross
++build's pkg-config prefixes the sysroot), and a display whose socket answers is never taken over,
++lock file or not (the launcher's own X server may keep none, and open_socket() would unlink it).
++
++diff --git a/xwayland/meson.build b/xwayland/meson.build
++--- a/xwayland/meson.build
+++++ b/xwayland/meson.build
++@@ -75,7 +75,21 @@
++ 	'terminate_delay',
++ ]
++ 
++-internal_config.set_quoted('XWAYLAND_PATH', xwayland.get_variable('xwayland'))
+++# A cross build's pkg-config puts the sysroot in front of every path it answers; the path is the
+++# one on the machine Xwayland runs on.
+++xwayland_path = xwayland.get_variable('xwayland')
+++xwayland_sysroot = meson.get_external_property('sys_root', '')
+++if xwayland_sysroot != '' and xwayland_path.startswith(xwayland_sysroot + '/')
+++	xwayland_path = xwayland_path.replace(xwayland_sysroot, '')
+++endif
+++internal_config.set_quoted('XWAYLAND_PATH', xwayland_path)
+++# Android has no /tmp. The X11 sockets and lock files go to the tmp/ of the prefix Xwayland is
+++# installed in (Termux's), where that prefix's libxcb looks for them.
+++if host_machine.system() == 'android'
+++	internal_config.set_quoted('WLR_X11_TMP_DIR', fs.parent(fs.parent(xwayland_path)) / 'tmp')
+++else
+++	internal_config.set_quoted('WLR_X11_TMP_DIR', '/tmp')
+++endif
++ foreach name : xwayland_feature_names
++ 	have = xwayland.get_variable('have_' + name, default_value: 'false') == 'true'
++ 	internal_config.set10('HAVE_XWAYLAND_' + name.to_upper(), have)
++diff --git a/xwayland/sockets.c b/xwayland/sockets.c
++--- a/xwayland/sockets.c
+++++ b/xwayland/sockets.c
++@@ -13,14 +13,15 @@
++ #include <sys/un.h>
++ #include <unistd.h>
++ #include <wlr/util/log.h>
+++#include "config.h"
++ #include "sockets.h"
++ #include "util/fd.h"
++ 
++-static const char lock_fmt[] = "/tmp/.X%d-lock";
++-static const char socket_dir[] = "/tmp/.X11-unix";
++-static const char socket_fmt[] = "/tmp/.X11-unix/X%d";
+++static const char lock_fmt[] = WLR_X11_TMP_DIR "/.X%d-lock";
+++static const char socket_dir[] = WLR_X11_TMP_DIR "/.X11-unix";
+++static const char socket_fmt[] = WLR_X11_TMP_DIR "/.X11-unix/X%d";
++ #ifndef __linux__
++-static const char socket_fmt2[] = "/tmp/.X11-unix/X%d_";
+++static const char socket_fmt2[] = WLR_X11_TMP_DIR "/.X11-unix/X%d_";
++ #endif
++ 
++ static int open_socket(struct sockaddr_un *addr, size_t path_size) {
++@@ -132,7 +133,7 @@
++ }
++ 
++ void unlink_display_sockets(int display) {
++-	char sun_path[64];
+++	char sun_path[sizeof(((struct sockaddr_un *)0)->sun_path)];
++ 
++ 	snprintf(sun_path, sizeof(sun_path), socket_fmt, display);
++ 	unlink(sun_path);
++@@ -146,13 +147,32 @@
++ 	unlink(sun_path);
++ }
++ 
+++// A display whose socket answers is some other X server's, even without a lock file (an Android
+++// app's own X server, as the launcher's display is, may keep none): never unlink and take it.
+++static bool socket_in_use(int display) {
+++	struct sockaddr_un addr = { .sun_family = AF_UNIX };
+++	snprintf(addr.sun_path, sizeof(addr.sun_path), socket_fmt, display);
+++	int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+++	if (fd < 0) {
+++		return false;
+++	}
+++	bool in_use = connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == 0;
+++	close(fd);
+++	return in_use;
+++}
+++
++ int open_display_sockets(int socks[2]) {
++ 	int lock_fd, display;
++-	char lock_name[64];
+++	char lock_name[sizeof(((struct sockaddr_un *)0)->sun_path)];
++ 
++ 	for (display = 0; display <= 32; display++) {
++ 		snprintf(lock_name, sizeof(lock_name), lock_fmt, display);
++ 		if ((lock_fd = open(lock_name, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0444)) >= 0) {
+++			if (socket_in_use(display)) {
+++				unlink(lock_name);
+++				close(lock_fd);
+++				continue;
+++			}
++ 			if (!open_sockets(socks, display)) {
++ 				unlink(lock_name);
++ 				close(lock_fd);
+--- a/subprojects/wlroots.wrap
++++ b/subprojects/wlroots.wrap
+@@ -15,4 +15,5 @@
+   wlroots/tl/0002-bionic-no-shm-open.patch,
+   wlroots/tl/0003-x11-follow-root-window-size.patch,
+   wlroots/tl/0004-vulkan-render-into-shm.patch,
+-  wlroots/tl/0005-bionic-sealed-memfd-pair.patch
++  wlroots/tl/0005-bionic-sealed-memfd-pair.patch,
++  wlroots/tl/0006-xwayland-android-paths.patch

@@ -71,3 +71,54 @@ jobs:
         env:
           TL_HEADLESS_STRICT: "1"
         run: bash tests/phosh/run-headless.sh
+
+  # phoc's X11 output following the X root window's size and scale, on Xvfb (issue #14,
+  # docs/PHOSH.md "Testing"): recipes/cross/phoc-xvfb-test.sh builds phoc natively with the
+  # recipes' patches and resizes the screen under it. The libraries noble has too old a version of
+  # come from tests/phosh/run-headless.sh --deps-only, the same prefix the headless job builds.
+  phoc-xvfb:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    # Until seen green.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Packages
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ninja-build pkg-config gcc git curl patch gettext bison xz-utils \
+            python3-venv libappstream-dev libfribidi-dev libpsl-dev libnghttp2-dev libsqlite3-dev \
+            libffi-dev libexpat1-dev \
+            glslang-tools libglib2.0-dev libglib2.0-dev-bin libgtk-3-dev libhandy-1-dev \
+            libgnome-desktop-3-dev libjson-glib-dev libgcr-3-dev libpulse-dev \
+            libpulse-mainloop-glib0 libupower-glib-dev libfontconfig-dev libcairo2-dev \
+            libwayland-dev libwayland-bin wayland-protocols libxkbcommon-dev libpixman-1-dev \
+            libdrm-dev libegl-dev libgles-dev libgbm-dev libvulkan-dev \
+            gsettings-desktop-schemas-dev libxcb1-dev libxcb-composite0-dev libxcb-dri3-dev \
+            libxcb-icccm4-dev libxcb-present-dev libxcb-render-util0-dev libxcb-render0-dev \
+            libxcb-shm0-dev libxcb-xfixes0-dev libxcb-xinput-dev libxcb-ewmh-dev libxcb-res0-dev \
+            libxcb-util-dev libx11-xcb-dev dbus libglib2.0-bin gsettings-desktop-schemas \
+            librsvg2-common adwaita-icon-theme fonts-dejavu-core xkb-data python3 \
+            xvfb x11-xserver-utils wlr-randr wayland-utils
+      - name: meson 1.7 or newer (as the headless job)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/mesonenv"
+          "$RUNNER_TEMP/mesonenv/bin/pip" install -q meson==1.7.2
+          echo "$RUNNER_TEMP/mesonenv/bin" >> "$GITHUB_PATH"
+      - name: Dependencies newer than noble's
+        env:
+          TL_TEST_DIR: ${{ runner.temp }}/phosh-headless
+          TL_HEADLESS_STRICT: "1"
+        run: bash tests/phosh/run-headless.sh --deps-only
+      - name: phoc on Xvfb
+        env:
+          TL_TEST_DIR: ${{ runner.temp }}/phoc-xvfb-test
+          TL_XVFB_TEST_STRICT: "1"
+        run: |
+          # The prefix run-headless.sh built, first, as run-headless.sh itself puts it.
+          prefix="$RUNNER_TEMP/phosh-headless/prefix"
+          multiarch=$(gcc -dumpmachine)
+          export PKG_CONFIG_PATH="$prefix/lib/pkgconfig:$prefix/share/pkgconfig:$prefix/lib/$multiarch/pkgconfig"
+          export LD_LIBRARY_PATH="$prefix/lib:$prefix/lib/$multiarch"
+          export PATH="$prefix/bin:$PATH"
+          bash recipes/cross/phoc-xvfb-test.sh

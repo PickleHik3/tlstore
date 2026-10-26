@@ -29,8 +29,11 @@
 #         display", Rendering), carried as a wlroots patch file
 #   0006  the keymap's shm file is a sealed memfd on Android (a wlroots patch file; no /proc
 #         re-open, which SELinux denies), and phoc survives a keymap that failed to allocate
-# and, from the recipe, not a patch: org.gnome.mutter.keybindings (phoc/*.gschema.xml) and the
-# archive's compiled share/glib-2.0/schemas/gschemas.compiled.
+#   0007  Xwayland on Android (a wlroots patch file): the X11 sockets and lock files in
+#         $TERMUX_PREFIX/tmp, where Termux's libxcb looks (Android has no /tmp), Xwayland's device
+#         path compiled in (not the sysroot's copy pkg-config answers), and a display whose
+#         socket answers (the launcher's own, :0) is never taken over
+# and, from the recipe, not a patch: org.gnome.mutter.keybindings (phoc/*.gschema.xml).
 #
 # M1 builds phosh 0.58.0 the same way: the tag, plus the numbered patches in recipes/cross/phosh/
 # (commits on the tag too, exported with `git format-patch`). They are of three kinds:
@@ -60,26 +63,37 @@
 #       -Dgudev=false          libgudev (nor this): udev monitoring, sysfs backlight and torch
 #       -Dsearchd=false        upstream's search service
 #     UPower, iio-sensor-proxy and the torch manager stay: they only look for their D-Bus names.
-# Not in the archive yet: the session script, the session files and the compiled gschemas, which
-# are the "session-file step" of docs/PHOSH.md ("Packaging"). The schemas are checked here, with
-# the overrides of data/90_tl.gschema.override, not compiled into the archive.
+#     -Dtl-debug stays false (its default): the TlState and TlTile test hooks on DebugControl
+#     (patches 0023 and 0033) are for tests/phosh/run-headless.sh only, never in the archive.
+# The archive also has the launcher's session script, bin/phosh-session (its exe=; the Desktops
+# session file is a catalog file item of its own, recipes/cross/phosh-session.desktop), and one
+# share/glib-2.0/schemas/gschemas.compiled, compiled once after every tree is in the stage (the
+# archive's schemas and overrides only). The session compiles its own copy at every start, with
+# Termux's org.gnome.desktop schemas next to them, so that the overrides of those apply; the
+# archive's compiled file is its fallback. check_phosh_schemas compiles that same set here.
 #
 # What is built in:
 #   - wlroots 0.20.2, the subproject phoc's wlroots.wrap names, linked statically: backends=x11
 #     only (no DRM, libinput, session), renderers=vulkan (the Vulkan renderer, and pixman, which
 #     wlroots always has; no GLES2), no allocators (no gbm, no udmabuf; the shm allocator is
-#     always built), no libliftoff, color management or Xwayland, and xcb-errors off (Termux has
-#     no xcb-util-errors; it only gives the X11 backend readable error names). The Vulkan
+#     always built), no libliftoff or color management, and xcb-errors off (Termux has no
+#     xcb-util-errors; it only gives the X11 backend and the X window manager readable error
+#     names). Xwayland is on (docs/PHOSH.md story 18, X11-only apps inside phosh): wlroots starts
+#     Termux's $TERMUX_PREFIX/bin/Xwayland (the xwayland part) when the first X client connects,
+#     and links libxcb's composite, res and xfixes and xcb-util-wm's ewmh and icccm. The Vulkan
 #     renderer links libvulkan.so (Termux's vulkan-loader-generic, with mesa-vulkan-icd-freedreno
 #     for the GPU: a hidden part of the archive's package) and compiles its shaders with the
 #     host's glslang (glslang-tools in CI). At start phoc tries Vulkan on the GPU and falls back
 #     to pixman, logging the choice; WLR_RENDERER=pixman|vulkan forces one;
 #   - gmobile v0.6.0_beta1 and gvdb, meson subprojects too, static;
-#   - phoc's own xwayland option off: M0 runs Wayland clients only;
+#   - phoc's own xwayland option on, with wlroots': phoc sets DISPLAY for phosh and the apps it
+#     starts to the Xwayland display (the first free one after the launcher's :0);
 #   - for phosh: gmobile (static), libgvc (static, over Termux's libpulse), feedbackd's libfeedback
-#     (a shared library, because its meson says so: lib/libfeedback-0.0.so in the archive, found
-#     through the binary's $ORIGIN/../lib), and everything else from the Termux sysroot (gtk3,
-#     libhandy, gcr, gnome-desktop3, appstream, libsoup3, upower's client library, libpulse).
+#     (a shared library whatever build_phosh's -Dlibfeedback:default_library=static says:
+#     feedbackd's meson builds it with target_type 'shared_library', so that option changes nothing. It is
+#     lib/libfeedback-0.0.so in the archive, found by phosh and phosh-mobile-settings through
+#     their $ORIGIN/../lib), and everything else from the Termux sysroot (gtk3, libhandy, gcr,
+#     gnome-desktop3, appstream, libsoup3, upower's client library, libpulse).
 # The subprojects are fetched by meson from the wraps the trees ship; their commits are pinned
 # below and checked.
 #
@@ -94,7 +108,10 @@
 # TL_TERMUX_X11=1; required), TL_ARCH, TL_NDK, TL_OUT, TL_BUILD_DIR, TERMUX_PREFIX,
 # TL_NATIVE_FILE (an extra meson native file, for a host whose glib tools are not where its .pc
 # files say; a host without glib-mkenums or gdbus-codegen, as Arch is, gets one made from the
-# sysroot's glib, see host_glib_tools), TL_BUILD_JOBS.
+# sysroot's glib, see host_glib_tools), TL_BUILD_JOBS, TL_TERMUX_DEBS (the .deb files the sysroot
+# was assembled from, termux-sysroot.sh's TL_CACHE; default: the directory next to TL_SYSROOT
+# named as it is with "sysroot" changed to "debs", which is where build-asset.sh and
+# termux-sysroot.sh's defaults put it; check_parts reads it).
 set -euo pipefail
 
 PHOC_VERSION="0.58.0"
@@ -137,6 +154,9 @@ TL_BUILD_DIR=${TL_BUILD_DIR:-"$PWD/build-phosh"}
 TERMUX_PREFIX=${TERMUX_PREFIX:-/data/data/com.termux/files/usr}
 TL_PHOSH_TREES=${TL_PHOSH_TREES:-phoc phosh phosh-mobile-settings tl-feedbackd}
 TL_SYSROOT=${TL_SYSROOT:-}
+sysroot_name=${TL_SYSROOT%/}
+sysroot_name=${sysroot_name##*/}
+TL_TERMUX_DEBS=${TL_TERMUX_DEBS:-"${TL_SYSROOT%/*}/${sysroot_name/sysroot/debs}"}
 [ -d "$TL_SYSROOT$TERMUX_PREFIX/lib/pkgconfig" ] || {
     echo "error: no Termux sysroot at '$TL_SYSROOT$TERMUX_PREFIX' (TL_SYSROOT; build it with termux-sysroot.sh -f phosh-deps.txt)" >&2
     exit 1
@@ -240,10 +260,10 @@ build_phoc() {
     meson setup "$build" "$SOURCE_DIR" --cross-file "$cross_file" "${native[@]}" \
         --prefix=/ --buildtype=release --wrap-mode=default \
         -Dtests=false -Dgtk_doc=false -Dman=false \
-        -Dxwayland=disabled \
+        -Dxwayland=enabled \
         -Dwlroots:default_library=static -Dgmobile:default_library=static \
         -Dwlroots:backends=x11 -Dwlroots:renderers=vulkan -Dwlroots:allocators= \
-        -Dwlroots:session=disabled -Dwlroots:xcb-errors=disabled -Dwlroots:xwayland=disabled \
+        -Dwlroots:session=disabled -Dwlroots:xcb-errors=disabled -Dwlroots:xwayland=enabled \
         -Dwlroots:color-management=disabled -Dwlroots:libliftoff=disabled \
         -Dwlroots:examples=false
     check_pin "$SOURCE_DIR/subprojects/wlroots-0.20.x" "$WLROOTS_COMMIT" "wlroots"
@@ -255,13 +275,10 @@ build_phoc() {
     DESTDIR="$stage" meson install -C "$build" --no-rebuild --strip >/dev/null
 
     # phoc opens org.gnome.mutter.keybindings, which no Termux package ships; the schemas it opens
-    # besides (org.gnome.desktop.*) come from Termux's gsettings-desktop-schemas. The archive
-    # carries its own compiled set (phoc's schema and the mutter one), self-contained.
-    local schemas="$stage/share/glib-2.0/schemas"
-    mkdir -p "$schemas"
-    cp "$SCRIPT_DIR/phoc/org.gnome.mutter.keybindings.gschema.xml" "$schemas/"
-    rm -f "$schemas/gschemas.compiled"
-    glib-compile-schemas --strict "$schemas"
+    # besides (org.gnome.desktop.*) come from Termux's gsettings-desktop-schemas. Compiled with
+    # the other trees' schemas once they are all in (the app tree, below).
+    mkdir -p "$stage/share/glib-2.0/schemas"
+    cp "$SCRIPT_DIR/phoc/org.gnome.mutter.keybindings.gschema.xml" "$stage/share/glib-2.0/schemas/"
 }
 
 # phosh's options: every feature the launcher does not ship is off (see the top of this file).
@@ -286,7 +303,7 @@ build_phosh() {
         -Dtests=false -Dtools=false -Dgtk_doc=false -Dman=false \
         "${opts[@]}" \
         -Dsearchd=false -Dlockscreen-plugins=false -Dquick-setting-plugins=false \
-        -Dstatus-icon-plugins=false \
+        -Dstatus-icon-plugins=false -Dtl-debug=false \
         -Dgmobile:default_library=static -Dlibfeedback:default_library=static \
         -Dlibfeedback:udev=false -Dlibfeedback:vapi=false
     check_pin "$SOURCE_DIR/subprojects/gmobile" "$GMOBILE_COMMIT" "gmobile (for phosh)"
@@ -300,8 +317,7 @@ build_phosh() {
     DESTDIR="$stage" meson install -C "$build" --no-rebuild --strip >/dev/null
 
     # What upstream installs for a systemd and gnome-session desktop. The launcher's own session
-    # script and session file are a later step (docs/PHOSH.md, "Packaging"), and a script of the
-    # same name from here would be taken for it.
+    # script is installed in the app tree below, and its session file is a catalog item of its own.
     rm -rf "$stage/lib/systemd" "$stage/share/gnome-session" "$stage/share/wayland-sessions" \
         "$stage/bin/phosh-session"
 
@@ -324,12 +340,22 @@ build_phosh() {
 # libfeedback, which the stage still has before the app tree below drops include/ and
 # lib/pkgconfig. They are copied to $TL_SYSROOT/tl-phosh-dev, with .pc files in the sysroot's
 # pkgconfig directory, because the cross file's pkg-config takes every path to be inside the sysroot;
-# both go away after the build. The compositor panel's display scale is the gsettings key
+# both go away after the build, and on any exit before that (an EXIT trap), so that a failed build
+# does not leave them in a sysroot that is reused or cached. The compositor panel's display scale is the gsettings key
 # mobi.phosh.MobileSettings display-scale, which the session script turns into PHOSH_SCALE for phoc
 # (recipes/cross/phosh-mobile-settings/0013).
 PMS_PANELS_OFF=(
     welcome lang alerts lockscreen osk convergence sensors features updates about
 )
+
+# pms_dev_clean — remove what build_phosh_mobile_settings put into the sysroot.
+pms_dev_clean() {
+    local pc
+    rm -rf "$TL_SYSROOT/tl-phosh-dev"
+    for pc in phosh-plugins phosh-settings libfeedback-0.0; do
+        rm -f "$TL_SYSROOT$TERMUX_PREFIX/lib/pkgconfig/$pc.pc"
+    done
+}
 
 build_phosh_mobile_settings() {
     fetch_tree phosh-mobile-settings "$PMS_URL" "$PMS_SHA256" "$PMS_VERSION" "$PMS_COMMIT"
@@ -343,7 +369,8 @@ build_phosh_mobile_settings() {
         echo "error: phosh-mobile-settings is built after phosh (TL_PHOSH_TREES), in the same stage" >&2
         exit 1
     }
-    rm -rf "$dev"
+    trap pms_dev_clean EXIT
+    pms_dev_clean
     mkdir -p "$dev/include" "$dev/lib"
     cp -a "$stage/include/phosh" "$stage/include/libfeedback-0.0" "$dev/include/"
     cp -a "$stage"/lib/libfeedback-0.0.so* "$dev/lib/"
@@ -368,8 +395,8 @@ build_phosh_mobile_settings() {
     echo "Installing phosh-mobile-settings into the stage..."
     DESTDIR="$stage" meson install -C "$build" --no-rebuild --strip >/dev/null
 
-    rm -rf "$dev"
-    for pc in phosh-plugins phosh-settings libfeedback-0.0; do rm -f "$prefix/lib/pkgconfig/$pc.pc"; done
+    pms_dev_clean
+    trap - EXIT
 }
 # tl-feedbackd (M3, #13): this repository's own daemon, GLib and GIO only; it owns
 # org.sigxcpu.Feedback and turns feedback events into launcherctl vibrate calls. It goes to
@@ -410,6 +437,22 @@ find "$stage" -mindepth 1 -type d -empty -delete
 # The launcher's session script (upstream's own was dropped in build_phosh): the archive's exe=.
 mkdir -p "$stage/bin"
 install -m 755 "$SCRIPT_DIR/phosh-session" "$stage/bin/phosh-session"
+# Every tree's schemas and overrides, compiled once now that all are in: the session's fallback
+# (phosh-session compiles its own copy with Termux's desktop schemas). The overrides of schemas
+# that are not in the archive (org.gnome.desktop.*, which Termux's gsettings-desktop-schemas
+# ships) are skipped here, as glib-compile-schemas says; anything else it reports fails the build.
+if [ -d "$stage/share/glib-2.0/schemas" ]; then
+    rm -f "$stage/share/glib-2.0/schemas/gschemas.compiled"
+    schema_log=$(glib-compile-schemas "$stage/share/glib-2.0/schemas" 2>&1) || {
+        printf '%s\n' "$schema_log" >&2
+        echo "error: the archive's schemas do not compile" >&2
+        exit 1
+    }
+    if printf '%s\n' "$schema_log" | grep -v '^$' | grep -v 'non-existent schema\|ignoring override'; then
+        echo "error: glib-compile-schemas reported the above on the archive's schemas" >&2
+        exit 1
+    fi
+fi
 
 # --- checks ---------------------------------------------------------------------------------
 readelf="$NDK_BIN/llvm-readelf"
@@ -429,6 +472,20 @@ check_phoc() {
     }
     if "$readelf" -d "$stage/bin/phoc" | grep NEEDED | grep -E 'libinput|libudev|libseat|libgbm|libEGL|libGLES'; then
         echo "error: phoc links a library the X11-only build must not need" >&2
+        exit 1
+    fi
+    # Xwayland is in, with the device's paths (phoc patch 0007): the binary Termux installs, the
+    # sockets where Termux's libxcb looks, and no path of the build machine's sysroot.
+    grep -qa "$TERMUX_PREFIX/bin/Xwayland" "$stage/bin/phoc" || {
+        echo "error: phoc has no Xwayland, or not $TERMUX_PREFIX/bin/Xwayland" >&2
+        exit 1
+    }
+    grep -qa "$TERMUX_PREFIX/tmp/.X11-unix" "$stage/bin/phoc" || {
+        echo "error: phoc's Xwayland sockets are not in $TERMUX_PREFIX/tmp/.X11-unix" >&2
+        exit 1
+    }
+    if grep -qa "$TL_SYSROOT$TERMUX_PREFIX/bin/Xwayland" "$stage/bin/phoc"; then
+        echo "error: phoc has the build sysroot's Xwayland path compiled in" >&2
         exit 1
     fi
     # meson install drops the build and sysroot directories from RUNPATH; only the device prefix stays.
@@ -469,6 +526,11 @@ check_phosh() {
     fi
     "$readelf" -d "$stage/bin/phosh" | grep -E 'RUNPATH' | grep -q '\$ORIGIN/../lib' || {
         echo "error: phosh does not look for libfeedback in ../lib" >&2
+        exit 1
+    }
+    # The test hooks are not in: TlState and TlTile answer "not supported" (patch 0033).
+    grep -qa 'Built without -Dtl-debug' "$stage/bin/phosh" || {
+        echo "error: phosh has the TlState and TlTile test hooks (-Dtl-debug); a phone's build must not" >&2
         exit 1
     }
     check_phosh_schemas
@@ -566,6 +628,71 @@ check_phosh_mobile_settings() {
     fi
 }
 
+# check_parts — every library a program or library of the archive links (NEEDED) that the archive
+# does not carry itself is shipped by a Termux package the phosh-deps row of scripts/items.tsv
+# installs on this processor (its source=, or x86_64:source= on x86_64), so that hand-kept list
+# cannot drift from what the build links. A library is mapped to its package through the .deb
+# files the sysroot was assembled from: the package is the part of the .deb's file name before the
+# first "_", and its libraries are the files under $TERMUX_PREFIX/lib/ in its data archive
+# (dpkg-deb, or ar and bsdtar, as termux-sysroot.sh extracts them). A library no .deb ships must be
+# Android's own (in the NDK's sysroot: libc, libm, libdl, liblog, libandroid, ...).
+check_parts() {
+    local items="$SCRIPT_DIR/../../scripts/items.tsv" index="$TL_BUILD_DIR/lib-packages-$TL_ARCH"
+    local parts deb pkg f lib needed provides missing=0 ndk_lib="$NDK_BIN/../sysroot/usr/lib"
+    [ -f "$items" ] || { echo "error: no $items" >&2; exit 1; }
+    ls "$TL_TERMUX_DEBS"/*.deb >/dev/null 2>&1 || {
+        echo "error: no .deb files in $TL_TERMUX_DEBS (TL_TERMUX_DEBS: the sysroot's package cache)" >&2
+        exit 1
+    }
+    parts=$(awk -F'\t' -v arch="$TL_ARCH" '$1 == "phosh-deps" {
+            list = $5
+            if (arch == "x86_64") {
+                n = split($8, meta, ";")
+                for (i = 1; i <= n; i++)
+                    if (index(meta[i], "x86_64:source=") == 1) list = substr(meta[i], 15)
+            }
+            print list
+        }' "$items")
+    [ -n "$parts" ] || { echo "error: no phosh-deps row in $items" >&2; exit 1; }
+    parts=" $parts "
+
+    # "<library file name> <package>", one line per library file of every .deb
+    : > "$index"
+    for deb in "$TL_TERMUX_DEBS"/*.deb; do
+        pkg=$(basename "$deb")
+        pkg=${pkg%%_*}
+        if command -v dpkg-deb >/dev/null 2>&1; then
+            dpkg-deb --fsys-tarfile "$deb" | tar -tf -
+        else
+            ar p "$deb" "$(ar t "$deb" | grep '^data\.tar')" | bsdtar -tf -
+        fi | sed -n "s#^\.\{0,1\}/\{0,1\}${TERMUX_PREFIX#/}/lib/\([^/]*\.so[^/]*\)\$#\1 $pkg#p" >> "$index"
+    done
+
+    needed=$(for f in "$stage"/bin/* "$stage"/lib/*.so*; do
+                 [ -f "$f" ] && [ ! -L "$f" ] || continue
+                 head -c 4 "$f" | grep -q 'ELF' || continue
+                 "$readelf" -d "$f" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p'
+             done | LC_ALL=C sort -u)
+    for lib in $needed; do
+        [ ! -e "$stage/lib/$lib" ] || continue
+        provides=$(awk -v lib="$lib" '$1 == lib { print $2 }' "$index" | LC_ALL=C sort -u)
+        if [ -z "$provides" ]; then
+            if find "$ndk_lib" -name "$lib" -print -quit 2>/dev/null | grep -q .; then
+                continue
+            fi
+            echo "error: $lib (NEEDED by the archive) is in no package of $TL_TERMUX_DEBS, nor Android's" >&2
+            missing=1
+            continue
+        fi
+        for pkg in $provides; do
+            case "$parts" in *" $pkg "*) continue 2 ;; esac
+        done
+        echo "error: $lib (NEEDED by the archive) comes from ${provides//$'\n'/ }, which the phosh-deps row of scripts/items.tsv does not install on $TL_ARCH" >&2
+        missing=1
+    done
+    [ "$missing" = 0 ] || exit 1
+}
+
 for tree in $TL_PHOSH_TREES; do
     case "$tree" in
         phoc) check_phoc ;;
@@ -574,6 +701,7 @@ for tree in $TL_PHOSH_TREES; do
         tl-feedbackd) check_tl_feedbackd ;;
     esac
 done
+check_parts
 
 # --- the archive ----------------------------------------------------------------------------
 rm -f "$TL_OUT/phosh"
