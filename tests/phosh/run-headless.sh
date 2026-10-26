@@ -269,6 +269,9 @@ build_phoc() {
     ninja -C "$TL_TEST_DIR/phoc-build" -j"$jobs"
     meson install -C "$TL_TEST_DIR/phoc-build" >/dev/null
     cp "$RECIPES/phoc/org.gnome.mutter.keybindings.gschema.xml" "$prefix/share/glib-2.0/schemas/"
+    # The schemas phosh opens that no distribution package provides here either (build-phosh.sh ships
+    # them in the archive): gnome-settings-daemon power, shell keybindings, touchscreen.
+    cp "$RECIPES"/phosh/*.gschema.xml "$prefix/share/glib-2.0/schemas/"
     touch "$TL_TEST_DIR/.installed-phoc"
 }
 
