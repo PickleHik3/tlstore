@@ -1,6 +1,7 @@
 # Termux packages for the phosh sysroot, M0: what phoc needs to configure and link.
 # Read by `termux-sysroot.sh -f` with TL_TERMUX_X11=1 (the x11-repo ones are marked). phosh's and
-# phosh-mobile-settings' libraries are added by the M1 tickets. termux-sysroot.sh does not
+# phosh-mobile-settings' libraries (gtk4, libadwaita, ...) come with M4; phosh's are the last block
+# of this file. termux-sysroot.sh does not
 # resolve Depends, so every library a listed one links against is named here too.
 # Names checked against both Packages indexes (aarch64 and x86_64) on 2026-10-26.
 # Not in Termux under any name: xcb-util-errors (wlroots' X11 backend uses it only for readable
@@ -96,3 +97,52 @@ libandroid-selinux
 libandroid-shmem
 dbus
 json-glib
+
+# M1, phosh's own libraries. Names checked against both Packages indexes on 2026-10-26.
+# Present: libhandy (x11-repo), gcr (x11-repo; the gcr-3 API phosh uses), appstream, libsoup3,
+# libsecret, upower (only its libupower-glib client library is used), pulseaudio (libpulse for
+# libgvc), json-glib, fribidi, gnome-desktop3, gtk3, gsettings-desktop-schemas, glib.
+# Not in Termux under any name: libnm (networkmanager), mm-glib (modemmanager), libgudev, polkit
+# (polkit-agent-1), libsystemd/libelogind, libpam, evolution-data-server (libecal-2.0,
+# libedataserver-1.2), gnome-bluetooth, libcall-ui and callaudiod (libcall-ui is a meson
+# subproject of phosh and is compiled out with calls; callaudiod is not used any more). The patch
+# set in recipes/cross/phosh/ compiles out each of them.
+libhandy                # x11-repo
+gcr                     # x11-repo
+appstream
+libsoup3
+libsecret
+upower
+pulseaudio
+pulseaudio-glib         # libpulse-mainloop-glib, which libgvc needs
+gobject-introspection   # appstream and gcr link libgirepository
+# What those link against (Depends, not resolved by termux-sysroot.sh)
+libgcrypt
+libgpg-error
+p11-kit
+libtasn1
+libunistring
+libxmlb
+libfyaml
+libstemmer
+libcurl
+libnghttp2
+libnghttp3
+libngtcp2
+libpsl
+libidn2
+libssh2
+libltdl
+libsndfile
+libflac
+libogg
+libopus
+libvorbis
+libmp3lame
+libmpg123
+libsoxr
+speexdsp
+libwebrtc-audio-processing
+abseil-cpp
+libandroid-stub
+atk
