@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PickleHik3 <noreply@example.invalid>
+Date: Mon, 26 Oct 2026 12:00:00 +0000
+Subject: [PATCH 14/16] Compile out ModemManager: -Dmodemmanager=false
+
+No mm-glib: the oFono backend is the one that is left.
+---
+ src/shell.c | 12 +++++++++++-
+ 1 file changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/src/shell.c b/src/shell.c
+index f59eb13..bb26377 100644
+--- a/src/shell.c
++++ b/src/shell.c
+@@ -112,7 +112,9 @@
+ #include "wifi-info.h"
+ #include "wwan-info.h"
+ #include "wwan/phosh-wwan-ofono.h"
+-#include "wwan/phosh-wwan-mm.h"
++#if PHOSH_HAVE_MODEMMANAGER
++# include "wwan/phosh-wwan-mm.h"
++#endif
+ #include "wall-clock.h"
+ 
+ #include "phosh-settings-enums.h"
+@@ -2376,8 +2378,11 @@ phosh_shell_get_wwan (PhoshShell *self)
+     switch (backend) {
+       default:
+       case PHOSH_WWAN_BACKEND_MM:
++#if PHOSH_HAVE_MODEMMANAGER
+         priv->wwan = PHOSH_WWAN (phosh_wwan_mm_new());
+         break;
++#endif
++        /* Without ModemManager the oFono backend is the one that is left */
+       case PHOSH_WWAN_BACKEND_OFONO:
+         priv->wwan = PHOSH_WWAN (phosh_wwan_ofono_new());
+         break;
+@@ -2878,6 +2883,11 @@ GType
+ phosh_shell_get_lockscreen_type (PhoshShell *self)
+ {
+   PhoshShellClass *klass = PHOSH_SHELL_GET_CLASS (self);
++
++  /* Without a lock screen there is no type to name */
++  if (!klass->get_lockscreen_type)
++    return G_TYPE_INVALID;
++
+   return klass->get_lockscreen_type (self);
+ }
+ 

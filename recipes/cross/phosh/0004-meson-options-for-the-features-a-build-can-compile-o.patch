@@ -1,0 +1,702 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PickleHik3 <noreply@example.invalid>
+Date: Mon, 26 Oct 2026 12:00:00 +0000
+Subject: [PATCH 04/16] meson: options for the features a build can compile out
+
+New options, all true, which is upstream's build: lockscreen, polkit, logind, osk, eds,
+calls, bluetooth, location, vpn, hotspot, networkmanager, modemmanager and gudev. A disabled
+feature has no dependency, no source files and no plugins in the build, defines
+PHOSH_HAVE_<FEATURE> as 0 in phosh-config.h, and takes its objects out of the GtkBuilder files
+that name them (tools/tl-ui-filter, between '<!-- tl-if FEATURE -->' markers). The C guards
+follow, one commit per feature.
+---
+ meson.build          | 123 +++++++++++++++++++++++++++++++++++--------
+ meson.options        |  54 +++++++++++++++++++
+ plugins/meson.build  |  42 ++++++++++-----
+ src/meson.build      | 118 +++++++++++++++++++++++++++--------------
+ src/ui/meson.build   |  28 ++++++++++
+ src/wwan/meson.build |  12 ++++-
+ tools/meson.build    |   4 +-
+ tools/tl-ui-filter   |  61 +++++++++++++++++++++
+ 8 files changed, 364 insertions(+), 78 deletions(-)
+ create mode 100644 src/ui/meson.build
+ create mode 100755 tools/tl-ui-filter
+
+diff --git a/meson.build b/meson.build
+index 55ac269..8bb8eff 100644
+--- a/meson.build
++++ b/meson.build
+@@ -134,14 +134,45 @@ i18n = import('i18n')
+ pkgconfig = import('pkgconfig')
+ 
+ appstream_dep = dependency('appstream', version: '>= 1.0.0')
+-ecal_dep = dependency('libecal-2.0', version: '>= 3.33.1')
+-eds_dep = dependency('libedataserver-1.2', version: '>= 3.33.1')
++# Dependencies of the features the tl patch set can compile out. A disabled feature has no
++# dependency: not_found_dep is a dependency that is never found and adds nothing to a build.
++not_found_dep = dependency('', required: false)
++
++have_eds = get_option('eds')
++have_bluetooth = get_option('bluetooth')
++have_calls = get_option('calls')
++have_gudev = get_option('gudev')
++have_hotspot = get_option('hotspot')
++have_location = get_option('location')
++have_lockscreen = get_option('lockscreen')
++have_logind = get_option('logind')
++have_modemmanager = get_option('modemmanager')
++have_networkmanager = get_option('networkmanager')
++have_osk = get_option('osk')
++have_polkit = get_option('polkit')
++have_vpn = get_option('vpn')
++
++# VPN and the hotspot setting are NetworkManager's.
++if not have_networkmanager
++  have_vpn = false
++  have_hotspot = false
++endif
++
++ecal_dep = not_found_dep
++eds_dep = not_found_dep
++if have_eds
++  ecal_dep = dependency('libecal-2.0', version: '>= 3.33.1')
++  eds_dep = dependency('libedataserver-1.2', version: '>= 3.33.1')
++endif
+ fribidi_dep = dependency('fribidi')
+ gcr_dep = dependency('gcr-3', version: '>= 3.7.5')
+ glib_dep = dependency('glib-2.0', version: glib_ver_cmp)
+ gio_dep = dependency('gio-2.0', version: glib_ver_cmp)
+ gio_unix_dep = dependency('gio-unix-2.0', version: glib_ver_cmp)
+-gnome_bluetooth_dep = dependency('gnome-bluetooth-3.0', version: '>= 46.0')
++gnome_bluetooth_dep = not_found_dep
++if have_bluetooth
++  gnome_bluetooth_dep = dependency('gnome-bluetooth-3.0', version: '>= 46.0')
++endif
+ gmobile_dep = dependency(
+   'gmobile',
+   version: '>= 0.1.0',
+@@ -162,16 +193,10 @@ gsettings_desktop_schemas_dep = dependency(
+ )
+ gtk_dep = dependency('gtk+-3.0', version: '>=3.22')
+ gtk_wayland_dep = dependency('gtk+-wayland-3.0', version: '>=3.22')
+-gudev_dep = dependency('gudev-1.0')
+-libcall_ui = subproject(
+-  'libcall-ui',
+-  default_options: [
+-    'examples=false',
+-    'gtk_doc=false',
+-    'tests=false',
+-    'install-i18n=@0@'.format(get_option('callui-i18n')),
+-  ],
+-)
++gudev_dep = not_found_dep
++if have_gudev
++  gudev_dep = dependency('gudev-1.0')
++endif
+ libfeedback_dep = dependency(
+   'libfeedback-0.0',
+   version: '>= 0.7.0',
+@@ -202,13 +227,40 @@ libhandy_dep = dependency(
+   fallback: ['libhandy', 'libhandy_dep'],
+   default_options: ['introspection=disabled'],
+ )
+-libcall_ui_dep = libcall_ui.get_variable('libcall_ui_dep')
+-libnm_dep = dependency('libnm', version: '>= 1.14')
+-libpolkit_agent_dep = dependency('polkit-agent-1', version: '>= 0.122')
++libcall_ui_dep = not_found_dep
++if have_calls
++  libcall_ui = subproject(
++    'libcall-ui',
++    default_options: [
++      'examples=false',
++      'gtk_doc=false',
++      'tests=false',
++      'install-i18n=@0@'.format(get_option('callui-i18n')),
++    ],
++  )
++  libcall_ui_dep = libcall_ui.get_variable('libcall_ui_dep')
++endif
++libnm_dep = not_found_dep
++if have_networkmanager
++  libnm_dep = dependency('libnm', version: '>= 1.14')
++endif
++libpolkit_agent_dep = not_found_dep
++if have_polkit
++  libpolkit_agent_dep = dependency('polkit-agent-1', version: '>= 0.122')
++endif
+ libsoup_dep = dependency('libsoup-3.0', version: '>= 3.6')
+-libsystemd_dep = dependency('libsystemd', 'libelogind', version: '>= 241')
+-mm_glib_dep = dependency('mm-glib', version: '>= 1.24')
+-network_agent_dep = dependency('libsecret-1')
++libsystemd_dep = not_found_dep
++if have_logind
++  libsystemd_dep = dependency('libsystemd', 'libelogind', version: '>= 241')
++endif
++mm_glib_dep = not_found_dep
++if have_modemmanager
++  mm_glib_dep = dependency('mm-glib', version: '>= 1.24')
++endif
++network_agent_dep = not_found_dep
++if have_networkmanager
++  network_agent_dep = dependency('libsecret-1')
++endif
+ upower_glib_dep = dependency('upower-glib', version: '>=1.90')
+ wayland_client_dep = dependency('wayland-client', version: '>=1.14')
+ wayland_protos_dep = dependency('wayland-protocols', version: '>=1.12')
+@@ -236,6 +288,20 @@ config_h.set_quoted('PHOSH_PLUGINS_DIR', plugins_dir)
+ config_h.set_quoted('PHOSH_VERSION', meson.project_version())
+ config_h.set('PHOSH_ANIMATION_SLOWDOWN', get_option('animation-slowdown'))
+ config_h.set('HAVE_RFKILL_EVENT_EXT', have_rfkill_event_ext)
++# The tl patch set's switches, always defined as 0 or 1 so that `#if` works
++config_h.set10('PHOSH_HAVE_BLUETOOTH', have_bluetooth)
++config_h.set10('PHOSH_HAVE_CALLS', have_calls)
++config_h.set10('PHOSH_HAVE_EDS', have_eds)
++config_h.set10('PHOSH_HAVE_GUDEV', have_gudev)
++config_h.set10('PHOSH_HAVE_HOTSPOT', have_hotspot)
++config_h.set10('PHOSH_HAVE_LOCATION', have_location)
++config_h.set10('PHOSH_HAVE_LOCKSCREEN', have_lockscreen)
++config_h.set10('PHOSH_HAVE_LOGIND', have_logind)
++config_h.set10('PHOSH_HAVE_MODEMMANAGER', have_modemmanager)
++config_h.set10('PHOSH_HAVE_NETWORKMANAGER', have_networkmanager)
++config_h.set10('PHOSH_HAVE_OSK', have_osk)
++config_h.set10('PHOSH_HAVE_POLKIT', have_polkit)
++config_h.set10('PHOSH_HAVE_VPN', have_vpn)
+ config_h.set(
+   'PHOSH_HAVE_MEMFD_CREATE',
+   have_memfd_create,
+@@ -278,7 +344,9 @@ subdir('searchd')
+ subdir('tests')
+ subdir('tools')
+ subdir('docs')
+-subdir('calendar-server')
++if have_eds
++  subdir('calendar-server')
++endif
+ 
+ summary(
+   {
+@@ -288,12 +356,25 @@ summary(
+     'Introspection': enable_introspection,
+     'Manual pages': get_option('man'),
+     'Tools': get_option('tools'),
+-    'Lockscreen Plugins': get_option('lockscreen-plugins'),
++    'Lockscreen Plugins': build_lockscreen_plugins,
+     'Quick Setting Plugins': get_option('quick-setting-plugins'),
+     'Animation slowdown': get_option('animation-slowdown'),
+     'Bindings Library': bindings_lib,
+     'ABI Compliance Check': abi_check,
+     'Searchd': get_option('searchd'),
++    'Lock screen (PAM)': have_lockscreen,
++    'Polkit agent': have_polkit,
++    'logind / libsystemd': have_logind,
++    'On-screen keyboard manager': have_osk,
++    'Calendar (EDS)': have_eds,
++    'Calls': have_calls,
++    'Bluetooth': have_bluetooth,
++    'Location': have_location,
++    'VPN': have_vpn,
++    'Wi-Fi hotspot': have_hotspot,
++    'NetworkManager (libnm)': have_networkmanager,
++    'ModemManager (mm-glib)': have_modemmanager,
++    'libgudev': have_gudev,
+   },
+   bool_yn: true,
+   section: 'Build',
+diff --git a/meson.options b/meson.options
+index 645f74a..56d3ae4 100644
+--- a/meson.options
++++ b/meson.options
+@@ -63,3 +63,57 @@ option('abi-check',
+ option('searchd',
+        type: 'boolean', value: false,
+        description: 'Enable build and installation of phosh\'s search service')
++
++# tl patch set: compile out features Termux Launcher does not ship. All default to true, which
++# is upstream's behaviour.
++option('lockscreen',
++       type: 'boolean', value: true,
++       description: 'Build the lock screen, PIN unlock, lock-screen plugins and PAM authentication. Without it phosh starts and stays unlocked')
++
++option('polkit',
++       type: 'boolean', value: true,
++       description: 'Build the polkit authentication agent')
++
++option('logind',
++       type: 'boolean', value: true,
++       description: 'Build the logind session, inhibit and idle/suspend integration (libsystemd or libelogind)')
++
++option('osk',
++       type: 'boolean', value: true,
++       description: 'Build the on-screen keyboard manager (the sm.puri.OSK0 service)')
++
++option('eds',
++       type: 'boolean', value: true,
++       description: 'Build the evolution-data-server calendar server and the calendar plugins')
++
++option('calls',
++       type: 'boolean', value: true,
++       description: 'Build phone calls: callaudiod-style call handling, libcall-ui widgets, emergency calls, cell broadcasts')
++
++option('bluetooth',
++       type: 'boolean', value: true,
++       description: 'Build the Bluetooth manager and status page (gnome-bluetooth)')
++
++option('location',
++       type: 'boolean', value: true,
++       description: 'Build the location (GeoClue) manager and its quick setting')
++
++option('vpn',
++       type: 'boolean', value: true,
++       description: 'Build the VPN manager')
++
++option('hotspot',
++       type: 'boolean', value: true,
++       description: 'Build the Wi-Fi hotspot quick setting')
++
++option('networkmanager',
++       type: 'boolean', value: true,
++       description: 'Build against libnm: Wi-Fi, connectivity, network authentication agent. Without it the Wi-Fi manager reports no Wi-Fi')
++
++option('modemmanager',
++       type: 'boolean', value: true,
++       description: 'Build the ModemManager (mm-glib) WWAN backend')
++
++option('gudev',
++       type: 'boolean', value: true,
++       description: 'Build against libgudev: udev monitoring, sysfs torch and backlight discovery')
+diff --git a/plugins/meson.build b/plugins/meson.build
+index 43fcd77..a34f8a6 100644
+--- a/plugins/meson.build
++++ b/plugins/meson.build
+@@ -58,27 +58,38 @@ pkgconfig.generate(
+   description: 'Phosh plugin configuration data',
+ )
+ 
+-lockscreen_plugins = [
+-  'calendar',
+-  'emergency-info',
+-  'launcher-box',
+-  'media-players',
+-  'ticket-box',
+-  'upcoming-events',
+-]
++lockscreen_plugins = []
++if have_lockscreen
++  lockscreen_plugins = [
++    'emergency-info',
++    'launcher-box',
++    'media-players',
++    'ticket-box',
++  ]
++  if have_eds
++    lockscreen_plugins += ['calendar', 'upcoming-events']
++  endif
++endif
+ 
+ quick_setting_plugins = [
+   'caffeine-quick-setting',
+   'dark-mode-quick-setting',
+-  'location-quick-setting',
+-  'mobile-data-quick-setting',
+   'night-light-quick-setting',
+   'pomodoro-quick-setting',
+   'scaling-quick-setting',
+   'simple-custom-quick-setting',
+   'syncthing-quick-setting',
+-  'wifi-hotspot-quick-setting',
+ ]
++if have_location
++  quick_setting_plugins += ['location-quick-setting']
++endif
++# Mobile data switches the modem's NetworkManager connection
++if have_networkmanager
++  quick_setting_plugins += ['mobile-data-quick-setting']
++endif
++if have_hotspot
++  quick_setting_plugins += ['wifi-hotspot-quick-setting']
++endif
+ 
+ status_icon_plugins = ['load-meter-status-icon', 'simple-custom-status-icon']
+ 
+@@ -88,9 +99,12 @@ foreach plugin : lockscreen_plugins + quick_setting_plugins
+ endforeach
+ plugin_schema_path = ':'.join(plugin_schema_dirs)
+ 
+-if get_option('lockscreen-plugins') or get_option('quick-setting-plugins')
++build_lockscreen_plugins = get_option('lockscreen-plugins') and have_lockscreen
++
++if build_lockscreen_plugins or get_option('quick-setting-plugins')
+   plugin_inc = include_directories('.')
+-  plugin_prefs_inc = include_directories('.')
++  # ../src for format-duration.h
++  plugin_prefs_inc = include_directories('.', '../src')
+ 
+   # Like phosh-config.h but for preference plugins
+   plugin_prefs_config = configuration_data()
+@@ -124,7 +138,7 @@ if get_option('lockscreen-plugins') or get_option('quick-setting-plugins')
+     ],
+   )
+ 
+-  if get_option('lockscreen-plugins')
++  if build_lockscreen_plugins
+     foreach plugin : lockscreen_plugins
+       subdir(plugin)
+     endforeach
+diff --git a/src/meson.build b/src/meson.build
+index b057c81..ad71797 100644
+--- a/src/meson.build
++++ b/src/meson.build
+@@ -1,4 +1,5 @@
+ subdir('dbus')
++subdir('ui')
+ subdir('monitor')
+ subdir('notifications')
+ subdir('wwan')
+@@ -51,6 +52,8 @@ phosh_resources = gnome.compile_resources(
+   'phosh-resources',
+   'phosh.gresources.xml',
+   c_name: 'phosh',
++  source_dir: [meson.current_build_dir(), meson.current_source_dir()],
++  dependencies: tl_filtered_uis,
+ )
+ 
+ libphosh_enum_headers = files('lockscreen.h')
+@@ -212,28 +215,17 @@ phosh_tool_sources = files(
+   'background-cache.c',
+   'background-image.c',
+   'background.c',
+-  'backlight-sysfs.c',
+   'backlight.c',
+   'battery-manager.c',
+   'bidi.c',
+   'brightness-manager.c',
+   'brightness-settings.c',
+-  'call-notification.c',
+-  'call.c',
+-  'calls-manager.c',
+-  'cell-broadcast-manager.c',
+-  'cell-broadcast-prompt.c',
+   'clamp.c',
+-  'connectivity-info.c',
+-  'connectivity-manager.c',
+   'debug-control.c',
+   'default-media-player.c',
+   'docked-info.c',
+   'docked-manager.c',
+   'drag-surface.c',
+-  'emergency-contact-row.c',
+-  'emergency-contact.c',
+-  'emergency-menu.c',
+   'end-session-dialog.c',
+   'fading-label.c',
+   'favorite-list-model.c',
+@@ -245,10 +237,8 @@ phosh_tool_sources = files(
+   'gtk-mount-prompt.c',
+   'hks-info.c',
+   'hks-manager.c',
+-  'keypad.c',
+   'launcher-entry-manager.c',
+   'layersurface.c',
+-  'lockshield.c',
+   'manager.c',
+   'media-player.c',
+   'metainfo-cache.c',
+@@ -278,17 +268,10 @@ phosh_tool_sources = files(
+   'swipe-away-bin.c',
+   'system-modal-dialog.c',
+   'system-modal.c',
+-  'udev-manager.c',
+   'util.c',
+-  'vpn-info.c',
+-  'vpn-manager.c',
+   'wall-clock.c',
+   'widget-box.c',
+   'wifi-info.c',
+-  'wifi-manager.c',
+-  'wifi-network-row.c',
+-  'wifi-network.c',
+-  'wifi-status-page.c',
+   'wl-buffer.c',
+ ) + [
+   phosh_monitor_sources,
+@@ -390,15 +373,8 @@ phosh_headers = files(
+ phosh_sources = files(
+   'app-tracker.c',
+   'arrow.c',
+-  'auth.c',
+   'background-manager.c',
+   'battery-info.c',
+-  'bt-device-row.c',
+-  'bt-info.c',
+-  'bt-manager.c',
+-  'bt-status-page.c',
+-  'contrib/shell-network-agent.c',
+-  'emergency-calls-manager.c',
+   'fader.c',
+   'thumbnail-overlay.c',
+   'fake-clock.c',
+@@ -407,20 +383,10 @@ phosh_sources = files(
+   'idle-manager.c',
+   'keyboard-events.c',
+   'layout-manager.c',
+-  'location-info.c',
+-  'location-manager.c',
+-  'lockscreen-bg.c',
+   'lockscreen-manager.c',
+-  'lockscreen.c',
+   'monitor-manager.c',
+-  'network-auth-manager.c',
+-  'network-auth-prompt.c',
+-  'osk-manager.c',
+-  'polkit-auth-agent.c',
+-  'polkit-auth-prompt.c',
+   'portal-access-manager.c',
+   'portal-request.c',
+-  'proximity.c',
+   'rotateinfo.c',
+   'rotation-manager.c',
+   'run-command-dialog.c',
+@@ -447,6 +413,75 @@ phosh_sources = files(
+   phosh_wwan_sources,
+ ]
+ 
++# Sources the tl patch set's options compile out. Each block also lists the files that only make
++# sense with the feature, so that a build without it has no reference to a library it lacks.
++if have_calls
++  phosh_tool_sources += files(
++    'call.c',
++    'call-notification.c',
++    'calls-manager.c',
++    'cell-broadcast-manager.c',
++    'cell-broadcast-prompt.c',
++    'emergency-contact-row.c',
++    'emergency-contact.c',
++    'emergency-menu.c',
++  )
++  phosh_sources += files('emergency-calls-manager.c', 'proximity.c')
++endif
++
++if have_lockscreen
++  phosh_tool_sources += files('keypad.c', 'lockshield.c')
++  phosh_sources += files('auth.c', 'lockscreen-bg.c', 'lockscreen.c')
++endif
++
++if have_polkit
++  phosh_sources += files('polkit-auth-agent.c', 'polkit-auth-prompt.c')
++endif
++
++if have_osk
++  phosh_sources += files('osk-manager.c')
++endif
++
++if have_bluetooth
++  phosh_sources += files(
++    'bt-device-row.c',
++    'bt-info.c',
++    'bt-manager.c',
++    'bt-status-page.c',
++  )
++endif
++
++if have_location
++  phosh_sources += files('location-info.c', 'location-manager.c')
++endif
++
++if have_vpn
++  phosh_tool_sources += files('vpn-info.c', 'vpn-manager.c')
++endif
++
++if have_networkmanager
++  phosh_tool_sources += files(
++    'connectivity-info.c',
++    'connectivity-manager.c',
++    'wifi-manager.c',
++    'wifi-network-row.c',
++    'wifi-network.c',
++    'wifi-status-page.c',
++  )
++  phosh_sources += files(
++    'contrib/shell-network-agent.c',
++    'network-auth-manager.c',
++    'network-auth-prompt.c',
++  )
++else
++  # Wi-Fi without NetworkManager: a manager that has no hardware to report
++  phosh_tool_sources += files('wifi-manager-none.c')
++endif
++
++if have_gudev
++  phosh_tool_sources += files('backlight-sysfs.c', 'udev-manager.c')
++endif
++
+ # Headers are bundled as they're not shipped by gnome-bluetooth
+ # https://gitlab.gnome.org/GNOME/gnome-bluetooth/-/merge_requests/200
+ gnome_bluetooth_headers_dep = declare_dependency(
+@@ -489,7 +524,7 @@ phosh_deps = [
+   network_agent_dep,
+   upower_glib_dep,
+   wayland_client_dep,
+-  cc.find_library('pam', required: true),
++  have_lockscreen ? cc.find_library('pam', required: true) : not_found_dep,
+   cc.find_library('m', required: false),
+   cc.find_library('rt', required: false),
+ ]
+@@ -540,7 +575,12 @@ phosh_lib = both_libraries(
+   dependencies: [phosh_tool_dep, phosh_deps],
+   soversion: 0,
+   install: bindings_lib,
+-  link_args: '-Wl,--version-script,@0@'.format(symbols_file.full_path()),
++  # The version script names the lock screen and the NetworkManager parts of the API, which are
++  # not there without those features
++  link_args: [
++    '-Wl,--version-script,@0@'.format(symbols_file.full_path()),
++    '-Wl,--undefined-version',
++  ],
+   link_depends: symbols_file,
+   override_options: abi_check ? {'optimization': 'g'} : {},
+ )
+diff --git a/src/ui/meson.build b/src/ui/meson.build
+new file mode 100644
+index 0000000..6461130
+--- /dev/null
++++ b/src/ui/meson.build
+@@ -0,0 +1,28 @@
++# GtkBuilder files that name objects of features the tl patch set can compile out are passed
++# through tools/tl-ui-filter, which drops the blocks of the features that are off. The result is in
++# this directory of the build tree, where phosh.gresources.xml finds it before the source's own.
++tl_ui_off = []
++foreach feature, enabled : {
++  'bluetooth': have_bluetooth,
++  'calls': have_calls,
++  'location': have_location,
++  'lockscreen': have_lockscreen,
++  'networkmanager': have_networkmanager,
++  'vpn': have_vpn,
++}
++  if not enabled
++    tl_ui_off += feature
++  endif
++endforeach
++
++tl_ui_filter = find_program(meson.project_source_root() / 'tools' / 'tl-ui-filter')
++
++tl_filtered_uis = []
++foreach ui : ['power-menu.ui', 'quick-settings.ui', 'top-panel.ui']
++  tl_filtered_uis += custom_target(
++    'filtered-' + ui,
++    input: ui,
++    output: ui,
++    command: [tl_ui_filter, '@INPUT@', '@OUTPUT@', tl_ui_off],
++  )
++endforeach
+diff --git a/src/wwan/meson.build b/src/wwan/meson.build
+index 802c313..18371c0 100644
+--- a/src/wwan/meson.build
++++ b/src/wwan/meson.build
+@@ -9,7 +9,15 @@ phosh_wwan_headers = files(
+ 
+ phosh_wwan_sources = files(
+   'phosh-wwan-iface.c',
+-  'phosh-wwan-mm.c',
+   'phosh-wwan-ofono.c',
+-  'wwan-manager.c',
+ )
++
++if have_networkmanager
++  phosh_wwan_sources += files('wwan-manager.c')
++else
++  phosh_wwan_sources += files('wwan-manager-none.c')
++endif
++
++if have_modemmanager
++  phosh_wwan_sources += files('phosh-wwan-mm.c')
++endif
+diff --git a/tools/meson.build b/tools/meson.build
+index 119247a..1f98724 100644
+--- a/tools/meson.build
++++ b/tools/meson.build
+@@ -25,7 +25,7 @@ if tools_or_tests
+   )
+ endif
+ 
+-if get_option('lockscreen-plugins') or get_option('quick-setting-plugins') or tools_or_tests
++if build_lockscreen_plugins or get_option('quick-setting-plugins') or tools_or_tests
+   # plugin-prefs is used in the tests
+   executable(
+     'plugin-prefs',
+@@ -87,7 +87,7 @@ if get_option('tools')
+     dependencies: [phosh_tool_dep, test_stubs_dep],
+   )
+ 
+-  if get_option('lockscreen-plugins')
++  if build_lockscreen_plugins
+     executable(
+       'widget-box',
+       ['widget-box-standalone.c'],
+diff --git a/tools/tl-ui-filter b/tools/tl-ui-filter
+new file mode 100755
+index 0000000..469c81a
+--- /dev/null
++++ b/tools/tl-ui-filter
+@@ -0,0 +1,61 @@
++#!/usr/bin/env python3
++#
++# Copyright (C) 2025 Termux Launcher
++#
++# SPDX-License-Identifier: GPL-3.0-or-later
++#
++# Takes the objects of features that are compiled out of a GtkBuilder file, so that the template
++# does not name a type that the build does not have.
++#
++# Usage: tl-ui-filter INPUT OUTPUT [FEATURE...]
++#
++# FEATUREs are the features that are *off*. A block starts with a line holding only
++#
++#   <!-- tl-if FEATURE -->
++#
++# and ends with a line holding only
++#
++#   <!-- tl-endif -->
++#
++# The block is kept when FEATURE is not listed and dropped when it is. The marker lines are not
++# copied. Blocks do not nest.
++
++import re
++import sys
++
++if len(sys.argv) < 3:
++    sys.exit(__doc__)
++
++src, dst = sys.argv[1:3]
++off = set(sys.argv[3:])
++
++start = re.compile(r"^\s*<!--\s*tl-if\s+([a-z0-9_-]+)\s*-->\s*$")
++end = re.compile(r"^\s*<!--\s*tl-endif\s*-->\s*$")
++
++out = []
++skipping = False
++inside = False
++
++with open(src, encoding="utf-8") as f:
++    for number, line in enumerate(f, 1):
++        m = start.match(line)
++        if m:
++            if inside:
++                sys.exit(f"{src}:{number}: tl-if inside tl-if")
++            inside = True
++            skipping = m.group(1) in off
++            continue
++        if end.match(line):
++            if not inside:
++                sys.exit(f"{src}:{number}: tl-endif without tl-if")
++            inside = False
++            skipping = False
++            continue
++        if not skipping:
++            out.append(line)
++
++if inside:
++    sys.exit(f"{src}: tl-if without tl-endif")
++
++with open(dst, "w", encoding="utf-8") as f:
++    f.writelines(out)

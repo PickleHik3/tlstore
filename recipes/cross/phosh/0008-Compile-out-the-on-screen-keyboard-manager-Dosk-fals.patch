@@ -1,0 +1,136 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PickleHik3 <noreply@example.invalid>
+Date: Mon, 26 Oct 2026 12:00:00 +0000
+Subject: [PATCH 08/16] Compile out the on-screen keyboard manager: -Dosk=false
+
+No sm.puri.OSK0 manager. The home bar has no keyboard to toggle.
+---
+ src/home.c  | 17 ++++++++++++++++-
+ src/shell.c | 18 +++++++++++++++---
+ 2 files changed, 31 insertions(+), 4 deletions(-)
+
+diff --git a/src/home.c b/src/home.c
+index 9282179..74d85b7 100644
+--- a/src/home.c
++++ b/src/home.c
+@@ -18,7 +18,9 @@
+ #include "shell-priv.h"
+ #include "shell.h"
+ #include "phosh-enums.h"
+-#include "osk-manager.h"
++#if PHOSH_HAVE_OSK
++# include "osk-manager.h"
++#endif
+ #include "style-manager.h"
+ #include "toplevel-manager.h"
+ #include "toplevel-thumbnail.h"
+@@ -378,11 +380,19 @@ on_powerbar_action_failed (PhoshHome *self)
+ static void
+ on_powerbar_pressed (PhoshHome *self)
+ {
++#if PHOSH_HAVE_OSK
+   PhoshOskManager *osk;
+   gboolean osk_is_available, osk_current_state, osk_new_state;
++#endif
+ 
+   g_return_if_fail (PHOSH_IS_HOME (self));
+ 
++#if !PHOSH_HAVE_OSK
++  /* No on-screen keyboard to toggle, the power bar has no action */
++  gtk_gesture_set_state ((self->click_gesture), GTK_EVENT_SEQUENCE_DENIED);
++  on_powerbar_action_failed (self);
++  return;
++#else
+   osk = phosh_shell_get_osk_manager (phosh_shell_get_default ());
+ 
+   osk_is_available = phosh_osk_manager_get_available (osk);
+@@ -403,6 +413,7 @@ on_powerbar_pressed (PhoshHome *self)
+   phosh_osk_manager_set_visible (osk, osk_new_state);
+ 
+   phosh_trigger_feedback ("button-pressed", FALSE);
++#endif
+ }
+ 
+ 
+@@ -715,7 +726,9 @@ phosh_home_constructed (GObject *object)
+ {
+   PhoshHome *self = PHOSH_HOME (object);
+   PhoshShell *shell = phosh_shell_get_default ();
++#if PHOSH_HAVE_OSK
+   PhoshOskManager *osk_manager;
++#endif
+ 
+   G_OBJECT_CLASS (phosh_home_parent_class)->constructed (object);
+ 
+@@ -727,10 +740,12 @@ phosh_home_constructed (GObject *object)
+                     NULL);
+   add_keybindings (self);
+ 
++#if PHOSH_HAVE_OSK
+   osk_manager = phosh_shell_get_osk_manager (phosh_shell_get_default ());
+   g_object_bind_property (osk_manager, "available",
+                           self, "osk-enabled",
+                           G_BINDING_SYNC_CREATE);
++#endif
+ 
+   g_signal_connect (self, "notify::drag-state", G_CALLBACK (on_drag_state_changed), NULL);
+ 
+diff --git a/src/shell.c b/src/shell.c
+index c30f31d..aec77ad 100644
+--- a/src/shell.c
++++ b/src/shell.c
+@@ -76,14 +76,20 @@
+ #include "network-auth-manager.h"
+ #include "notifications/notify-manager.h"
+ #include "notifications/notification-banner.h"
+-#include "osk-manager.h"
++#if PHOSH_HAVE_OSK
++# include "osk-manager.h"
++#endif
+ #include "password-entry.h"
+ #include "phosh-private-client-protocol.h"
+ #include "phosh-wayland.h"
+ #include "plugin-loader.h"
+-#include "polkit-auth-agent.h"
++#if PHOSH_HAVE_POLKIT
++# include "polkit-auth-agent.h"
++#endif
+ #include "portal-access-manager.h"
+-#include "proximity.h"
++#if PHOSH_HAVE_CALLS
++# include "proximity.h"
++#endif
+ #include "quick-setting.h"
+ #include "run-command-manager.h"
+ #include "rotateinfo.h"
+@@ -170,10 +176,14 @@ typedef struct {
+   PhoshMonitorManager        *monitor_manager;
+   PhoshLockscreenManager     *lockscreen_manager;
+   PhoshIdleManager           *idle_manager;
++#if PHOSH_HAVE_OSK
+   PhoshOskManager            *osk_manager;
++#endif
+   PhoshToplevelManager       *toplevel_manager;
+   PhoshWifiManager           *wifi_manager;
++#if PHOSH_HAVE_POLKIT
+   PhoshPolkitAuthAgent       *polkit_auth_agent;
++#endif
+   PhoshScreenSaverManager    *screen_saver_manager;
+   PhoshScreenshotManager     *screenshot_manager;
+   PhoshNotifyManager         *notify_manager;
+@@ -2213,6 +2223,7 @@ phosh_shell_get_mpris_manager (PhoshShell *self)
+   return priv->mpris_manager;
+ }
+ 
++#if PHOSH_HAVE_OSK
+ /**
+  * phosh_shell_get_osk_manager:
+  * @self: The shell singleton
+@@ -2235,6 +2246,7 @@ phosh_shell_get_osk_manager (PhoshShell *self)
+   g_return_val_if_fail (PHOSH_IS_OSK_MANAGER (priv->osk_manager), NULL);
+   return priv->osk_manager;
+ }
++#endif
+ 
+ /**
+  * phosh_shell_get_rotation_manager:

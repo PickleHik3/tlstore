@@ -1,0 +1,197 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PickleHik3 <noreply@example.invalid>
+Date: Mon, 26 Oct 2026 12:00:00 +0000
+Subject: [PATCH 15/16] Compile out libgudev: -Dgudev=false
+
+No udev manager and no sysfs backlight, and the torch manager finds no torch device. Their
+D-Bus and sysfs look-ups need libgudev.
+---
+ src/monitor/monitor.c |  4 ++++
+ src/shell.c           | 12 +++++++++++-
+ src/torch-manager.c   | 32 ++++++++++++++++++++++++++++++--
+ 3 files changed, 45 insertions(+), 3 deletions(-)
+
+diff --git a/src/monitor/monitor.c b/src/monitor/monitor.c
+index 413e700..e6f1722 100644
+--- a/src/monitor/monitor.c
++++ b/src/monitor/monitor.c
+@@ -7,6 +7,8 @@
+  */
+ #define G_LOG_DOMAIN "phosh-monitor"
+ 
++#include "phosh-config.h"
++
+ #include "gamma-table.h"
+ #include "monitor.h"
+ #include "shell-priv.h"
+@@ -87,11 +89,13 @@ output_handle_done (void             *data,
+ 
+   self->wl_output_done = TRUE;
+ 
++#if PHOSH_HAVE_GUDEV
+   if (!self->backlight && self->name) {
+     self->backlight = PHOSH_BACKLIGHT (phosh_backlight_sysfs_new (self->name, &err));
+     if (!self->backlight)
+       g_debug ("Failed to get backlight for %s: %s", self->name, err->message);
+   }
++#endif
+ 
+   g_signal_emit (self, signals[SIGNAL_CONFIGURED], 0);
+ }
+diff --git a/src/shell.c b/src/shell.c
+index bb26377..f05b9a1 100644
+--- a/src/shell.c
++++ b/src/shell.c
+@@ -106,7 +106,9 @@
+ #include "top-panel-bg.h"
+ #include "torch-manager.h"
+ #include "torch-info.h"
+-#include "udev-manager.h"
++#if PHOSH_HAVE_GUDEV
++# include "udev-manager.h"
++#endif
+ #include "util.h"
+ #include "vpn-info.h"
+ #include "wifi-info.h"
+@@ -168,7 +170,9 @@ typedef struct {
+ 
+   GtkWidget                  *notification_banner;
+ 
++#if PHOSH_HAVE_GUDEV
+   PhoshUdevManager           *udev_manager;
++#endif
+   PhoshAppTracker            *app_tracker;
+   PhoshSessionManager        *session_manager;
+   PhoshBackgroundManager     *background_manager;
+@@ -667,10 +671,14 @@ phosh_shell_dispose (GObject *object)
+   g_clear_object (&priv->suspend_manager);
+   g_clear_object (&priv->layout_manager);
+   g_clear_object (&priv->style_manager);
++#if PHOSH_HAVE_GUDEV
+   g_clear_object (&priv->udev_manager);
++#endif
+ 
+   /* sensors */
++#if PHOSH_HAVE_CALLS
+   g_clear_object (&priv->proximity);
++#endif
+   g_clear_object (&priv->rotation_manager);
+   g_clear_object (&priv->sensor_proxy_manager);
+ 
+@@ -1546,7 +1554,9 @@ phosh_shell_init (PhoshShell *self)
+   /* We bind this early since a wl_display_roundtrip () would make us miss
+      existing toplevels */
+   priv->toplevel_manager = phosh_toplevel_manager_new ();
++#if PHOSH_HAVE_GUDEV
+   priv->udev_manager = phosh_udev_manager_get_default ();
++#endif
+ }
+ 
+ /* }}} */
+diff --git a/src/torch-manager.c b/src/torch-manager.c
+index 33b97ca..e3a5d9b 100644
+--- a/src/torch-manager.c
++++ b/src/torch-manager.c
+@@ -11,10 +11,14 @@
+ 
+ #include "phosh-config.h"
+ 
+-#include <gudev/gudev.h>
++#if PHOSH_HAVE_GUDEV
++# include <gudev/gudev.h>
++#endif
+ 
+ #include "torch-manager.h"
+-#include "udev-manager.h"
++#if PHOSH_HAVE_GUDEV
++# include "udev-manager.h"
++#endif
+ #include "dbus/login1-session-dbus.h"
+ 
+ #include <math.h>
+@@ -56,7 +60,9 @@ struct _PhoshTorchManager {
+   int                    max_brightness;
+   int                    last_brightness;
+ 
++#if PHOSH_HAVE_GUDEV
+   GUdevDevice           *udev_device;
++#endif
+ 
+   PhoshDBusLoginSession *session_proxy;
+   GCancellable          *cancel;
+@@ -64,6 +70,7 @@ struct _PhoshTorchManager {
+ G_DEFINE_TYPE (PhoshTorchManager, phosh_torch_manager, PHOSH_TYPE_MANAGER);
+ 
+ 
++#if PHOSH_HAVE_GUDEV
+ static void
+ apply_brightness (PhoshTorchManager *self)
+ {
+@@ -127,6 +134,16 @@ set_brightness (PhoshTorchManager *self, int brightness)
+                                                 self);
+ }
+ 
++#else
++/* Without libgudev no torch is ever found, so there is nothing to switch */
++static void
++set_brightness (PhoshTorchManager *self, int brightness)
++{
++  g_debug ("No torch device, not setting brightness to %d", brightness);
++}
++
++#endif
++
+ static void
+ phosh_torch_manager_get_property (GObject    *object,
+                                   guint       property_id,
+@@ -158,6 +175,7 @@ phosh_torch_manager_get_property (GObject    *object,
+ }
+ 
+ 
++#if PHOSH_HAVE_GUDEV
+ static void
+ get_first_torch_device (gpointer data, gpointer manager)
+ {
+@@ -209,9 +227,12 @@ find_torch_device (PhoshTorchManager *self, PhoshUdevManager *udev_manager)
+ }
+ 
+ 
++#endif
++
+ static void
+ phosh_torch_manager_idle_init (PhoshManager *manager)
+ {
++#if PHOSH_HAVE_GUDEV
+   PhoshTorchManager *self = PHOSH_TORCH_MANAGER (manager);
+   PhoshUdevManager *udev_manager = phosh_udev_manager_get_default ();
+ 
+@@ -226,6 +247,9 @@ phosh_torch_manager_idle_init (PhoshManager *manager)
+     g_object_notify_by_pspec (G_OBJECT (self), props[PROP_PRESENT]);
+     g_object_thaw_notify (G_OBJECT (self));
+   }
++#else
++  g_debug ("Built without libgudev, no torch");
++#endif
+ }
+ 
+ 
+@@ -239,7 +263,9 @@ phosh_torch_manager_dispose (GObject *object)
+ 
+   g_clear_object (&self->session_proxy);
+ 
++#if PHOSH_HAVE_GUDEV
+   g_clear_object (&self->udev_device);
++#endif
+ 
+   G_OBJECT_CLASS (phosh_torch_manager_parent_class)->dispose (object);
+ }
+@@ -428,7 +454,9 @@ void
+ phosh_torch_manager_toggle (PhoshTorchManager *self)
+ {
+   g_return_if_fail (PHOSH_IS_TORCH_MANAGER (self));
++#if PHOSH_HAVE_GUDEV
+   g_return_if_fail (PHOSH_DBUS_IS_LOGIN_SESSION (self->session_proxy));
++#endif
+ 
+   if (self->brightness) {
+     g_debug ("Disabling torch");

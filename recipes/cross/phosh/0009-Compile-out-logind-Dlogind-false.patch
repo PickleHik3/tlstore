@@ -1,0 +1,272 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PickleHik3 <noreply@example.invalid>
+Date: Mon, 26 Oct 2026 12:00:00 +0000
+Subject: [PATCH 09/16] Compile out logind: -Dlogind=false
+
+No libsystemd or libelogind: no session lookup, no sd_notify, and the screen saver manager
+does not talk to login1 (no inhibitors, no locked hint, no PrepareForSleep).
+---
+ src/main.c                 |  6 +++++-
+ src/screen-saver-manager.c | 30 ++++++++++++++++++++++++++++++
+ src/util.c                 | 14 +++++++++++++-
+ 3 files changed, 48 insertions(+), 2 deletions(-)
+
+diff --git a/src/main.c b/src/main.c
+index f3b6fc0..158508d 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -25,7 +25,9 @@
+ #include <glib/gi18n.h>
+ #include <glib-unix.h>
+ 
+-#include <systemd/sd-daemon.h>
++#if PHOSH_HAVE_LOGIND
++# include <systemd/sd-daemon.h>
++#endif
+ 
+ static gboolean
+ quit (gpointer unused)
+@@ -64,8 +66,10 @@ on_shell_ready (PhoshShell *shell, GTimer *timer)
+   g_timer_stop (timer);
+   g_message ("Phosh ready after %.2fs", g_timer_elapsed (timer, NULL));
+ 
++#if PHOSH_HAVE_LOGIND
+   /* Inform systemd we're up */
+   sd_notify (0, "READY=1");
++#endif
+ 
+   g_signal_handlers_disconnect_by_data (shell, timer);
+ }
+diff --git a/src/screen-saver-manager.c b/src/screen-saver-manager.c
+index 16031e1..1d59113 100644
+--- a/src/screen-saver-manager.c
++++ b/src/screen-saver-manager.c
+@@ -8,6 +8,8 @@
+ 
+ #define G_LOG_DOMAIN "phosh-screen-saver-manager"
+ 
++#include "phosh-config.h"
++
+ #include "screen-saver-manager.h"
+ #include "session-presence.h"
+ #include "shell-priv.h"
+@@ -91,8 +93,10 @@ typedef struct _PhoshScreenSaverManager
+   int      inhibit_suspend_fd;
+   PhoshMonitor *primary_monitor;
+ 
++#if PHOSH_HAVE_LOGIND
+   PhoshDBusLoginSession *logind_session_proxy;
+   PhoshDBusLoginManager *logind_manager_proxy;
++#endif
+ 
+   GCancellable          *cancel;
+ } PhoshScreenSaverManager;
+@@ -396,6 +400,7 @@ notify_active_changed (PhoshScreenSaverManager *self)
+   }
+ }
+ 
++#if PHOSH_HAVE_LOGIND
+ static void
+ on_inhibit_suspend_finished (GObject      *source_object,
+                              GAsyncResult *res,
+@@ -434,7 +439,9 @@ on_inhibit_suspend_finished (GObject      *source_object,
+ 
+   g_debug ("Inhibited logind suspend handling");
+ }
++#endif
+ 
++#if PHOSH_HAVE_LOGIND
+ static void
+ phosh_screen_saver_manager_inhibit_suspend (PhoshScreenSaverManager *self)
+ {
+@@ -450,6 +457,7 @@ phosh_screen_saver_manager_inhibit_suspend (PhoshScreenSaverManager *self)
+                                          on_inhibit_suspend_finished,
+                                          self);
+ }
++#endif
+ 
+ static void
+ phosh_screen_saver_manager_wakeup_screen (PhoshScreenSaverManager *self)
+@@ -491,6 +499,7 @@ on_lockscreen_manager_wakeup_outputs (PhoshScreenSaverManager *self,
+ }
+ 
+ 
++#if PHOSH_HAVE_LOGIND
+ static void
+ on_locked_hint_set (GObject *source_object, GAsyncResult *res, gpointer user_data)
+ {
+@@ -504,6 +513,7 @@ on_locked_hint_set (GObject *source_object, GAsyncResult *res, gpointer user_dat
+   if (!success)
+     g_warning ("Failed to send locked hint: %s", err->message);
+ }
++#endif
+ 
+ 
+ static void
+@@ -514,6 +524,7 @@ on_lockscreen_manager_locked_changed (PhoshScreenSaverManager *self)
+   g_return_if_fail (PHOSH_IS_SCREEN_SAVER_MANAGER (self));
+ 
+   locked = phosh_lockscreen_manager_get_locked (self->lockscreen_manager);
++#if PHOSH_HAVE_LOGIND
+   if (self->logind_session_proxy) {
+     phosh_dbus_login_session_call_set_locked_hint (self->logind_session_proxy,
+                                                    locked,
+@@ -521,6 +532,7 @@ on_lockscreen_manager_locked_changed (PhoshScreenSaverManager *self)
+                                                    on_locked_hint_set,
+                                                    NULL);
+   }
++#endif
+ 
+   if (locked == TRUE)
+     return;
+@@ -529,22 +541,27 @@ on_lockscreen_manager_locked_changed (PhoshScreenSaverManager *self)
+ }
+ 
+ 
++#if PHOSH_HAVE_LOGIND
+ static void
+ on_logind_lock (PhoshScreenSaverManager *self, PhoshDBusLoginSession *proxy)
+ {
+   g_debug ("Locking request via logind1");
+   phosh_lockscreen_manager_set_locked  (self->lockscreen_manager, TRUE);
+ }
++#endif
+ 
+ 
++#if PHOSH_HAVE_LOGIND
+ static void
+ on_logind_unlock (PhoshScreenSaverManager *self, PhoshDBusLoginSession *proxy)
+ {
+   g_debug ("Unlocking request via logind1");
+   phosh_lockscreen_manager_set_locked  (self->lockscreen_manager, FALSE);
+ }
++#endif
+ 
+ 
++#if PHOSH_HAVE_LOGIND
+ static void
+ on_logind_prepare_for_sleep (PhoshScreenSaverManager *self,
+                              gboolean                 suspending,
+@@ -565,6 +582,7 @@ on_logind_prepare_for_sleep (PhoshScreenSaverManager *self,
+     phosh_screen_saver_manager_inhibit_suspend (self);
+   }
+ }
++#endif
+ 
+ 
+ static void
+@@ -642,8 +660,10 @@ phosh_screen_saver_manager_dispose (GObject *object)
+ 
+   g_clear_object (&self->settings);
+   g_clear_object (&self->lockscreen_manager);
++#if PHOSH_HAVE_LOGIND
+   g_clear_object (&self->logind_session_proxy);
+   g_clear_object (&self->logind_manager_proxy);
++#endif
+   g_clear_object (&self->primary_monitor);
+ 
+   g_clear_object (&self->presence);
+@@ -653,6 +673,7 @@ phosh_screen_saver_manager_dispose (GObject *object)
+ }
+ 
+ 
++#if PHOSH_HAVE_LOGIND
+ static void
+ on_logind_get_session_proxy_finish  (GObject                 *object,
+                                      GAsyncResult            *res,
+@@ -676,8 +697,10 @@ on_logind_get_session_proxy_finish  (GObject                 *object,
+     "swapped-object-signal::unlock", G_CALLBACK (on_logind_unlock), self,
+     NULL);
+ }
++#endif
+ 
+ 
++#if PHOSH_HAVE_LOGIND
+ static void
+ on_logind_manager_get_session_finished (PhoshDBusLoginManager   *object,
+                                         GAsyncResult            *res,
+@@ -704,8 +727,10 @@ on_logind_manager_get_session_finished (PhoshDBusLoginManager   *object,
+     (GAsyncReadyCallback)on_logind_get_session_proxy_finish,
+     self);
+ }
++#endif
+ 
+ 
++#if PHOSH_HAVE_LOGIND
+ static void
+ on_inhibit_pwr_button_finished (GObject      *source_object,
+                                 GAsyncResult *res,
+@@ -744,8 +769,10 @@ on_inhibit_pwr_button_finished (GObject      *source_object,
+ 
+   g_debug ("Inhibited logind power button handling");
+ }
++#endif
+ 
+ 
++#if PHOSH_HAVE_LOGIND
+ static void
+ on_logind_manager_proxy_new_for_bus_finish (GObject                 *source_object,
+                                             GAsyncResult            *res,
+@@ -797,6 +824,7 @@ on_logind_manager_proxy_new_for_bus_finish (GObject                 *source_obje
+ 
+   phosh_screen_saver_manager_inhibit_suspend (self);
+ }
++#endif
+ 
+ 
+ static void
+@@ -858,6 +886,7 @@ on_primary_monitor_changed (PhoshScreenSaverManager *self,
+ static gboolean
+ on_idle (PhoshScreenSaverManager *self)
+ {
++#if PHOSH_HAVE_LOGIND
+   /* Connect to logind's session manager */
+   phosh_dbus_login_manager_proxy_new_for_bus (
+     G_BUS_TYPE_SYSTEM,
+@@ -867,6 +896,7 @@ on_idle (PhoshScreenSaverManager *self)
+     self->cancel,
+     (GAsyncReadyCallback) on_logind_manager_proxy_new_for_bus_finish,
+     self);
++#endif
+ 
+   g_signal_connect_swapped (phosh_shell_get_default (),
+                             "notify::primary-monitor",
+diff --git a/src/util.c b/src/util.c
+index 70431e7..cea55ce 100644
+--- a/src/util.c
++++ b/src/util.c
+@@ -23,7 +23,9 @@
+ #include <glib/gi18n.h>
+ #include <glib/gstdio.h>
+ 
+-#include <systemd/sd-login.h>
++#if PHOSH_HAVE_LOGIND
++# include <systemd/sd-login.h>
++#endif
+ 
+ #include <libsoup/soup.h>
+ 
+@@ -171,6 +173,7 @@ phosh_strip_suffix_from_app_id (const char *app_id)
+ }
+ 
+ 
++#if PHOSH_HAVE_LOGIND
+ gboolean
+ phosh_find_systemd_session (char **session_id)
+ {
+@@ -194,6 +197,15 @@ phosh_find_systemd_session (char **session_id)
+ 
+   return FALSE;
+ }
++#else
++gboolean
++phosh_find_systemd_session (char **session_id)
++{
++  g_return_val_if_fail (session_id != NULL && *session_id == NULL, FALSE);
++
++  return FALSE;
++}
++#endif
+ 
+ /**
+  * phosh_async_error_warn:
