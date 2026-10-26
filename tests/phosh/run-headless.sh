@@ -122,6 +122,10 @@ mkdir -p "$TL_TEST_DIR" "$prefix"
 # The prefix's libraries come first for pkg-config, so a too-old system copy is never picked.
 multiarch=$(gcc -dumpmachine 2>/dev/null || echo x86_64-linux-gnu)
 export PKG_CONFIG_PATH="$prefix/lib/pkgconfig:$prefix/share/pkgconfig:$prefix/lib/$multiarch/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+# The prefix's libraries first for everything built or run from here on: glib-compile-schemas from the
+# prefix must find the prefix's glib 2.84, not the system's 2.80.
+LD_LIBRARY_PATH="$prefix/lib:$prefix/lib/$multiarch${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export LD_LIBRARY_PATH
 export PATH="$prefix/bin:$PATH"
 
 skipped_patch() {
@@ -354,8 +358,6 @@ glib-compile-schemas "$schemas" 2>&1 | grep -v 'non-existent schema' || true
 export GSETTINGS_SCHEMA_DIR="$schemas" GSETTINGS_BACKEND=memory
 export XDG_DATA_DIRS="$prefix/share:/usr/local/share:/usr/share"
 export XDG_CURRENT_DESKTOP=Phosh
-LD_LIBRARY_PATH="$prefix/lib:$prefix/lib/$multiarch${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-export LD_LIBRARY_PATH
 export NO_AT_BRIDGE=1 GTK_A11Y=none GDK_BACKEND=wayland G_MESSAGES_DEBUG=
 # wlroots: the headless backend, one output, the pixman renderer.
 export WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1 WLR_RENDERER=pixman
