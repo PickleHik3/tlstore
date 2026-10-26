@@ -304,6 +304,10 @@ build_phosh() {
     # same name from here would be taken for it.
     rm -rf "$stage/lib/systemd" "$stage/share/gnome-session" "$stage/share/wayland-sessions" \
         "$stage/bin/phosh-session"
+
+    # Schemas phosh opens that no Termux package provides (gnome-settings-daemon's power and
+    # touchscreen ones, GNOME Shell's keybindings): GLib aborts the shell without them.
+    cp "$SCRIPT_DIR"/phosh/*.gschema.xml "$stage/share/glib-2.0/schemas/"
 }
 # phosh-mobile-settings (M4): the four panels this build keeps are the overview (app filter, hidden
 # apps), the compositor (display scale), the top bar (quick settings layout) and feedback; every

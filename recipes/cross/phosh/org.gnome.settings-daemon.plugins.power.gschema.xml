@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Termux Launcher: the keys phosh reads from gnome-settings-daemon's power plugin
+     (src/brightness-manager.c, brightness-settings.c, ambient.c), which no Termux package
+     provides; GLib aborts at g_settings_new() without the schema. power-button-action is set by
+     00_mobi.Phosh.gschema.override. Installed into the archive's share/glib-2.0/schemas by
+     build-phosh.sh. -->
+<schemalist>
+  <schema id="org.gnome.settings-daemon.plugins.power" path="/org/gnome/settings-daemon/plugins/power/">
+    <key name="ambient-enabled" type="b">
+      <default>true</default>
+      <summary>Ambient light sensor</summary>
+      <description>Whether the brightness follows the ambient light sensor.</description>
+    </key>
+    <key name="idle-brightness" type="i">
+      <default>30</default>
+      <summary>Brightness when idle</summary>
+      <description>The brightness, in percent, the screen dims to when idle.</description>
+    </key>
+    <key name="power-button-action" type="s">
+      <default>'suspend'</default>
+      <summary>Power button action</summary>
+      <description>What the power button does.</description>
+    </key>
+  </schema>
+</schemalist>

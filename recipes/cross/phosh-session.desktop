@@ -2,6 +2,5 @@
 Type=XSession
 Name=Phosh
 Comment=The phone shell, on the display
-Exec=phosh-session
-TryExec=phosh-session
+Exec=sh -c '"$HOME/.local/bin/phosh-session"'
 DesktopNames=Phosh
