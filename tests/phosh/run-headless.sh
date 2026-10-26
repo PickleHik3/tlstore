@@ -172,6 +172,13 @@ want_dep() {
 # wlroots 0.20.2 and phosh 0.58.0 (as the harness builds them).
 build_deps() {
     local gnome=https://download.gnome.org/sources
+    # phosh 0.58.0 links g_variant_builder_init_static and g_clear_dbus_signal_subscription (glib
+    # 2.84; noble has 2.80, Termux 2.86). Built first: the other prefix libraries link against it.
+    want_dep glib && build_dep glib 2.84.4 \
+        "$gnome/glib/2.84/glib-2.84.4.tar.xz" \
+        8a9ea10943c36fc117e253f80c91e477b673525ae45762942858aef57631bb90 \
+        -Dtests=false -Dintrospection=disabled -Ddocumentation=false -Dman-pages=disabled \
+        -Dsysprof=disabled -Dselinux=disabled -Dlibmount=disabled -Dglib_debug=disabled
     # phoc >= 1.23.1, wlroots >= 1.24.0 (noble 1.22.0)
     want_dep wayland && build_dep wayland 1.24.0 \
         https://gitlab.freedesktop.org/wayland/wayland/-/releases/1.24.0/downloads/wayland-1.24.0.tar.xz \
