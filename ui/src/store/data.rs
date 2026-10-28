@@ -413,6 +413,8 @@ pub enum Progress {
     Row { name: String, action: String, kind: String, version: String, by: String, why: String },
     Step { name: String, pct: u8, words: String },
     Done { name: String, ok: bool, message: String },
+    /// A job-level error (`error<TAB>text`): not scoped to one row, at any point of the stream.
+    Error { text: String },
 }
 
 pub fn parse_progress(line: &str) -> Option<Progress> {
@@ -441,6 +443,9 @@ pub fn parse_progress(line: &str) -> Option<Progress> {
             ok: f[2] == "ok",
             message: f.get(3).copied().unwrap_or("").to_string(),
         }),
+        "error" if f.len() >= 2 && !f[1].trim().is_empty() => {
+            Some(Progress::Error { text: f[1].trim_end().to_string() })
+        }
         _ => None,
     }
 }
@@ -540,6 +545,12 @@ mod tests {
             Some(Progress::Done { name: "kitten".into(), ok: true, message: "kept your config.fish".into() })
         );
         assert_eq!(parse_progress("Installing: kitten"), None);
+        assert_eq!(
+            parse_progress("error\tcould not install what is needed to build: patchelf"),
+            Some(Progress::Error { text: "could not install what is needed to build: patchelf".into() })
+        );
+        assert_eq!(parse_progress("error"), None, "an error needs its sentence");
+        assert_eq!(parse_progress("error\t"), None);
         let row = |name: &str, action: &str, kind: &str, version: &str, by: &str, why: &str| Progress::Row {
             name: name.into(),
             action: action.into(),

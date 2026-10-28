@@ -386,7 +386,7 @@ impl View for Front {
             Some(Slot::new(space, "select", Key::Char(' ')).when(has)),
             // `f` (the launcher's keyboard held down) still works, unhinted: the row is for the
             // keys an item needs.
-            None,
+            st.failure_shown().then(|| Slot::new("d", "details", Key::Char('d'))),
             Some(Slot::new("q", "quit", Key::Char('q'))),
         ]
     }
