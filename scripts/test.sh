@@ -303,7 +303,9 @@ echo "\$@" >> "$ROOT/pkg.log"
 # A failed install, while the test has dropped this marker: packages it cannot find, which are
 # then not there either.
 if [ "\${1:-}" = -Sy ] && [ -e "$ROOT/pacman-fails" ]; then echo "error: target not found"; exit 1; fi
-if [ "\${1:-}" = -Q ] && [ -e "$ROOT/pacman-fails" ]; then
+# Or one that says what the test put in this file, whatever that is, and stops.
+if { [ "\${1:-}" = -Sy ] || [ "\${1:-}" = -S ]; } && [ -e "$ROOT/pacman-says" ]; then cat "$ROOT/pacman-says"; exit 1; fi
+if [ "\${1:-}" = -Q ] && { [ -e "$ROOT/pacman-fails" ] || [ -e "$ROOT/pacman-says" ]; }; then
     case "\${2:-}" in demo-one|demo-two) exit 1 ;; esac
 fi
 if [ "\${1:-}" = -S ] || [ "\${1:-}" = -Sy ]; then
@@ -988,6 +990,74 @@ run_suite() {
     expect_no_file "nor put in place" "$TESTHOME/.local/bin/claude"
     rm -rf "$PSTATE" "$TESTHOME/.local/bin" "$TESTHOME/.local/lib" "$TESTHOME/.config"
     : > "$ROOT/pkg.log"
+
+    # --- a failed job says why (Revision 18): the stream's error line, the transcript, the sentences ---
+    JOBLOG="$TESTHOME/.cache/tlstore/last-job.log"
+    pj_clean() { rm -rf "$PSTATE" "$TESTHOME/.local/bin" "$TESTHOME/.local/lib" "$TESTHOME/.config"; : > "$ROOT/pkg.log"; }
+    # pj_says <lines...> — a failing run under --progress whose package manager says these.
+    pj_says() {
+        printf '%s\n' "$@" > "$ROOT/pacman-says"
+        tl_stdout install claude-code --progress
+        rm -f "$ROOT/pacman-says"
+        pj_clean
+    }
+    pj_says "error: failed to commit transaction (conflicting files)" \
+        "ripgrep: /data/data/com.termux/files/usr/bin/rg exists in filesystem" \
+        "pcre2: /data/data/com.termux/files/usr/lib/libpcre2-posix.so exists in filesystem" \
+        "Errors occurred, no packages were upgraded."
+    expect_status "a conflict fails the install" 1
+    expect_out "the stream carries the root cause" $'^error\tpacman found files it does not own (rg, libpcre2-posix.so)$'
+    expect_out "and then the build tools error" $'^error\tcould not install what is needed to build: demo-build$'
+    expect_out "the row lines are as before" $'^done\tdemo-pkg\tfailed\tthe package manager could not install demo-one, demo-two$'
+    expect_no_out "an error line has exactly two fields" $'^error\t[^\t]*\t'
+    expect_no_out "nothing but the machine stream is on stdout" "Installing"
+    if [ "$(sed -n 1,3p "$JOBLOG")" = "To fix:"$'\n'"pacman -S --overwrite '*' ripgrep pcre2" ] && [ -z "$(sed -n 3p "$JOBLOG")" ] && [ -n "$(sed -n 4p "$JOBLOG")" ]; then pass; else fail "the transcript starts with the fix" "$(sed -n 1,4p "$JOBLOG")"; fi
+    pj_a=$(grep -n 'libpcre2-posix.so exists' "$JOBLOG" | head -1 | cut -d: -f1)
+    pj_b=$(grep -n '^tlstore: pacman found files' "$JOBLOG" | head -1 | cut -d: -f1)
+    pj_c=$(grep -n '^tlstore: could not install what is needed to build' "$JOBLOG" | head -1 | cut -d: -f1)
+    if [ -n "$pj_a" ] && [ -n "$pj_b" ] && [ -n "$pj_c" ] && [ "$pj_a" -lt "$pj_b" ] && [ "$pj_b" -lt "$pj_c" ]; then pass; else fail "the transcript has the package manager's lines, then both errors" "$pj_a $pj_b $pj_c: $(cat "$JOBLOG")"; fi
+    if grep -q '^Installing packages: ' "$JOBLOG"; then pass; else fail "the transcript has what the engine said"; fi
+    pj_says "error: failed to init transaction (unable to lock database)"
+    expect_out "a locked database" $'^error\tthe package database is locked: another install is running, or one was interrupted$'
+    if grep -q '^To fix:' "$JOBLOG"; then fail "a lock has no fix command"; else pass; fi
+    pj_says "error: failed retrieving file 'x.pkg.tar.zst' from mirror"
+    expect_out "an unreachable mirror" $'^error\tthe package mirror could not be reached, or has no such package$'
+    pj_says "error: could not write: No space left on device"
+    expect_out "no space" $'^error\tthe phone is out of storage space$'
+    pj_says "curl: Could not resolve host: mirror" "error: failed retrieving file 'x'"
+    expect_out "no network wins over the mirror" $'^error\tno network$'
+    pj_says "error: unable to lock database" "No space left on device"
+    expect_out "a lock wins over space" $'^error\tthe package database is locked'
+    pj_says "error: something nobody has seen"
+    expect_out "an unknown failure" $'^error\tthe package manager stopped$'
+    if grep -q '^To fix:' "$JOBLOG"; then fail "an unknown failure has no fix command"; else pass; fi
+    pj_says "a: /usr/bin/a exists in filesystem" "b: /usr/bin/b exists in filesystem" "c: /usr/bin/c exists in filesystem" \
+        "d: /usr/bin/d exists in filesystem" "e: /usr/bin/e exists in filesystem"
+    expect_out "five conflicts: three names and a count" $'^error\tpacman found files it does not own (a, b, c and 2 more)$'
+    tl_stdout install claude-code --progress
+    expect_status "a clean run installs" 0
+    expect_no_out "no error line in a run that succeeds" $'^error\t'
+    if grep -q '^error\|^To fix:\|^tlstore: ' "$JOBLOG"; then fail "the transcript starts afresh" "$(cat "$JOBLOG")"; else pass; fi
+    tl remove claude-code demo-pkg musl-loader -y
+    pj_clean
+    awk 'BEGIN { for (i = 0; i < 6000; i++) printf "line %05d of what the package manager said, long enough to pad\n", i }' > "$ROOT/pj-big"
+    cp "$ROOT/pj-big" "$ROOT/pacman-says"
+    tl_stdout install claude-code --progress
+    rm -f "$ROOT/pacman-says" "$ROOT/pj-big"
+    pj_clean
+    if [ "$(head -1 "$JOBLOG")" = "… earlier lines dropped" ]; then pass; else fail "a long transcript is cut at the front" "$(head -1 "$JOBLOG")"; fi
+    if [ "$(wc -c < "$JOBLOG")" -le $((262144 + 40)) ]; then pass; else fail "and stays within the cap" "$(wc -c < "$JOBLOG")"; fi
+    if grep -q 'line 05999 of' "$JOBLOG"; then pass; else fail "keeping the end"; fi
+    rm -f "$JOBLOG"
+    touch "$ROOT/pacman-fails"
+    tl install claude-code -y
+    rm -f "$ROOT/pacman-fails"
+    pj_clean
+    expect_no_file "a run on the terminal writes no transcript" "$JOBLOG"
+    tl_stdout install secret --progress
+    expect_status "a refused plan under --progress fails" 1
+    expect_out "and its reason is an error line" $'^error\t.*part of another item'
+    expect_file "and leaves a transcript" "$JOBLOG"
 
     # --- fetch first (Revision 13, step 3): every payload is fetched and checked before any row
     # is applied ---

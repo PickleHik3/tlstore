@@ -56,7 +56,7 @@
 
 set -u
 
-TLSTORE_VERSION=0.26
+TLSTORE_VERSION=0.27
 
 # The first tlstore whose `update` only refreshes and lists (Revision 19);
 # `upgrade` installs. An engine before it hands an update it has just
@@ -213,6 +213,20 @@ NL='
 # reason an item failed (plan_apply clears it before each row).
 LAST_ERR=""
 
+# What the package manager's last failed call came down to (pm_classify): one
+# plain sentence with no command in it, and the command that would put it
+# right, or empty for each when its words matched nothing known.
+PM_WHY=""
+PM_FIX=""
+
+# The transcript of a --progress run (Revision 18): what say and err said and
+# everything the package manager printed, for the store to show beside a
+# failure. Opened (emptied) where --progress is parsed, so a refused plan leaves
+# one too; a run on the terminal never writes it.
+JOB_LOG="$CACHE_DIR/last-job.log"
+JOB_LOG_ON=0
+JOB_LOG_MAX=262144
+
 # What a cancel (SIGTERM to the whole process group — tlstore-ui sends it when
 # the person backs out of a running --progress job) has to clean up: the temp
 # file the current download is writing (download() keeps this current),
@@ -235,7 +249,40 @@ DL_STAGE=0
 # Output
 # ---------------------------------------------------------------------------
 
+# job_log <text> — a line of the --progress transcript.
+job_log() {
+    [ "$JOB_LOG_ON" = 1 ] || return 0
+    printf '%s\n' "$*" >> "$JOB_LOG"
+}
+
+# job_log_start — --progress was asked for: begin an empty transcript.
+job_log_start() {
+    mkdir -p "$CACHE_DIR" 2>/dev/null || return 0
+    : > "$JOB_LOG" 2>/dev/null || return 0
+    JOB_LOG_ON=1
+}
+
+# job_log_finish — the run is over: keep only the last JOB_LOG_MAX bytes (from
+# the first whole line, under a marker line), then put the fix command, when
+# one is known, at the head. Once; a second call finds the transcript closed.
+job_log_finish() {
+    [ "$JOB_LOG_ON" = 1 ] || return 0
+    JOB_LOG_ON=0
+    jf_tmp="$JOB_LOG.tmp"
+    jf_size=$(wc -c < "$JOB_LOG" 2>/dev/null | tr -d ' ')
+    if [ "${jf_size:-0}" -gt "$JOB_LOG_MAX" ]; then
+        { printf '… earlier lines dropped\n'; tail -c "$JOB_LOG_MAX" "$JOB_LOG" | sed 1d; } > "$jf_tmp" &&
+            mv "$jf_tmp" "$JOB_LOG"
+    fi
+    if [ -n "$PM_FIX" ]; then
+        { printf 'To fix:\n%s\n\n' "$PM_FIX"; cat "$JOB_LOG"; } > "$jf_tmp" &&
+            mv "$jf_tmp" "$JOB_LOG"
+    fi
+    rm -f "$jf_tmp"
+}
+
 say() {
+    job_log "$*"
     if [ "$PROGRESS" = 1 ]; then
         printf '%s\n' "$*" >&2
     elif [ "$STATUS_SCOPE" = 1 ]; then
@@ -251,7 +298,10 @@ say() {
 # Inside a styled row, the row's own closing line carries the reason instead.
 err() {
     LAST_ERR="$*"
+    job_log "tlstore: $*"
     [ "$STATUS_SCOPE" = 1 ] && [ -n "$ROW_NAME" ] && return 0
+    # The stream's own line for a failure no row carries (Revision 18).
+    [ "$PROGRESS" != 1 ] || printf 'error\t%s\n' "$*"
     status_clear
     # Inside a styled run the error takes a step on the rail, when stderr is a
     # terminal too (or the style was forced, as a test does).
@@ -263,7 +313,7 @@ err() {
     fi
     printf 'tlstore: %s\n' "$*" >&2
 }
-die() { ROW_NAME=""; err "$*"; outro 1; exit 1; }
+die() { ROW_NAME=""; err "$*"; outro 1; job_log_finish; exit 1; }
 
 # progress_line <step> <name> <pct> <words> — one line of the --progress
 # stream. Always stdout, whether or not PROGRESS is set, since these lines are
@@ -1259,22 +1309,31 @@ pm_run() {
     fi
     # No item to give the steps to (only build tools to fetch): what it says
     # still stays off stdout, which is the machine stream.
-    if [ -z "$CANCEL_ITEM" ]; then
-        "$@" >&2
-        return
-    fi
     mkdir -p "$CACHE_DIR"
     pr_rc="$CACHE_DIR/pm.rc"
+    pr_out="$CACHE_DIR/pm.out"
+    : > "$pr_out"
+    pr_log=""
+    [ "$JOB_LOG_ON" != 1 ] || pr_log="$JOB_LOG"
+    if [ -z "$CANCEL_ITEM" ]; then
+        # tee also keeps it for the transcript and for pm_classify.
+        { "$@" 2>&1; echo "$?" > "$pr_rc"; } | tee -a "$pr_out" ${pr_log:+"$pr_log"} >&2
+        pr_status=$(cat "$pr_rc" 2>/dev/null || echo 1)
+        rm -f "$pr_rc"
+        [ "$pr_status" = 0 ] && return 0
+        pm_classify "$pr_out"
+        return 1
+    fi
     # As in curl_to, the exit status comes back through a file; so does the
     # last percentage reported, so progress_stage never steps back behind it.
     { "$@" 2>&1; echo "$?" > "$pr_rc"; } |
         tr '\r' '\n' |
-        awk -v name="$CANCEL_ITEM" -v from="$PROGRESS_AT" -v to="$PROGRESS_FETCH_END" -v atf="$pr_rc.at" '
+        awk -v name="$CANCEL_ITEM" -v from="$PROGRESS_AT" -v to="$PROGRESS_FETCH_END" -v atf="$pr_rc.at" -v jl="$pr_log" -v cf="$pr_out" '
             function step(v, w) {
                 if (v > last) { last = v; printf "step\t%s\t%d\t%s\n", name, v, w; fflush() }
             }
             BEGIN { last = from; at = from }
-            { print | "cat 1>&2" }
+            { print | "cat 1>&2"; print >> cf; if (jl != "") print >> jl }
             /^(Get|Hit):[0-9]/ || /downloading/ || /^:: (Synchronizing|Retrieving)/ {
                 at += (to - at) / 3; step(int(at), "fetched"); next
             }
@@ -1287,7 +1346,57 @@ pm_run() {
     pr_status=$(cat "$pr_rc" 2>/dev/null || echo 1)
     PROGRESS_AT=$(cat "$pr_rc.at" 2>/dev/null || echo "$PROGRESS_AT")
     rm -f "$pr_rc" "$pr_rc.at"
-    [ "$pr_status" = 0 ]
+    [ "$pr_status" = 0 ] && return 0
+    pm_classify "$pr_out"
+    return 1
+}
+
+# pm_classify <file> — what the package manager printed in a failed call, as one
+# of five known causes (Revision 18): sets PM_WHY and PM_FIX when it knows, and
+# leaves them alone when it does not. When several match the first of conflict,
+# lock, space, network, mirror wins, the one that explains the rest.
+pm_classify() {
+    pc_f="$1"
+    [ -s "$pc_f" ] || return 0
+    if grep -Eq 'exists in filesystem|conflicting files' "$pc_f"; then
+        # One line: up to three file names (and a count of the rest), a tab,
+        # then each package once, in the order seen.
+        pc_res=$(awk '
+            / exists in filesystem/ {
+                i = index($0, ": "); if (i < 1) next
+                pkg = substr($0, 1, i - 1)
+                path = substr($0, i + 2); sub(/ exists in filesystem.*/, "", path)
+                n = split(path, a, "/"); base = a[n]
+                if (!(path in seenp)) { seenp[path] = 1; total++; if (total <= 3) names = names (total > 1 ? ", " : "") base }
+                if (!(pkg in seenk)) { seenk[pkg] = 1; pkgs = pkgs " " pkg }
+            }
+            END {
+                if (total > 3) names = names " and " (total - 3) " more"
+                printf "%s\t%s\n", names, pkgs
+            }' "$pc_f")
+        pc_names=${pc_res%%"$TAB"*}
+        pc_pkgs=${pc_res#*"$TAB"}
+        if [ -n "$pc_names" ]; then
+            PM_WHY="pacman found files it does not own ($pc_names)"
+            PM_FIX="pacman -S --overwrite '*'$pc_pkgs"
+        else
+            PM_WHY="pacman found files it does not own"
+            PM_FIX=""
+        fi
+    elif grep -Eq 'unable to lock database|could not lock database|Could not get lock' "$pc_f"; then
+        PM_WHY="the package database is locked: another install is running, or one was interrupted"
+        PM_FIX=""
+    elif grep -Eq 'No space left on device|not enough free disk space' "$pc_f"; then
+        PM_WHY="the phone is out of storage space"
+        PM_FIX=""
+    elif grep -Eq 'Could not resolve host|Temporary failure resolving|Network is unreachable' "$pc_f"; then
+        PM_WHY="no network"
+        PM_FIX=""
+    elif grep -Eq 'failed retrieving file|failed to synchronize all databases|Failed to fetch| 404 ' "$pc_f"; then
+        PM_WHY="the package mirror could not be reached, or has no such package"
+        PM_FIX=""
+    fi
+    return 0
 }
 
 # pm_styled <command...> — pm_run on a styled terminal: what the package
@@ -1305,17 +1414,19 @@ pm_styled() {
     [ "$PM_LOGGED" = 1 ] || : > "$PM_LOG"
     PM_LOGGED=1
     pms_rc="$CACHE_DIR/pm.rc"
+    pms_out="$CACHE_DIR/pm.out"
+    : > "$pms_out"
     status "Installing Termux packages" "$I_DL"
     pms_head=$(status_text "$SPIN_I" "Installing Termux packages" 30)
     { DPKG_FORCE=confdef,confold "$@" < /dev/null 2>&1; echo "$?" > "$pms_rc"; } |
         tr '\r' '\n' |
-        awk -v lf="$PM_LOG" -v head="$pms_head" -v esc="$ESC" '
+        awk -v lf="$PM_LOG" -v cf="$pms_out" -v head="$pms_head" -v esc="$ESC" '
             function show(w) {
                 if (w == shown) return
                 shown = w
                 printf "\r%s[K%s · %s", esc, head, substr(w, 1, 24); fflush()
             }
-            { print >> lf }
+            { print >> lf; print >> cf }
             match($0, /^\([0-9]+\/[0-9]+\)/) { split(substr($0, 2, RLENGTH - 2), n, "/"); show(n[1] " of " n[2]); next }
             /^(Unpacking|Setting up) / { show($2) }'
     pms_status=$(cat "$pms_rc" 2>/dev/null || echo 1)
@@ -1329,7 +1440,10 @@ pm_styled() {
     tail -n 10 "$PM_LOG" | while IFS= read -r pms_line; do
         pm_rail_line "$C_DIM$pms_line$C_OFF"
     done
+    pm_classify "$pms_out"
     pm_rail_line "The package manager stopped. Everything it said is in ~/${PM_LOG#"$HOME"/}"
+    [ -z "$PM_WHY" ] || pm_rail_line "$PM_WHY"
+    [ -z "$PM_FIX" ] || pm_rail_line "To fix: $PM_FIX"
     [ "$INTRO" = 0 ] || RAIL_UP=0
     return 1
 }
@@ -5047,6 +5161,8 @@ plan_packages() {
         progress_stage 10 fetched
     fi
     pp_rc=0
+    PM_WHY=""
+    PM_FIX=""
     if [ -n "$pl_repo" ]; then
         say "Installing $(words_list "$pl_repo") first, for the packages that come from it"
         # shellcheck disable=SC2086  # a list of package names, split on purpose
@@ -5078,6 +5194,8 @@ plan_packages() {
     fi
     pa_pkg_at="$PROGRESS_AT"
     CANCEL_ITEM=""
+    # The one job-level error: the root cause, before the rows say what it cost.
+    [ "$pp_rc" = 0 ] || err "${PM_WHY:-the package manager stopped}"
 
     for pp_t in $pp_missing; do
         if [ "$pp_rc" = 0 ] || pkg_present "$pp_t"; then
@@ -5247,6 +5365,7 @@ plan_apply() {
         install) row_summary installed "already installed" ;;
         *) row_summary removed "not installed" ;;
     esac
+    job_log_finish
     return "$pa_rc"
 }
 
@@ -5550,7 +5669,7 @@ cmd_install() {
         case "$ci_a" in
             -y|--yes) ASSUME_YES=1 ;;
             --configs) REPLACE_CONFIGS=1 ;;
-            --progress) PROGRESS=1; ASSUME_YES=1 ;;
+            --progress) PROGRESS=1; ASSUME_YES=1; job_log_start ;;
             -n|--dry-run) DRY_RUN=1 ;;
             -*) bad_opt install "$ci_a"; return 2 ;;
             *) ci_names="$ci_names $ci_a" ;;
@@ -5610,7 +5729,7 @@ cmd_remove() {
     for cr_a in "$@"; do
         case "$cr_a" in
             -y|--yes) ASSUME_YES=1 ;;
-            --progress) PROGRESS=1; ASSUME_YES=1 ;;
+            --progress) PROGRESS=1; ASSUME_YES=1; job_log_start ;;
             -n|--dry-run) DRY_RUN=1 ;;
             -*) bad_opt remove "$cr_a"; return 2 ;;
             *) cr_names="$cr_names $cr_a" ;;
@@ -5648,7 +5767,7 @@ update_items() {
             --offline) cu_offline=1 ;;
             --tsv) cu_tsv=1 ;;
             --configs) REPLACE_CONFIGS=1 ;;
-            --progress) PROGRESS=1; ASSUME_YES=1 ;;
+            --progress) PROGRESS=1; ASSUME_YES=1; job_log_start ;;
             -y|--yes) ASSUME_YES=1 ;;
             -n|--dry-run) cu_check=1; DRY_RUN=1 ;;
             -*) bad_opt "$cu_verb" "$cu_a"; return 2 ;;
