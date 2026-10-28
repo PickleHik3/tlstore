@@ -111,7 +111,7 @@ Installing: number + bar = job.pct (100 when all ok); Block(1..4) at gutter+12, 
   Keys once over: `⏎ done` · `d details` (Job::failed_for_details: over, not cancelled, a row or error failed) · `esc back`.
 Notice: Store.failure_notice marks the failure notice (set where the router puts a job's summary on the row; cleared by the next key/tap). paint::draw_notice is one line, as ever; while the failure notice shows
   the router uses draw_notice_wrapped: one line when it fits, else two (word wrap into hdr.notice-1 and hdr.notice, both rows cleared across the content width first; the body is not re-laid out, its last row is covered).
-  `d details` then sits in key slot 3 on Front (free) and Item (in place of `o repo`); the router takes that `d` itself (the key that clears the notice) and pushes Details.
+  `d details` then sits in key slot 3 on Front (in place of `select`, so 40 columns still fit) and Item (in place of `o repo`); the router takes that `d` itself (the key that clears the notice) and pushes Details.
 Details (view name "details", store/details.rs): the transcript `<Store.home>/.cache/tlstore/last-job.log` (Store.home = Ctx.home, copied in by the router each draw/handle) as plain wrapped lines under the header
   of Job::shown_name (facts `failed`), scrolling as the item page (↑↓/j/k, PageUp/PageDown, Home/End, wheel, drag). A first line `To fix:` + the command on the next line (then a blank) is drawn `To fix:` accent bold and the command
   in the tonal code style; the rest ink. Missing or empty file: one dim line `No transcript from the last job.` Keys: `c copy` (only with a `To fix:` head) · `esc back` (Back/←/backspace too).

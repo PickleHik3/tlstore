@@ -383,10 +383,16 @@ impl View for Front {
         [
             Some(Slot::new(enter, "open", Key::Enter).when(has)),
             Some(verb.when(has)),
-            Some(Slot::new(space, "select", Key::Char(' ')).when(has)),
+            // While the last job's failure is on the notice row (one key's worth), `d details`
+            // takes select's place: a fifth slot squeezes the row into ellipses at 40 columns.
+            if st.failure_shown() {
+                Some(Slot::new("d", "details", Key::Char('d')))
+            } else {
+                Some(Slot::new(space, "select", Key::Char(' ')).when(has))
+            },
             // `f` (the launcher's keyboard held down) still works, unhinted: the row is for the
             // keys an item needs.
-            st.failure_shown().then(|| Slot::new("d", "details", Key::Char('d'))),
+            None,
             Some(Slot::new("q", "quit", Key::Char('q'))),
         ]
     }
