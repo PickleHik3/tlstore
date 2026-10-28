@@ -991,7 +991,7 @@ run_suite() {
     rm -rf "$PSTATE" "$TESTHOME/.local/bin" "$TESTHOME/.local/lib" "$TESTHOME/.config"
     : > "$ROOT/pkg.log"
 
-    # --- a failed job says why (Revision 18): the stream's error line, the transcript, the sentences ---
+    # --- a failed job says why (Revision 20): the stream's error line, the transcript, the sentences ---
     JOBLOG="$TESTHOME/.cache/tlstore/last-job.log"
     pj_clean() { rm -rf "$PSTATE" "$TESTHOME/.local/bin" "$TESTHOME/.local/lib" "$TESTHOME/.config"; : > "$ROOT/pkg.log"; }
     # pj_says <lines...> — a failing run under --progress whose package manager says these.
@@ -1009,6 +1009,8 @@ run_suite() {
     expect_out "the stream carries the root cause" $'^error\tpacman found files it does not own (rg, libpcre2-posix.so)$'
     expect_out "and then the build tools error" $'^error\tcould not install what is needed to build: demo-build$'
     expect_out "the row lines are as before" $'^done\tdemo-pkg\tfailed\tthe package manager could not install demo-one, demo-two$'
+    expect_no_out "a row's own reason is not repeated as an error line" $'^error\tthe package manager could not install'
+    expect_no_out "nor a skipped row's" $'^error\tskipped '
     expect_no_out "an error line has exactly two fields" $'^error\t[^\t]*\t'
     expect_no_out "nothing but the machine stream is on stdout" "Installing"
     if [ "$(sed -n 1,3p "$JOBLOG")" = "To fix:"$'\n'"pacman -S --overwrite '*' ripgrep pcre2" ] && [ -z "$(sed -n 3p "$JOBLOG")" ] && [ -n "$(sed -n 4p "$JOBLOG")" ]; then pass; else fail "the transcript starts with the fix" "$(sed -n 1,4p "$JOBLOG")"; fi
@@ -2532,7 +2534,7 @@ EOF
     rm -rf "$TESTHOME/.local"
     mv "$ROOT/saved-local" "$TESTHOME/.local"
 
-    # --- skill (Revision 18): an agent skill, one folder from one pinned .tar.gz ---
+    # --- skill (Revision 20): an agent skill, one folder from one pinned .tar.gz ---
     # The tarball's one top-level entry is the skill's folder, named like the item. It unpacks
     # into ~/.agents/skills/<name>, replaced whole by an update, and is linked from
     # ~/.claude/skills/<name> (and ~/.codex/skills/<name> while ~/.codex is there). A real folder
@@ -4477,7 +4479,7 @@ if git -C "$repo" show dev:dist/tlstore > "$OLD_TLSTORE" 2>/dev/null; then
         expect_no_file "and puts no directory down" "$TESTHOME/.local/lib/oldapp"
         expect_no_file "nor a wrapper" "$TESTHOME/.local/bin/oldapp"
     fi
-    # A skill row (Revision 18) the same: an engine from before it lists it, refuses it and
+    # A skill row (Revision 20) the same: an engine from before it lists it, refuses it and
     # writes nothing; one that knows the kind (do_skill) installs it and links it.
     mkdir -p "$FX/oldsk/oldsk"
     printf 'old skill\n' > "$FX/oldsk/oldsk/SKILL.md"
@@ -4650,7 +4652,7 @@ for bc_exe in "-" "exe=" "exe=/bin/app" "exe=../app" "exe=bin/../../app"; do
     if [ "$ST" != 0 ]; then pass; else fail "an archive with options '$bc_exe' is refused"; fi
 done
 
-# skill (Revision 18): digested like a binary, x86_64:digest included; a placeholder tag with no
+# skill (Revision 20): digested like a binary, x86_64:digest included; a placeholder tag with no
 # SHA256SUMS line stops the build.
 bc_write_items "$bc_items" 1 Tools
 printf '8888888888888888888888888888888888888888888888888888888888888888  skill-sk-aarch64\n' >> "$BC_SUMS"

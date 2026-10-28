@@ -91,7 +91,7 @@ LIB_DIR="$HOME/.local/lib"
 # Where a priv=shizuku binary itself lives: off PATH, since what the user runs
 # is the wrapper in BIN_DIR that hands it to the launcher's privileged lane.
 PRIV_DIR="$LIB_DIR/tlstore/priv"
-# Where a skill item unpacks (Revision 18): the directory agents share, which
+# Where a skill item unpacks (Revision 20): the directory agents share, which
 # each agent's own skills directory links into.
 SKILLS_DIR="$HOME/.agents/skills"
 DATA_DIR="$HOME/.local/share/tlstore"
@@ -219,7 +219,7 @@ LAST_ERR=""
 PM_WHY=""
 PM_FIX=""
 
-# The transcript of a --progress run (Revision 18): what say and err said and
+# The transcript of a --progress run (Revision 20): what say and err said and
 # everything the package manager printed, for the store to show beside a
 # failure. Opened (emptied) where --progress is parsed, so a refused plan leaves
 # one too; a run on the terminal never writes it.
@@ -300,8 +300,10 @@ err() {
     LAST_ERR="$*"
     job_log "tlstore: $*"
     [ "$STATUS_SCOPE" = 1 ] && [ -n "$ROW_NAME" ] && return 0
-    # The stream's own line for a failure no row carries (Revision 18).
-    [ "$PROGRESS" != 1 ] || printf 'error\t%s\n' "$*"
+    # The stream's own line for a failure no row carries (Revision 20). A
+    # row's reason goes in its done line instead: under --progress nothing is
+    # styled, so ROW_NAME alone says whether a row is being worked on.
+    [ "$PROGRESS" != 1 ] || [ -n "$ROW_NAME" ] || printf 'error\t%s\n' "$*"
     status_clear
     # Inside a styled run the error takes a step on the rail, when stderr is a
     # terminal too (or the style was forced, as a test does).
@@ -1352,7 +1354,7 @@ pm_run() {
 }
 
 # pm_classify <file> — what the package manager printed in a failed call, as one
-# of five known causes (Revision 18): sets PM_WHY and PM_FIX when it knows, and
+# of five known causes (Revision 20): sets PM_WHY and PM_FIX when it knows, and
 # leaves them alone when it does not. When several match the first of conflict,
 # lock, space, network, mirror wins, the one that explains the rest.
 pm_classify() {
@@ -1442,7 +1444,7 @@ pm_styled() {
     done
     pm_classify "$pms_out"
     pm_rail_line "The package manager stopped. Everything it said is in ~/${PM_LOG#"$HOME"/}"
-    [ -z "$PM_WHY" ] || pm_rail_line "$PM_WHY"
+    # PM_WHY itself is said by plan_packages' err, on the rail; only the fix is ours.
     [ -z "$PM_FIX" ] || pm_rail_line "To fix: $PM_FIX"
     [ "$INTRO" = 0 ] || RAIL_UP=0
     return 1
@@ -2418,7 +2420,7 @@ replace_dir() {
     rm -rf "$2.old"
 }
 
-# do_skill — an agent skill (Revision 18): one pinned .tar.gz whose only top
+# do_skill — an agent skill (Revision 20): one pinned .tar.gz whose only top
 # level entry is the skill's directory, named like the item. It unpacks with
 # the archive kind's code into ~/.agents/skills/<name>, replaced whole on every
 # update, and each agent's skills directory gets a link to it (skill_link). No

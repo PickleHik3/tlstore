@@ -1316,7 +1316,7 @@ version listing; and the real hand-off — the 0.20 engine from this checkout's 
 
 ## Revision 20 — a failed job says why (tlstore 0.27)
 
-The brief for this was called "Revision 18"; 18 and 19 were taken, so it is 20. Under `--progress`
+Under `--progress`
 the package manager's own words went to stderr, which the store discards, and a refusal before any
 row was said on stderr too, so a failed install showed "failed" and nothing else. Three additions,
 all under `--progress`; a run on the terminal changes only where noted.
@@ -1352,9 +1352,9 @@ empty.
 
 `plan_packages` emits one unscoped `err` right after its package-manager call fails: `PM_WHY`, or
 `the package manager stopped` when it is empty. The existing "could not install what is needed to
-build" error follows, and the rows' reasons keep their old wording. On the terminal, `pm_styled`'s
-failure path prints `PM_WHY` and, when set, `To fix: <command>` on the rail after the existing
-"The package manager stopped" line.
+build" error follows, and the rows' reasons keep their old wording. On the terminal that `err` lands on
+the rail as any error does, and `pm_styled`'s failure path adds `To fix: <command>` when one is
+known, after the existing "The package manager stopped" line.
 
 Tests (`scripts/test.sh`): the fake pacman says the contents of a `pacman-says` file and fails; the
 stream carries the conflict sentence then the build-tools error, with the row lines unchanged; the
