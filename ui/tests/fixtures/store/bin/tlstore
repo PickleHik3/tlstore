@@ -148,6 +148,12 @@ for n in "$@"; do
         printf 'step\t%s\t100\tready\n' "$p"
         printf 'done\t%s\tok\tinstalled\n' "$p"
     fi
+    # error-<name>: its lines arrive as job-level `error` lines before the item's first step.
+    if [ -f "$d/error-$n" ]; then
+        while IFS= read -r line; do
+            printf 'error\t%s\n' "$line"
+        done < "$d/error-$n"
+    fi
     printf 'step\t%s\t10\tfetched\n' "$n"
     if [ -f "$d/hold" ]; then
         printf 'step\t%s\t60\tsignature checked\n' "$n"

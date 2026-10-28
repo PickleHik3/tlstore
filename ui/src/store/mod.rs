@@ -8,6 +8,7 @@
 
 pub mod data;
 pub mod decode;
+pub mod details;
 pub mod front;
 pub mod installing;
 pub mod item;
@@ -34,7 +35,7 @@ use data::{
     parse_progress, parse_self_check, parse_updates, AssetKind, Catalog, Channels, Progress, Snapshot, STEPS,
 };
 use decode::{Decoder, Done as Answer, Job as DecodeJob};
-use paint::{draw_keys, draw_notice, Facts, Paint, Slots, A_HOME, A_KEY0};
+use paint::{draw_keys, draw_notice, draw_notice_wrapped, Facts, Paint, Slots, A_HOME, A_KEY0};
 use proc::{parse_prefetch, Env, Fetch, Task, TaskKind};
 use scene::{Fx, Motion, NavKind, NoMotion, Phase, Scene};
 
@@ -206,6 +207,9 @@ pub struct Job {
     /// Exit code once the script is gone.
     pub exit: Option<i32>,
     pub cancelled: bool,
+    /// The stream's job-level `error` lines, in order (a refused plan, the package manager,
+    /// a missing build tool).
+    pub errors: Vec<String>,
 }
 
 pub fn and_list(names: &[&str]) -> String {
@@ -289,6 +293,7 @@ impl Job {
             done: Vec::new(),
             exit: None,
             cancelled: false,
+            errors: Vec::new(),
         }
     }
 
@@ -405,6 +410,7 @@ impl Job {
                 self.done.push(Done { name: name.clone(), ok, message });
                 out = ok.then_some(name);
             }
+            Some(Progress::Error { text }) => self.errors.push(text),
             None => return None,
         }
         self.pct = self.pct.max(self.weighted());
@@ -417,6 +423,35 @@ impl Job {
         if !self.done.is_empty() && self.done.iter().all(|d| d.ok) {
             self.pct = 100;
         }
+    }
+
+    /// `Could not <verb> <items>: <reason>.` The reason is the job's first `error` line, else
+    /// the first failed item's own `done` message; the store's own update keeps its old
+    /// closing words.
+    fn could_not(&self, failed: &[&str]) -> String {
+        let head = format!("Could not {} {}", self.verb.word(), and_list(failed));
+        if self.verb == Verb::SelfUpdate {
+            return format!("{head}. Try again later.");
+        }
+        let own = failed
+            .iter()
+            .find_map(|n| self.done.iter().find(|d| &d.name == n && !d.ok).map(|d| d.message.as_str()));
+        let reason = self.errors.first().map(String::as_str).or(own).unwrap_or("").trim();
+        let reason = reason.trim_end_matches('.');
+        if reason.is_empty() {
+            format!("{head}.")
+        } else {
+            format!("{head}: {reason}.")
+        }
+    }
+
+    /// True when the job is over, was not stopped, and something it was asked for failed:
+    /// what `d details` is offered for.
+    pub fn failed_for_details(&self) -> bool {
+        self.verb != Verb::SelfUpdate
+            && !self.running()
+            && !self.cancelled
+            && (self.done.iter().any(|d| !d.ok) || !self.errors.is_empty())
     }
 
     /// Plain sentences for the end of the job: what worked, what did not, kept files.
@@ -450,7 +485,7 @@ impl Job {
             if self.cancelled {
                 lines.push(format!("Stopped before {} was done.", and_list(&failed)));
             } else {
-                lines.push(format!("Could not {} {}. Try again later.", self.verb.word(), and_list(&failed)));
+                lines.push(self.could_not(&failed));
             }
         }
         for d in &self.done {
@@ -525,6 +560,11 @@ pub struct Store {
     pub notice: Option<String>,
     /// … or until then, when the notice is on a timer (the "tlstore updated to …" line).
     pub notice_until: Option<Instant>,
+    /// The notice on the row is the failure of the last job: `d` opens its transcript.
+    pub failure_notice: bool,
+    /// `$HOME`, as the terminal context has it (the router copies it in); the transcript is
+    /// `<home>/.cache/tlstore/last-job.log`.
+    pub home: PathBuf,
     /// An install that pulls in large Termux packages, held for a second `i` (Revision 15);
     /// any other key or tap lets it go.
     pub confirm: Option<Vec<String>>,
@@ -606,6 +646,8 @@ impl Store {
             fullscreen: false,
             notice: None,
             notice_until: None,
+            failure_notice: false,
+            home: PathBuf::new(),
             confirm: None,
             self_update: SelfUpdate::Checking,
             channels: Channels::default(),
@@ -890,6 +932,11 @@ impl Store {
         if !body.is_empty() {
             (self.env.tty_write)(&osc99("tlstore", &body));
         }
+    }
+
+    /// The failure notice of the last job is on the notice row (`d details` is offered).
+    pub fn failure_shown(&self) -> bool {
+        self.failure_notice && self.notice.is_some()
     }
 
     /// True once, after a job has ended (the router puts its summary on the notice row).
@@ -1701,7 +1748,11 @@ impl Router {
         view.draw(&mut p, st);
         st.leaving = false;
         if let Some(n) = &notice {
-            draw_notice(&mut p, &hdr, n);
+            if st.failure_shown() {
+                draw_notice_wrapped(&mut p, &hdr, n);
+            } else {
+                draw_notice(&mut p, &hdr, n);
+            }
         }
         let slots = view.keys(st);
         draw_keys(&mut p, &hdr, &slots);
@@ -1742,6 +1793,7 @@ impl Router {
 impl Screen for Router {
     fn draw(&mut self, f: &mut Frame) {
         self.motion_on = f.ctx.motion;
+        self.st.home = f.ctx.home.clone();
         let now = (self.clock)();
         self.st.now = now;
         if self.st.wake_at.is_some_and(|w| now >= w) {
@@ -1761,6 +1813,8 @@ impl Screen for Router {
     fn handle(&mut self, ev: &Event, ctx: &mut Ctx) -> Nav {
         self.motion_on = ctx.motion;
         self.st.now = (self.clock)();
+        self.st.home = ctx.home.clone();
+        let mut had_failure = false;
         match ev {
             Event::Readable(fd) => {
                 if self.st.on_readable(*fd, &mut ctx.pics) {
@@ -1779,12 +1833,16 @@ impl Screen for Router {
                         } else {
                             lines.first().cloned()
                         };
+                        self.st.failure_notice = job.failed_for_details()
+                            && self.st.notice.as_deref().is_some_and(|n| n.starts_with("Could not"));
                     }
                 }
                 return Nav::Stay;
             }
             Event::Resize(_) => return Nav::Stay,
             Event::Key(_) | Event::Tap { .. } => {
+                // The key that clears the failure notice may still be its `d`.
+                had_failure = std::mem::take(&mut self.st.failure_notice) && self.st.notice.is_some();
                 self.st.notice = None;
                 self.st.notice_until = None;
             }
@@ -1805,6 +1863,9 @@ impl Screen for Router {
             self.st.confirm = None;
         }
         let top = self.views.len() - 1;
+        if had_failure && matches!(ev, Event::Key(Key::Char('d'))) && self.top() != "installing" {
+            return self.navigate(Go::Push(Box::new(details::Details::new(&self.st))));
+        }
         let go = self.views[top].handle(&ev, &mut self.st);
         let go = match (go, ev) {
             (Go::Pass, Event::Key(k)) => self.global_key(k),

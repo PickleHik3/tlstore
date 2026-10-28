@@ -306,7 +306,11 @@ impl View for ItemView {
                 Slot::new("s", if starred { "unstar" } else { "star" }, Key::Char('s'))
                     .when(st.gh == Gh::Ready)
             }),
-            (!setup).then(|| Slot::new("o", "repo", Key::Char('o'))),
+            if st.failure_shown() {
+                Some(Slot::new("d", "details", Key::Char('d')))
+            } else {
+                (!setup).then(|| Slot::new("o", "repo", Key::Char('o')))
+            },
             Some(Slot::new("esc", "back", Key::Esc)),
         ]
     }

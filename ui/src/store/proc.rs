@@ -21,6 +21,9 @@ pub struct Env {
     pub launcherctl: Option<OsString>,
     /// URL opener when present (`$TLSTORE_OPEN`, else `termux-open-url` on PATH).
     pub opener: Option<OsString>,
+    /// `termux-clipboard-set` when on PATH (`$TLSTORE_CLIPBOARD` may name another); None
+    /// means copying goes out as an OSC 52 write.
+    pub clipboard: Option<OsString>,
     /// `$TLSTORE_UI_SELF_UPDATED`: the copy that started this one had just moved the store to
     /// this version. No self-update check runs, and Front says so once.
     pub self_updated: Option<String>,
@@ -48,12 +51,16 @@ impl Env {
             var("TLSTORE_LAUNCHERCTL").or_else(|| Some("launcherctl".into())).filter(|p| which(p).is_some());
         let opener =
             var("TLSTORE_OPEN").or_else(|| Some("termux-open-url".into())).filter(|p| which(p).is_some());
+        let clipboard = var("TLSTORE_CLIPBOARD")
+            .or_else(|| Some("termux-clipboard-set".into()))
+            .filter(|p| which(p).is_some());
         let self_updated = std::env::var("TLSTORE_UI_SELF_UPDATED").ok().filter(|v| !v.is_empty());
         Env {
             tlstore,
             gh,
             launcherctl,
             opener,
+            clipboard,
             self_updated,
             tty_write: Box::new(|s: &str| {
                 if let Ok(mut t) = std::fs::OpenOptions::new().write(true).open("/dev/tty") {
@@ -76,9 +83,31 @@ impl Env {
             gh: gh.into(),
             launcherctl: launcherctl.map(Into::into),
             opener: opener.map(Into::into),
+            clipboard: None,
             self_updated: None,
             tty_write: Box::new(move |s: &str| sink.borrow_mut().push(s.to_string())),
         }
+    }
+
+    /// Puts `text` on the clipboard: `termux-clipboard-set` with the text on stdin when it is
+    /// there, else an OSC 52 write to the terminal.
+    pub fn copy(&mut self, text: &str) {
+        if let Some(prog) = &self.clipboard {
+            let child = Command::new(prog)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn();
+            if let Ok(mut c) = child {
+                if let Some(mut i) = c.stdin.take() {
+                    let _ = i.write_all(text.as_bytes());
+                }
+                let _ = c.wait();
+                return;
+            }
+        }
+        let seq = format!("\x1b]52;c;{}\x07", base64(text.as_bytes()));
+        (self.tty_write)(&seq);
     }
 
     /// Runs `prog args…` to the end; returns (exit code, stdout). -1 for a signal. Errs when
@@ -354,5 +383,36 @@ mod tests {
         assert!(parse_prefetch("done\tdawn\tpicture\tx").is_none());
         assert!(parse_prefetch("ready\tdawn\tthing\tx").is_none());
         assert!(parse_prefetch("").is_none());
+    }
+}
+
+/// Standard base64 with padding (OSC 52 carries the text in it).
+pub fn base64(bytes: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for c in bytes.chunks(3) {
+        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+        for i in 0..4 {
+            if i <= c.len() {
+                out.push(T[(n >> (18 - 6 * i) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod base64_tests {
+    use super::base64;
+
+    #[test]
+    fn base64_pads() {
+        assert_eq!(base64(b""), "");
+        assert_eq!(base64(b"f"), "Zg==");
+        assert_eq!(base64(b"fo"), "Zm8=");
+        assert_eq!(base64(b"foo"), "Zm9v");
+        assert_eq!(base64(b"foobar"), "Zm9vYmFy");
     }
 }

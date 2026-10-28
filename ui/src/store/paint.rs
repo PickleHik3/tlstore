@@ -560,6 +560,25 @@ pub fn draw_notice(p: &mut Paint, h: &Header, text: &str) {
     p.text(El::Notice, h.gutter, h.notice, &line, pal.dim_s().italic());
 }
 
+/// The failure notice of a job: [`draw_notice`] when it fits one line; else wrapped at word
+/// boundaries onto two, the second on the notice row and the first on the row above it (the
+/// body's last row, which the notice covers while it shows). Both rows are cleared across the
+/// content width first so the body does not show through.
+pub fn draw_notice_wrapped(p: &mut Paint, h: &Header, text: &str) {
+    let pal = *p.f.pal();
+    let lines = layout::wrap(text, h.content.w, 2);
+    if lines.len() < 2 || h.notice == 0 {
+        draw_notice(p, h, text);
+        return;
+    }
+    let blank = " ".repeat(h.content.w as usize);
+    for (i, line) in lines.iter().enumerate() {
+        let y = h.notice - 1 + i as u16;
+        p.text(El::Notice, h.gutter, y, &blank, pal.dim_s());
+        p.text(El::Notice, h.gutter, y, line, pal.dim_s().italic());
+    }
+}
+
 impl Effect {
     /// The effect a hidden picture gets (kitty has no alpha per placement).
     pub fn hidden() -> Effect {

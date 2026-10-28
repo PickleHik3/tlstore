@@ -9,6 +9,7 @@ use crate::term::{Event, Key};
 
 use super::paint::{self, draw_header, Facts, HeaderContent, Masthead, Paint, Slot, Slots, A_BACK, A_CONTEXT};
 use super::scene::El;
+use super::details::Details;
 use super::{header_for, Go, Row, RowState, SelfUpdate, Store, Verb, View, STORE_REPO};
 
 #[derive(Default)]
@@ -52,6 +53,8 @@ impl View for Installing {
         let plan: Vec<Row> = job.rows[first..first + shown].to_vec();
         let queued = job.queued();
         let summary = job.summary();
+        let block = failure_block(job);
+        let errors = job.errors.clone();
 
         let state = if running {
             Some(verb.ing())
@@ -145,6 +148,33 @@ impl View for Installing {
                     }
                 }
             }
+        } else if let Some(entries) = &block {
+            // A job that failed: the failed rows with their reasons, the job-level errors, one
+            // dim fold line. Beside the number when it fits four lines; else under the
+            // progress line at the full width. Where it does not fit the earliest lines go,
+            // never the fold.
+            let wrapped = |w: u16| -> Vec<(String, bool)> {
+                entries
+                    .iter()
+                    .flat_map(|(t, f)| layout::wrap(t, w, usize::MAX).into_iter().map(move |l| (l, *f)))
+                    .collect()
+            };
+            let beside = wrapped(sw);
+            let below_rows = (b.h as usize).saturating_sub(6);
+            if beside.len() <= 4 || below_rows < 4 {
+                let from = beside.len().saturating_sub(4);
+                for (slot, (text, failed)) in beside[from..].iter().enumerate() {
+                    let style = if *failed { pal.ink_s().bold() } else { pal.dim_s() };
+                    p.text_clip(El::Block(1 + slot as u16), sx, b.y + slot as u16, text, style, b.right());
+                }
+            } else {
+                let lines = wrapped(b.w);
+                let from = lines.len().saturating_sub(below_rows);
+                for (slot, (text, failed)) in lines[from..].iter().enumerate() {
+                    let style = if *failed { pal.ink_s().bold() } else { pal.dim_s() };
+                    p.text_clip(El::Block(6 + slot as u16), g, b.y + 6 + slot as u16, text, style, b.right());
+                }
+            }
         } else {
             let mut y = b.y;
             for (i, l) in summary.iter().enumerate() {
@@ -179,9 +209,24 @@ impl View for Installing {
             }
         }
 
-        // The requested items still to come (the rows beside the number name the parts).
+        // The job's own errors take the row under the window as they arrive (the `then` row
+        // gives way to the first) and the rows below while there is room; they stay once it
+        // is over (the failure block already holds them).
         let ny = b.y + 6;
-        if running && ny < b.bottom() && !queued.is_empty() {
+        let in_block = !running && block.is_some();
+        if !errors.is_empty() && !in_block {
+            let mut y = ny;
+            for e in &errors {
+                for line in layout::wrap(e, b.w, usize::MAX) {
+                    if y >= b.bottom() {
+                        break;
+                    }
+                    p.text(El::Block(6 + (y - ny)), g, y, &line, pal.ink_s().bold());
+                    y += 1;
+                }
+            }
+        } else if running && ny < b.bottom() && !queued.is_empty() {
+            // The requested items still to come (the rows beside the number name the parts).
             let s = layout::fit_line(&format!("then {}", queued.join(", ")), b.w);
             p.text(El::Block(6), g, ny, &s, pal.dim_s());
         }
@@ -193,7 +238,9 @@ impl View for Installing {
         } else {
             Slot::new(paint::key_glyphs(st.env.launcherctl.is_some()).0, "done", Key::Enter)
         };
-        [Some(first), None, None, None, Some(Slot::new("esc", "back", Key::Esc))]
+        let details = st.job.as_ref().is_some_and(Job::failed_for_details);
+        let details = details.then(|| Slot::new("d", "details", Key::Char('d')));
+        [Some(first), details, None, None, Some(Slot::new("esc", "back", Key::Esc))]
     }
 
     fn handle(&mut self, ev: &Event, st: &mut Store) -> Go {
@@ -203,6 +250,9 @@ impl View for Installing {
         match ev {
             Event::Key(Key::Esc | Key::Backspace) | Event::Tap { action: A_BACK, .. } => Go::Back,
             Event::Key(Key::Enter) if !st.job_running() => Go::Back,
+            Event::Key(Key::Char('d')) if st.job.as_ref().is_some_and(Job::failed_for_details) => {
+                Go::Push(Box::new(Details::new(st)))
+            }
             Event::Key(Key::Char('x')) if st.job_running() => {
                 st.cancel_job();
                 Go::Stay
@@ -259,6 +309,34 @@ impl Installing {
             _ => Go::Stay,
         }
     }
+}
+
+/// The done screen of a job that failed: every failed row as `<name>  <reason>`, each
+/// job-level error, then `N ready` (dim, omitted at zero), to be wrapped by the caller; each line
+/// says whether it is in failed ink. None for a job that is running, was stopped, is the
+/// store's own update, or has no failed row: those keep their usual screen.
+fn failure_block(job: &Job) -> Option<Vec<(String, bool)>> {
+    if job.running() || job.cancelled || job.verb == Verb::SelfUpdate {
+        return None;
+    }
+    let failed: Vec<&Row> = job.rows.iter().filter(|r| matches!(r.state, RowState::Done { ok: false, .. })).collect();
+    if failed.is_empty() {
+        return None;
+    }
+    let mut out: Vec<(String, bool)> = Vec::new();
+    for r in failed {
+        let RowState::Done { message, .. } = &r.state else { continue };
+        let why = if message.is_empty() { "failed" } else { message.as_str() };
+        out.push((format!("{}  {why}", r.name), true));
+    }
+    for e in &job.errors {
+        out.push((e.clone(), true));
+    }
+    let ready = job.rows.iter().filter(|r| matches!(r.state, RowState::Done { ok: true, .. })).count();
+    if ready > 0 {
+        out.push((format!("{ready} ready"), false));
+    }
+    Some(out)
 }
 
 /// How many of the plan's rows show beside the number, and from which.

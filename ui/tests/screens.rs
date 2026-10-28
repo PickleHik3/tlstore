@@ -139,6 +139,7 @@ impl H {
         );
         env.self_updated = o.self_updated.map(str::to_string);
         let mut ctx = Ctx::for_tests(cols, rows);
+        ctx.home = dir.clone();
         ctx.motion = o.motion.is_some() && !o.motion_off;
         if o.caps {
             ctx.caps = Caps::all();
@@ -991,7 +992,7 @@ fn failures_and_kept_config_are_reported() {
     h.settle();
     let s = h.r().st.job.as_ref().unwrap().summary();
     assert_eq!(s[0], "sigye is ready.");
-    assert_eq!(s[1], "Could not install broken. Try again later.");
+    assert_eq!(s[1], "Could not install broken: could not install broken.");
     assert_eq!(s[2], "Kept your config.fish.");
     // Off the Installing screen the first summary line is the notice.
     assert!(h.has("sigye is ready."), "{}", h.text);
@@ -1007,7 +1008,7 @@ fn a_failed_item_shows_failed_on_installing_and_front() {
     h.settle();
     let hdr = layout::header(53, 26, 7, None);
     assert!(h.row(hdr.facts as usize).starts_with("  failed 0.6.0"), "{}", h.text);
-    assert!(h.row(hdr.notice as usize).contains("Could not install sigye. Try again later."), "{}", h.text);
+    assert!(h.row(hdr.notice as usize).contains("Could not install sigye: could not install sigye."), "{}", h.text);
     assert!(h.has("\u{f0311}  done"));
     h.key(Key::Enter);
     assert_eq!(h.r().top(), "front");
@@ -1889,4 +1890,191 @@ fn motion_off_keeps_the_hero_still() {
     h.key(Key::Down);
     assert!(h.out.contains(&format!("\x1b_Ga=d,d=i,i={pic_id},p=1,q=2\x1b\\")), "{:?}", h.out);
     assert!(!h.out.contains("d=I"));
+}
+
+// ---------------------------------------------------------------------------
+// A failed job says why (issue #19)
+// ---------------------------------------------------------------------------
+
+const ERR1: &str = "pacman found files it does not own (rg, libpcre2-posix.so)";
+const ERR2: &str = "could not install what is needed to build: patchelf";
+const NOTICE: &str = "Could not install opencode: pacman found files it does not own (rg, libpcre2-posix.so).";
+const FIX: &str = "pacman -S --overwrite '*' pcre2 ripgrep";
+
+/// opencode fails after its part (ripgrep) went in, with the two job-level errors.
+fn opencode_fails(h: &H) {
+    std::fs::write(h.dir.join("fail-opencode"), "").unwrap();
+    std::fs::write(h.dir.join("part-opencode"), "ripgrep").unwrap();
+    std::fs::write(h.dir.join("error-opencode"), format!("{ERR1}\n{ERR2}\n")).unwrap();
+}
+
+fn write_transcript(h: &H, text: &str) {
+    let dir = h.dir.join(".cache/tlstore");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("last-job.log"), text).unwrap();
+}
+
+fn failed_job_on_installing(h: &mut H) {
+    go_to(h, "opencode");
+    install_key(h);
+    assert_eq!(h.r().top(), "installing", "{}", h.text);
+    h.settle();
+}
+
+/// `i`, and again when the item pulls in big packages and the first press only asks.
+fn install_key(h: &mut H) {
+    h.key(Key::Char('i'));
+    if h.r().top() == "front" {
+        h.key(Key::Char('i'));
+    }
+}
+
+#[test]
+fn a_running_job_shows_its_first_error_where_then_was() {
+    let mut h = H::new(53, 26, Opts::default());
+    opencode_fails(&h);
+    std::fs::write(h.dir.join("hold"), "").unwrap();
+    go_to(&mut h, "opencode");
+    h.key(Key::Char(' '));
+    go_to(&mut h, "sigye");
+    h.key(Key::Char(' '));
+    install_key(&mut h);
+    assert_eq!(h.r().top(), "installing", "{}", h.text);
+    h.pump(|r| r.st.job.as_ref().is_some_and(|j| j.errors.len() >= 2));
+    h.draw();
+    let hdr = layout::header(53, 26, 7, None);
+    let y = hdr.body.y as usize + 6;
+    assert!(h.row(y).trim_start().starts_with("pacman found files it does not own"), "{}", h.text);
+    assert!(h.row(y + 2).trim_start().starts_with("could not install what is needed"), "{}", h.text);
+    assert!(!h.has("then "), "{}", h.text);
+    h.key(Key::Char('x'));
+    h.settle();
+    std::fs::remove_file(h.dir.join("hold")).unwrap();
+}
+
+#[test]
+fn the_done_screen_keeps_the_failed_rows_and_the_errors() {
+    let mut h = H::new(53, 26, Opts::default());
+    opencode_fails(&h);
+    failed_job_on_installing(&mut h);
+    let hdr = layout::header(53, 26, 7, None);
+    let y = hdr.body.y as usize;
+    let rows: Vec<String> = (0..12).map(|i| h.row(y + i)).collect();
+    let all = rows.join("\n");
+    assert!(all.contains("opencode could not install opencode"), "{}", h.text);
+    assert!(all.contains("pacman found files it does not own"), "{}", h.text);
+    assert!(all.contains("could not install what is needed to build:"), "{}", h.text);
+    assert!(all.contains("1 ready"), "{}", h.text);
+    assert!(!all.contains("Could not install"), "no summary sentence over the rows\n{}", h.text);
+    assert!(h.has("\u{f0311}  done") && h.has("details"), "{}", h.text);
+}
+
+#[test]
+fn the_front_notice_takes_two_rows_and_covers_the_bodys_last() {
+    let mut h = H::new(53, 26, Opts::default());
+    opencode_fails(&h);
+    assert!(h.r().st.start_job(tlstore_ui::store::Verb::Install, vec!["opencode".into()]));
+    h.settle();
+    let hdr = layout::header(53, 26, 7, None);
+    let (hi, lo) = (h.row(hdr.notice as usize - 1), h.row(hdr.notice as usize));
+    assert!(hi.trim_start().starts_with("Could not install opencode: pacman"), "{}", h.text);
+    assert_eq!(format!("{} {}", hi.trim(), lo.trim()), NOTICE, "{}", h.text);
+    assert!(h.row(hdr.keys as usize).contains("details"), "{}", h.text);
+}
+
+#[test]
+fn a_one_line_notice_leaves_the_row_above_alone() {
+    let mut h = H::new(53, 26, Opts::default());
+    let hdr = layout::header(53, 26, 7, None);
+    let above = h.row(hdr.notice as usize - 1);
+    h.r().st.notice = Some("hello there".into());
+    h.draw();
+    assert_eq!(h.row(hdr.notice as usize - 1), above, "{}", h.text);
+    assert!(h.row(hdr.notice as usize).contains("hello there"), "{}", h.text);
+}
+
+#[test]
+fn details_is_offered_after_a_failure_and_not_after_a_clean_job() {
+    let hdr = layout::header(53, 26, 7, None);
+    let mut h = H::new(53, 26, Opts::default());
+    assert!(h.r().st.start_job(tlstore_ui::store::Verb::Install, vec!["sigye".into()]));
+    h.settle();
+    assert!(!h.row(hdr.keys as usize).contains("details"), "{}", h.text);
+    let mut h = H::new(53, 26, Opts::default());
+    go_to(&mut h, "sigye");
+    h.key(Key::Char('i'));
+    h.settle();
+    assert!(!h.row(hdr.keys as usize).contains("details"), "{}", h.text);
+    let mut h = H::new(53, 26, Opts::default());
+    opencode_fails(&h);
+    failed_job_on_installing(&mut h);
+    assert!(h.row(hdr.keys as usize).contains("details"), "{}", h.text);
+}
+
+#[test]
+fn d_opens_the_transcript_and_esc_returns() {
+    let mut h = H::new(53, 26, Opts::default());
+    opencode_fails(&h);
+    write_transcript(&h, &format!("To fix:\n{FIX}\n\nInstalling opencode\nerror: failed to commit transaction\n"));
+    failed_job_on_installing(&mut h);
+    h.key(Key::Char('d'));
+    assert_eq!(h.r().top(), "details", "{}", h.text);
+    assert!(h.has("To fix:") && h.has(FIX), "{}", h.text);
+    assert!(h.has("error: failed to commit transaction"), "{}", h.text);
+    assert!(h.has("copy"), "{}", h.text);
+    h.key(Key::Esc);
+    assert_eq!(h.r().top(), "installing", "{}", h.text);
+    // Off the Installing screen: the failure notice's `d`.
+    h.key(Key::Enter);
+    assert_eq!(h.r().top(), "front");
+    assert!(h.r().st.start_job(tlstore_ui::store::Verb::Install, vec!["opencode".into()]));
+    h.settle();
+    h.key(Key::Char('d'));
+    assert_eq!(h.r().top(), "details", "{}", h.text);
+    h.key(Key::Esc);
+    assert_eq!(h.r().top(), "front", "{}", h.text);
+}
+
+#[test]
+fn a_missing_transcript_is_said_in_one_line() {
+    let mut h = H::new(53, 26, Opts::default());
+    opencode_fails(&h);
+    failed_job_on_installing(&mut h);
+    h.key(Key::Char('d'));
+    assert_eq!(h.r().top(), "details", "{}", h.text);
+    assert!(h.has("No transcript from the last job."), "{}", h.text);
+    assert!(!h.has("copy"), "{}", h.text);
+}
+
+#[test]
+fn c_copies_the_fix_through_osc_52_without_termux_clipboard() {
+    let mut h = H::new(53, 26, Opts::default());
+    opencode_fails(&h);
+    write_transcript(&h, &format!("To fix:\n{FIX}\n\nnarration\n"));
+    failed_job_on_installing(&mut h);
+    h.key(Key::Char('d'));
+    h.sink.borrow_mut().clear();
+    h.key(Key::Char('c'));
+    let want = format!("\x1b]52;c;{}\x07", tlstore_ui::store::proc::base64(FIX.as_bytes()));
+    assert!(h.sink.borrow().contains(&want), "{:?}", h.sink.borrow());
+    let hdr = layout::header(53, 26, 7, None);
+    assert!(h.row(hdr.notice as usize).contains("copied"), "{}", h.text);
+}
+
+#[test]
+fn a_cancelled_job_keeps_its_one_sentence_and_offers_no_details() {
+    let mut h = H::new(53, 26, Opts::default());
+    opencode_fails(&h);
+    std::fs::write(h.dir.join("hold"), "").unwrap();
+    go_to(&mut h, "opencode");
+    install_key(&mut h);
+    h.pump(|r| r.st.job.as_ref().is_some_and(|j| j.errors.len() >= 2));
+    h.key(Key::Char('x'));
+    h.settle();
+    std::fs::remove_file(h.dir.join("hold")).unwrap();
+    let s = h.r().st.job.as_ref().unwrap().summary();
+    assert_eq!(s, vec!["Stopped before opencode was done.".to_string()]);
+    let hdr = layout::header(53, 26, 7, None);
+    assert!(h.row(hdr.notice as usize).contains("Stopped before opencode was done."), "{}", h.text);
+    assert!(!h.row(hdr.keys as usize).contains("details"), "{}", h.text);
 }
