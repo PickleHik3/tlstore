@@ -43,7 +43,16 @@ tuios attach work
 
 ## CPU and RAM in the dock
 
-The RAM meter works as it is. Android keeps `/proc/stat` from apps, so the CPU meter reads it
+tuios leaves both meters off until you turn them on: switch on "CPU meter" and "RAM meter" in the
+settings page (`ctrl+b` `,`), or add this to `~/.config/tuios/config.toml`:
+
+```toml
+[appearance]
+show_cpu = true
+show_ram = true
+```
+
+The RAM meter then works as it is. Android keeps `/proc/stat` from apps, so the CPU meter reads it
 through the launcher instead, and shows `CPU: n/a` without that. In Termux Launcher it needs
 Shizuku running and permission granted to Termux:Launcher; the store installs a small helper,
 `tuios-cpu`, for this alongside tuios. It is started when the CPU meter first needs it and stops

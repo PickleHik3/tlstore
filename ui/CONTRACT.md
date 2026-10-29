@@ -51,8 +51,9 @@ Router::new(env) (no motion) | Router::animated(env) (Timeline) | Router::with_m
 Router is the only app::Screen; views: Front → Item → Installing, stacked; Router::top()/depth()/header_item(); router.st is the Store.
 trait View { name()->"front"|"item"|"installing"; draw(&mut self,p:&mut Paint,st:&mut Store) /*header + body*/; keys(&self,st)->Slots;
   handle(&mut self,ev,st)->Go::{Stay,Pass,Push,Replace,Back,Home,Quit}; refresh(&mut self,st) }  Router draws notice + key row after draw().
-Job{verb,names,current /*owner of the live row*/,pct /*whole job, never lower*/,rows: Vec<Row>,step,done,exit,cancelled}; Row{name,action,kind,by,why,
+Job{verb,names,current /*owner of the live row*/,pct /*whole job, never lower*/,rows: Vec<Row>,step,done,exit,cancelled,errors: Vec<String>}; Row{name,action,kind,by,why,
   pct,words,state: RowState::{Pending,Live,Done{ok,message}}} — data::Progress::Row from `row\tname\taction\tkind\tversion\tby\twhy` (Revision 17).
+  `error\ttext` (data::Progress::Error; two fields, no final period, any point of the stream: before a row, between, after the last done) → Job.errors, in order; unknown kinds stay ignored.
   Job::new seeds an implied row per name (dropped by the first `row` line); a `step` for an unknown name appends one (by requested|auto, kind -);
   step: row.pct=max, Live, current=owner(row) (requested → itself; `needed by X`/`part of X` → X, up the plan; else names[0]); done ok: row 100, failed: row stays.
   pct = max(pct, Σw·row.pct/Σw), w by kind for install (pkg 3; binary/archive/npm-* 4; fisher 2; file/file-once 1; bundle 0; other 2),
@@ -101,7 +102,20 @@ motion (D7): leave 120 ms body fade (pictures hidden at once); enter: body eleme
   Input goes to the new view at once, during the leave too. TLSTORE_MOTION=0: no navigate/frame/drawn, frames at rest, header pictures placed at once.
 Installing: number + bar = job.pct (100 when all ok); Block(1..4) at gutter+12, rows b..b+3: the plan, `<name>  <words>` — pending rule (its `fetched` dim when the fetch phase got it), live accent
   + dotted words, done dim `ready` (or the message unless installed/updated), failed ink bold + reason; 4-line window, live on line min(i,2);
-  first four before any step, last four after; summary once over. Row b+6 `then <queued>`; no "also bringing". The header: shown_name().
+  first four before any step, last four after; summary once over (a job with no failed row, or a cancelled one: unchanged). Row b+6 `then <queued>`; no "also bringing". The header: shown_name().
+  Job.errors: the first error replaces the `then` row (same row, ink bold = failed ink), later ones follow on b+7.. while the body has room (wrapped at b.w; never over the notice/key rows);
+  they stay when the job is over. Done and not cancelled and ≥1 failed row (not SelfUpdate): instead of the summary, one block of `<name>  <reason>` per failed row, then each error, then dim `N ready`
+  (N = rows done ok, omitted at 0): wrapped (never cut) at the name column's width beside the number when ≤4 lines (rows b..b+3), else at b.w under the progress line from b+6;
+  too long → the earliest lines are dropped, the fold line never. Block(1..4) / Block(6..) fade in as other body elements. Summary sentence (Job::summary, the notice): `Could not <verb> <items>: <reason>.`
+  reason = the first `error` else the first failed item's own done message (trailing `.` dropped; none → `Could not <verb> <items>.`); several: `a and b`; SelfUpdate and the GitHub notice keep `Try again later.`
+  Keys once over: `⏎ done` · `d details` (Job::failed_for_details: over, not cancelled, a row or error failed) · `esc back`.
+Notice: Store.failure_notice marks the failure notice (set where the router puts a job's summary on the row; cleared by the next key/tap). paint::draw_notice is one line, as ever; while the failure notice shows
+  the router uses draw_notice_wrapped: one line when it fits, else two (word wrap into hdr.notice-1 and hdr.notice, both rows cleared across the content width first; the body is not re-laid out, its last row is covered).
+  `d details` then sits in key slot 3 on Front (in place of `select`, so 40 columns still fit) and Item (in place of `o repo`); the router takes that `d` itself (the key that clears the notice) and pushes Details.
+Details (view name "details", store/details.rs): the transcript `<Store.home>/.cache/tlstore/last-job.log` (Store.home = Ctx.home, copied in by the router each draw/handle) as plain wrapped lines under the header
+  of Job::shown_name (facts `failed`), scrolling as the item page (↑↓/j/k, PageUp/PageDown, Home/End, wheel, drag). A first line `To fix:` + the command on the next line (then a blank) is drawn `To fix:` accent bold and the command
+  in the tonal code style; the rest ink. Missing or empty file: one dim line `No transcript from the last job.` Keys: `c copy fix` (only with a `To fix:` head) · `esc back` (Back/←/backspace too).
+  `c`: Env.copy(command) — in the launcher's terminal (Env.in_launcher: `$TERM_PROGRAM` = termux-launcher) OSC 52 `ESC ] 52 ; c ; <base64> BEL` through Env.tty_write, which the launcher takes natively; elsewhere `termux-clipboard-set` (Env.clipboard: `$TLSTORE_CLIPBOARD`, else PATH) with the command on stdin, and OSC 52 when that is missing or cannot start — then notice `fix copied`.
 Installing, Verb::SelfUpdate: the same screen for the item `tlstore` — no catalog row and no picture (layout::header(…,7,None)), the name in the script
   face, standfirst "the launcher's tool store", masthead link STORE_REPO, facts `updating <have> → <new>` from Store::self_update; steps and the line
   from the stream as for any item (fetched to 80, signature checked 85, putting files in place 92, ready 100). Keys while running: `x cancel` · `esc

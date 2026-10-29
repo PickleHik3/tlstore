@@ -20,7 +20,7 @@ everything else here is a source for it.
 | `dist/` | `tlstore`, `tlstore.minisig`, `catalog.tsv`, `catalog.tsv.minisig`, `trusted.pub`, `tlstore-ui-arm64-v8a`, `tlstore-ui-x86_64` — the release set a tag ships. Never hand-edited; `scripts/release.sh` writes it. |
 | `recipes/`, `licenses/`, `SHA256SUMS`, `hero/`, `readme/` | The recipes that build the showcase binaries (kitten, fastfetch, dawn, sigye, btop, tl-priv, the musl runtime), the digests of the published assets and pinned files, and the pinned readmes and hero pictures themselves. The binaries are release assets: `.github/workflows/build.yml` builds them (`recipes/cross/build-asset.sh`), publishes a `bins-…` prerelease and records it with `scripts/bins-record.sh`. |
 | `.github/workflows/` | `ci.yml` (tests on every push), `build.yml` (binaries → release assets), `release.yml` (the signed store release). |
-| `docs/` | Design docs: `SPEC.md` and `REVISION-5.md`/`REVISION-6.md` (engine and UI history and current design), `docs/maintainer/catalog.md` (the day-to-day workflow), `docs/maintainer/npm-items.md` (how npm items such as opencode are fetched, patched and updated on the phone), `docs/user/Tlstore.md` (user-facing), `docs/adr/` (architecture decisions). |
+| `docs/` | Design docs: `SPEC.md` and `REVISION-5.md`/`REVISION-6.md` (engine and UI history and current design), `docs/maintainer/catalog.md` (the day-to-day workflow), `docs/maintainer/npm-items.md` (how npm items such as opencode are fetched, patched and updated on the phone), `docs/user/Tlstore.md` (user-facing), `docs/PHOSH.md` (the planned native phosh desktop item: keep/drop, launcherctl bridges, milestones), `docs/adr/` (architecture decisions). |
 
 ## Build and test commands
 
@@ -79,3 +79,19 @@ consumes it read-only:
   `ui/CONTRACT.md` for exactly what tlstore-ui expects the terminal to support.
 - Nothing in the launcher builds, tests or signs any of this; that all happens in this repository,
   and a release is consumed by tag.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues on PickleHik3/tlstore, through the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five default labels: needs-triage, needs-info, ready-for-agent, ready-for-human, wontfix. See
+`docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: a root `GLOSSARY.md` (created when a term is first settled) and `docs/adr/`. See
+`docs/agents/domain.md`.

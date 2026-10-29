@@ -1313,3 +1313,51 @@ one (exit 1) and after "never"; `upgrade -y` re-executing as `upgrade -y`, `upda
 `upgrade --configs`; `TLSTORE_UPDATED_FROM=0.20` with `update -y` upgrading and the current
 version listing; and the real hand-off — the 0.20 engine from this checkout's history running
 `update -y`, taking this engine, which upgrades the items in the same run.
+
+## Revision 20 — a failed job says why (tlstore 0.27)
+
+Under `--progress`
+the package manager's own words went to stderr, which the store discards, and a refusal before any
+row was said on stderr too, so a failed install showed "failed" and nothing else. Three additions,
+all under `--progress`; a run on the terminal changes only where noted.
+
+**The `error` line.** `err()` also prints `error<TAB><sentence>` on stdout (exactly two fields),
+in addition to its stderr line, whenever it is not row-scoped. A row's own reason still travels in
+that row's `done` line, so it is not repeated. `die()` goes through `err()`, so a plan refused
+before any row emits one. Nothing else was added to stdout: the stream is still `row`, `step`,
+`done`, `note` and `error`. A reader that does not know `error` ignores it.
+
+**The transcript** `~/.cache/tlstore/last-job.log`. Emptied where `--progress` is parsed (so a
+refused plan leaves one), written only under `--progress`; install, update and upgrade with
+`--progress` write it, a run on the terminal never creates or touches it. It holds, in order, every
+`say()` text as is, every `err()` text as `tlstore: <text>` (row-scoped ones too), and everything the
+package manager printed in `pm_run`'s `--progress` paths. Curl's percentage frames and status redraws
+never reach it. At the end of the run (the end of `plan_apply`, and in `die()`) a file over 262144
+bytes keeps its last 262144 bytes from the first whole line, under a first line
+`… earlier lines dropped`. Then, when a fix command is known, the file starts with `To fix:`, the
+command on the next line, and a blank line. `last-update.log` (above) is unchanged.
+
+**Five outcomes.** `pm_run` keeps what the package manager printed in a call and, when the call
+fails, `pm_classify` sets `PM_WHY` (a sentence, no command) and `PM_FIX` (a command, or empty).
+Precedence when several match: conflict, lock, space, network, mirror. Anything else leaves both
+empty.
+
+| output contains | `PM_WHY` | `PM_FIX` |
+|---|---|---|
+| `<pkg>: <path> exists in filesystem`, `conflicting files` | `pacman found files it does not own (a, b, c[ and N more])` (up to three basenames) | `pacman -S --overwrite '*' <each pkg once, in order seen>` |
+| `unable to lock database`, `could not lock database`, `Could not get lock` | `the package database is locked: another install is running, or one was interrupted` | none |
+| `No space left on device`, `not enough free disk space` | `the phone is out of storage space` | none |
+| `Could not resolve host`, `Temporary failure resolving`, `Network is unreachable` | `no network` | none |
+| `failed retrieving file`, `failed to synchronize all databases`, `Failed to fetch`, ` 404 ` | `the package mirror could not be reached, or has no such package` | none |
+
+`plan_packages` emits one unscoped `err` right after its package-manager call fails: `PM_WHY`, or
+`the package manager stopped` when it is empty. The existing "could not install what is needed to
+build" error follows, and the rows' reasons keep their old wording. On the terminal that `err` lands on
+the rail as any error does, and `pm_styled`'s failure path adds `To fix: <command>` when one is
+known, after the existing "The package manager stopped" line.
+
+Tests (`scripts/test.sh`): the fake pacman says the contents of a `pacman-says` file and fails; the
+stream carries the conflict sentence then the build-tools error, with the row lines unchanged; the
+transcript's head, order and content; each other sentence and the unknown one; precedence; a clean
+run leaves no `error` line and a fresh transcript; the cap; a terminal run writes none; a refused
+plan emits an `error` line.
