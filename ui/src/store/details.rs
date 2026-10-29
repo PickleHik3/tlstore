@@ -1,7 +1,7 @@
 //! Details: the transcript of the last job (`<home>/.cache/tlstore/last-job.log`) as plain
 //! wrapped lines under the header of the item the Installing screen showed. It scrolls like
 //! the item page. When the engine knew a fix the file starts `To fix:` and the command on the
-//! next line; `c` copies that command.
+//! next line; `c` copies that command (the legend says `copy fix`, so nobody expects the whole transcript).
 
 use crate::layout;
 use crate::render::{Rect, Style};
@@ -138,7 +138,7 @@ impl View for Details {
 
     fn keys(&self, _st: &mut Store) -> Slots {
         [
-            self.transcript.fix.as_ref().map(|_| Slot::new("c", "copy", Key::Char('c'))),
+            self.transcript.fix.as_ref().map(|_| Slot::new("c", "copy fix", Key::Char('c'))),
             None,
             None,
             None,
@@ -161,7 +161,7 @@ impl View for Details {
             Event::Key(Key::Char('c')) => {
                 if let Some(cmd) = self.transcript.fix.clone() {
                     st.env.copy(&cmd);
-                    st.notice = Some("copied".into());
+                    st.notice = Some("fix copied".into());
                 }
             }
             Event::Tap { action: A_CONTEXT, .. } => {}

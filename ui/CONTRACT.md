@@ -114,8 +114,8 @@ Notice: Store.failure_notice marks the failure notice (set where the router puts
   `d details` then sits in key slot 3 on Front (in place of `select`, so 40 columns still fit) and Item (in place of `o repo`); the router takes that `d` itself (the key that clears the notice) and pushes Details.
 Details (view name "details", store/details.rs): the transcript `<Store.home>/.cache/tlstore/last-job.log` (Store.home = Ctx.home, copied in by the router each draw/handle) as plain wrapped lines under the header
   of Job::shown_name (facts `failed`), scrolling as the item page (↑↓/j/k, PageUp/PageDown, Home/End, wheel, drag). A first line `To fix:` + the command on the next line (then a blank) is drawn `To fix:` accent bold and the command
-  in the tonal code style; the rest ink. Missing or empty file: one dim line `No transcript from the last job.` Keys: `c copy` (only with a `To fix:` head) · `esc back` (Back/←/backspace too).
-  `c`: Env.copy(command) — `termux-clipboard-set` (Env.clipboard: `$TLSTORE_CLIPBOARD`, else PATH) with the command on stdin, else OSC 52 `ESC ] 52 ; c ; <base64> BEL` through Env.tty_write — then notice `copied`.
+  in the tonal code style; the rest ink. Missing or empty file: one dim line `No transcript from the last job.` Keys: `c copy fix` (only with a `To fix:` head) · `esc back` (Back/←/backspace too).
+  `c`: Env.copy(command) — `termux-clipboard-set` (Env.clipboard: `$TLSTORE_CLIPBOARD`, else PATH) with the command on stdin, else OSC 52 `ESC ] 52 ; c ; <base64> BEL` through Env.tty_write — then notice `fix copied`.
 Installing, Verb::SelfUpdate: the same screen for the item `tlstore` — no catalog row and no picture (layout::header(…,7,None)), the name in the script
   face, standfirst "the launcher's tool store", masthead link STORE_REPO, facts `updating <have> → <new>` from Store::self_update; steps and the line
   from the stream as for any item (fetched to 80, signature checked 85, putting files in place 92, ready 100). Keys while running: `x cancel` · `esc

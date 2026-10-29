@@ -2021,7 +2021,7 @@ fn d_opens_the_transcript_and_esc_returns() {
     assert_eq!(h.r().top(), "details", "{}", h.text);
     assert!(h.has("To fix:") && h.has(FIX), "{}", h.text);
     assert!(h.has("error: failed to commit transaction"), "{}", h.text);
-    assert!(h.has("copy"), "{}", h.text);
+    assert!(h.has("copy fix"), "{}", h.text);
     h.key(Key::Esc);
     assert_eq!(h.r().top(), "installing", "{}", h.text);
     // Off the Installing screen: the failure notice's `d`.
@@ -2058,7 +2058,7 @@ fn c_copies_the_fix_through_osc_52_without_termux_clipboard() {
     let want = format!("\x1b]52;c;{}\x07", tlstore_ui::store::proc::base64(FIX.as_bytes()));
     assert!(h.sink.borrow().contains(&want), "{:?}", h.sink.borrow());
     let hdr = layout::header(53, 26, 7, None);
-    assert!(h.row(hdr.notice as usize).contains("copied"), "{}", h.text);
+    assert!(h.row(hdr.notice as usize).contains("fix copied"), "{}", h.text);
 }
 
 #[test]
