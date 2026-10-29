@@ -21,9 +21,13 @@ pub struct Env {
     pub launcherctl: Option<OsString>,
     /// URL opener when present (`$TLSTORE_OPEN`, else `termux-open-url` on PATH).
     pub opener: Option<OsString>,
-    /// `termux-clipboard-set` when on PATH (`$TLSTORE_CLIPBOARD` may name another); None
-    /// means copying goes out as an OSC 52 write.
+    /// `termux-clipboard-set` when on PATH (`$TLSTORE_CLIPBOARD` may name another), the
+    /// fallback for a terminal that is not the launcher's; None means copying goes out as an
+    /// OSC 52 write.
     pub clipboard: Option<OsString>,
+    /// The terminal is the launcher's (`$TERM_PROGRAM` = termux-launcher), which takes OSC 52
+    /// itself: no Termux:API round trip is needed.
+    pub in_launcher: bool,
     /// `$TLSTORE_UI_SELF_UPDATED`: the copy that started this one had just moved the store to
     /// this version. No self-update check runs, and Front says so once.
     pub self_updated: Option<String>,
@@ -55,12 +59,14 @@ impl Env {
             .or_else(|| Some("termux-clipboard-set".into()))
             .filter(|p| which(p).is_some());
         let self_updated = std::env::var("TLSTORE_UI_SELF_UPDATED").ok().filter(|v| !v.is_empty());
+        let in_launcher = std::env::var("TERM_PROGRAM").is_ok_and(|v| v == "termux-launcher");
         Env {
             tlstore,
             gh,
             launcherctl,
             opener,
             clipboard,
+            in_launcher,
             self_updated,
             tty_write: Box::new(|s: &str| {
                 if let Ok(mut t) = std::fs::OpenOptions::new().write(true).open("/dev/tty") {
@@ -84,14 +90,21 @@ impl Env {
             launcherctl: launcherctl.map(Into::into),
             opener: opener.map(Into::into),
             clipboard: None,
+            in_launcher: false,
             self_updated: None,
             tty_write: Box::new(move |s: &str| sink.borrow_mut().push(s.to_string())),
         }
     }
 
-    /// Puts `text` on the clipboard: `termux-clipboard-set` with the text on stdin when it is
-    /// there, else an OSC 52 write to the terminal.
+    /// Puts `text` on the clipboard. In the launcher's terminal that is an OSC 52 write, which
+    /// it takes natively. Elsewhere `termux-clipboard-set` (Termux:API) gets the text on stdin
+    /// when it is there, and OSC 52 is the last resort: it cannot report failure, so the
+    /// choice is made up front rather than on an error.
     pub fn copy(&mut self, text: &str) {
+        if self.in_launcher {
+            self.osc52(text);
+            return;
+        }
         if let Some(prog) = &self.clipboard {
             let child = Command::new(prog)
                 .stdin(Stdio::piped())
@@ -106,6 +119,10 @@ impl Env {
                 return;
             }
         }
+        self.osc52(text);
+    }
+
+    fn osc52(&mut self, text: &str) {
         let seq = format!("\x1b]52;c;{}\x07", base64(text.as_bytes()));
         (self.tty_write)(&seq);
     }
@@ -401,6 +418,29 @@ pub fn base64(bytes: &[u8]) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod copy_tests {
+    use super::*;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    /// In the launcher the clipboard program is left alone even when it is there.
+    #[test]
+    fn the_launcher_gets_osc_52_before_termux_api() {
+        let sink = Rc::new(RefCell::new(Vec::new()));
+        let mut env = Env::for_tests(Path::new("tlstore"), Path::new("gh"), None, None, sink.clone());
+        env.clipboard = Some("/nonexistent/termux-clipboard-set".into());
+        env.in_launcher = true;
+        env.copy("fix");
+        assert_eq!(sink.borrow().as_slice(), ["\x1b]52;c;Zml4\x07".to_string()]);
+        // Outside it the program is tried first; one that cannot start falls back to OSC 52.
+        env.in_launcher = false;
+        sink.borrow_mut().clear();
+        env.copy("fix");
+        assert_eq!(sink.borrow().len(), 1);
+    }
 }
 
 #[cfg(test)]
