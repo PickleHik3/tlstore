@@ -7,6 +7,8 @@
 # The archive (an archive item, docs/SPEC.md Revision 14), top level = the app root:
 #
 #   bin/herdr-app    the stripped binary, what the catalog's exe= runs
+#   share/herdr-app.svg  upstream's app icon, named by the launcher's desktop entry
+#                    (desktop/herdr-app.<edition>.desktop, the herdr-gui-desktop part)
 #   LICENSE, THIRD-PARTY-NOTICES
 #
 # No prefix is baked in, so one copy serves every launcher edition: the binary finds Termux's
@@ -21,7 +23,8 @@
 #     Zig TLS; see build-herdr-core.sh and build-herdr.sh);
 #   - libghostty-vt from vendor/ghostty, built by crates/ghostty-sys/build.rs with Zig 0.16.0
 #     for <arch>-linux-android, SIMD off; bindgen for its header and for quickjs-jit-sys, pointed
-#     at the NDK's sysroot;
+#     at the NDK's sysroot; 0001-ghostty-android-no-libc-stubs.patch keeps wuffs' calloc/free
+#     stubs out of it (see build-herdr-core.sh);
 #   - a Termux sysroot ($TL_SYSROOT, from termux-sysroot.sh via build-asset.sh) for libxcb and
 #     libxkbcommon, found through pkg-config;
 #   - 0001-herdr-app-android.patch: the Linux cfgs also true on Android across the app and its
@@ -54,6 +57,7 @@ APP_MTIME=1794009600
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PATCH="$SCRIPT_DIR/0001-herdr-app-android.patch"
+GHOSTTY_PATCH="$SCRIPT_DIR/0001-ghostty-android-no-libc-stubs.patch"
 
 TL_NDK=${TL_NDK:-"$HOME/Android/Sdk/ndk/29.0.14206865"}
 TL_OUT=${TL_OUT:-"$PWD/out"}
@@ -118,7 +122,7 @@ export ZIG_GLOBAL_CACHE_DIR="$TL_BUILD_DIR/zig-cache"
 
 # --- the source ---------------------------------------------------------------------------------
 source_dir="$TL_BUILD_DIR/source"
-patches_sum=$(cat "$PATCH" "$SCRIPT_DIR"/0002-herdr-app-*.patch | sha256sum | cut -d' ' -f1)
+patches_sum=$(cat "$PATCH" "$GHOSTTY_PATCH" "$SCRIPT_DIR"/0002-herdr-app-*.patch | sha256sum | cut -d' ' -f1)
 prepared="$APP_COMMIT $patches_sum $(sha256sum < "${BASH_SOURCE[0]}" | cut -d' ' -f1)"
 if [ "$(cat "$source_dir/.tl-prepared" 2>/dev/null || true)" != "$prepared" ]; then
     rm -rf "$source_dir"
@@ -135,6 +139,11 @@ if [ "$(cat "$source_dir/.tl-prepared" 2>/dev/null || true)" != "$prepared" ]; t
     echo "Applying the Android patch..."
     git -C "$source_dir" apply "$PATCH" || {
         echo "error: 0001-herdr-app-android.patch does not apply to herdr-app $APP_VERSION; rebase it" >&2
+        exit 1
+    }
+    echo "Patching ghostty's wuffs libc stubs out of the Android build..."
+    git -C "$source_dir/vendor/ghostty" apply "$GHOSTTY_PATCH" || {
+        echo "error: 0001-ghostty-android-no-libc-stubs.patch does not apply to vendor/ghostty; rebase it" >&2
         exit 1
     }
     echo "Fetching and patching the vendored crates..."
@@ -189,10 +198,11 @@ echo "Building..."
 # --- the app tree -------------------------------------------------------------------------------
 stage="$TL_BUILD_DIR/stage-$TL_ARCH"
 rm -rf "$stage"
-mkdir -p "$stage/bin"
+mkdir -p "$stage/bin" "$stage/share"
 "$NDK_BIN/llvm-strip" -o "$stage/bin/herdr-app" "$source_dir/target/$TL_TRIPLE/release/herdr-app"
 chmod 755 "$stage/bin/herdr-app"
 cp "$source_dir/LICENSE" "$source_dir/THIRD-PARTY-NOTICES" "$stage/"
+cp "$source_dir/assets/icons/herdr-ui-icon-clean.svg" "$stage/share/herdr-app.svg"
 
 rm -f "$TL_OUT/herdr-gui"
 (

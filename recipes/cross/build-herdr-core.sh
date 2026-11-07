@@ -16,7 +16,10 @@
 #     the 64-aligned .tdata ARM64 bionic requires (see build-herdr.sh);
 #   - 0001-herdr-core-android.patch: the Linux cfgs also true on Android, the X11 socket under
 #     $TMPDIR/$PREFIX, the Zig target, and `hc update` refused (the store updates hc; upstream's
-#     release is a Linux build that cannot run here). `hc update --from` still works.
+#     release is a Linux build that cannot run here). `hc update --from` still works;
+#   - 0001-ghostty-android-no-libc-stubs.patch, on vendor/ghostty: with SIMD off the vt module
+#     links no libc, so wuffs exports hidden weak calloc/free stubs, and in the final executable
+#     those win over bionic's for every caller (calloc returns null, free leaks). Not on Android.
 #
 # Requires: rustup with the <arch>-linux-android target, the Android NDK, git, curl, xz, and an
 # x86_64 Linux host (the Zig download and the NDK's host tools).
@@ -30,6 +33,7 @@ ZIG_SHA256=70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PATCH="$SCRIPT_DIR/0001-herdr-core-android.patch"
+GHOSTTY_PATCH="$SCRIPT_DIR/0001-ghostty-android-no-libc-stubs.patch"
 
 TL_NDK=${TL_NDK:-"$HOME/Android/Sdk/ndk/29.0.14206865"}
 TL_OUT=${TL_OUT:-"$PWD/out"}
@@ -87,7 +91,7 @@ export ZIG_GLOBAL_CACHE_DIR="$TL_BUILD_DIR/zig-cache"
 
 # --- the source ---------------------------------------------------------------------------------
 source_dir="$TL_BUILD_DIR/source"
-prepared="$CORE_COMMIT $(sha256sum < "$PATCH" | cut -d' ' -f1) $(sha256sum < "${BASH_SOURCE[0]}" | cut -d' ' -f1)"
+prepared="$CORE_COMMIT $(cat "$PATCH" "$GHOSTTY_PATCH" | sha256sum | cut -d' ' -f1) $(sha256sum < "${BASH_SOURCE[0]}" | cut -d' ' -f1)"
 if [ "$(cat "$source_dir/.tl-prepared" 2>/dev/null || true)" != "$prepared" ]; then
     rm -rf "$source_dir"
     echo "Fetching herdr-core $CORE_VERSION ($CORE_COMMIT)..."
@@ -103,6 +107,11 @@ if [ "$(cat "$source_dir/.tl-prepared" 2>/dev/null || true)" != "$prepared" ]; t
     echo "Applying the Android patch..."
     git -C "$source_dir" apply "$PATCH" || {
         echo "error: 0001-herdr-core-android.patch does not apply to herdr-core $CORE_VERSION; rebase it" >&2
+        exit 1
+    }
+    echo "Patching ghostty's wuffs libc stubs out of the Android build..."
+    git -C "$source_dir/vendor/ghostty" apply "$GHOSTTY_PATCH" || {
+        echo "error: 0001-ghostty-android-no-libc-stubs.patch does not apply to vendor/ghostty; rebase it" >&2
         exit 1
     }
     printf '%s\n' "$prepared" > "$source_dir/.tl-prepared"

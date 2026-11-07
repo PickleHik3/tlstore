@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Herdr
+Comment=Terminals and coding agents that keep running
+Exec=/data/data/io.vaj.tl/files/home/.local/bin/herdr-app
+TryExec=/data/data/io.vaj.tl/files/home/.local/bin/herdr-app
+Icon=/data/data/io.vaj.tl/files/home/.local/lib/herdr-gui/share/herdr-app.svg
+Terminal=false
+Categories=Development;
+StartupWMClass=herdr-app
