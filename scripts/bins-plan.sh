@@ -33,6 +33,8 @@ kitten       -                     kitten
 tuios        -                     tuios
 sigye        -                     sigye
 herdr        -                     herdr
+herdr-core   -                     herdr-core
+herdr-gui    -                     herdr-gui
 terminal-browser -                 terminal-browser
 fastfetch    com.termux,io.vaj.tl  -
 dawn         com.termux,io.vaj.tl  -

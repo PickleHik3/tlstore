@@ -1,0 +1,58 @@
+
+--- a/Cargo.toml	2006-07-24 04:21:28.000000000 +0300
++++ b/Cargo.toml	2026-11-07 13:51:20.000000000 +0300
+@@ -81,7 +81,7 @@
+ default-features = false
+ package = "gpui-pre"
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.gpui_linux]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.gpui_linux]
+ version = "=0.3.8"
+ default-features = false
+ package = "gpui-pre-linux"
+@@ -93,7 +93,7 @@
+ version = "=0.3.8"
+ package = "gpui-pre-web"
+ 
+-[target.'cfg(target_os = "linux")'.dependencies.gpui_wgpu]
++[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies.gpui_wgpu]
+ version = "=0.3.8"
+ optional = true
+ package = "gpui-pre-wgpu"
+
+--- a/src/gpui_platform.rs	2006-07-24 04:21:28.000000000 +0300
++++ b/src/gpui_platform.rs	2026-11-07 13:51:20.000000000 +0300
+@@ -29,7 +29,7 @@
+ /// It starts windowed in the process's own environment, or headless if that names no allowed
+ /// display server. Set another initial mode with [`gpui::Application::with_windowing`], and
+ /// switch later with [`gpui::App::request_windowing`].
+-#[cfg(any(target_os = "linux", target_os = "freebsd"))]
++#[cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))]
+ pub fn linux(allowed_modes: gpui::WindowingModes) -> gpui::Application {
+     gpui::Application::with_platform(gpui_linux::linux_platform(allowed_modes))
+ }
+@@ -78,7 +78,7 @@
+         )
+     }
+ 
+-    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
++    #[cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))]
+     {
+         gpui_linux::current_platform(headless)
+     }
+@@ -117,13 +117,13 @@
+         )))
+     }
+ 
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     {
+         gpui_wgpu::WgpuHeadlessRenderer::new()
+             .map(|renderer| Some(Box::new(renderer) as Box<dyn gpui::PlatformHeadlessRenderer>))
+     }
+ 
+-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
++    #[cfg(not(any(target_os = "macos", any(target_os = "linux", target_os = "android"))))]
+     {
+         Ok(None)
+     }

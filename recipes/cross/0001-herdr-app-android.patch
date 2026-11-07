@@ -1,0 +1,2098 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 56ec781..1d645bd 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -3265,8 +3265,6 @@ dependencies = [
+ [[package]]
+ name = "gpui-pre-platform"
+ version = "0.3.8"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "e200b7b78836f1a0fc70767d971768e88f29d8b91b697285c15fb8e373635a3e"
+ dependencies = [
+  "anyhow",
+  "console_error_panic_hook",
+@@ -6512,6 +6510,7 @@ name = "quickjs-jit-sys"
+ version = "0.12.11"
+ source = "git+https://github.com/longbridge/quickjs-jit?rev=96593cd7a54440ac060a391b8baea7e9a3cf1393#96593cd7a54440ac060a391b8baea7e9a3cf1393"
+ dependencies = [
++ "bindgen",
+  "cc",
+ ]
+ 
+@@ -8958,8 +8957,6 @@ dependencies = [
+ [[package]]
+ name = "wayland-cursor"
+ version = "0.31.14"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "4a52d18780be9b1314328a3de5f930b73d2200112e3849ca6cb11822793fb34d"
+ dependencies = [
+  "rustix",
+  "wayland-client",
+@@ -9973,8 +9970,6 @@ dependencies = [
+ [[package]]
+ name = "x11rb-protocol"
+ version = "0.13.2"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "ea6fc2961e4ef194dcbfe56bb845534d0dc8098940c7e5c012a258bfec6701bd"
+ 
+ [[package]]
+ name = "x25519-dalek"
+@@ -10242,8 +10237,6 @@ dependencies = [
+ [[package]]
+ name = "zed-scap"
+ version = "0.0.8-zed"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "b6b338d705ae33a43ca00287c11129303a7a0aa57b101b72a1c08c863f698ac8"
+ dependencies = [
+  "anyhow",
+  "cocoa 0.25.0",
+diff --git a/Cargo.toml b/Cargo.toml
+index 0606654..2025493 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -1,6 +1,6 @@
+ [workspace]
+ members = ["crates/ghostty-sys"]
+-exclude = ["vendor/gpui-kit", "vendor/gpui-pre", "vendor/gpui-pre-wgpu", "vendor/gpui-pre-apple", "vendor/gpui-pre-linux", "vendor/gpui-pre-macos", "vendor/gpui-pre-windows", "vendor/taffy", "vendor/quickjs-jit-runtime", "vendor/zed-xim", "vendor/xim-ctext"]
++exclude = ["termux-vendor/gpui-pre-platform", "termux-vendor/x11rb-protocol", "termux-vendor/wayland-cursor", "termux-vendor/zed-scap", "vendor/gpui-kit", "vendor/gpui-pre", "vendor/gpui-pre-wgpu", "vendor/gpui-pre-apple", "vendor/gpui-pre-linux", "vendor/gpui-pre-macos", "vendor/gpui-pre-windows", "vendor/taffy", "vendor/quickjs-jit-runtime", "vendor/zed-xim", "vendor/xim-ctext"]
+ resolver = "2"
+ 
+ [workspace.package]
+@@ -46,13 +46,13 @@ gpui_platform = { package = "gpui-pre-platform", version = "=0.3.8", features =
+ gpui = { package = "gpui-pre", version = "=0.3.8", features = ["test-support"] }
+ gpui-shell = { path = "vendor/gpui-kit/crates/shell", features = ["render-test-support"] }
+ 
+-[target.'cfg(target_os = "linux")'.dev-dependencies]
++[target.'cfg(any(target_os = "linux", target_os = "android"))'.dev-dependencies]
+ gpui_wgpu = { package = "gpui-pre-wgpu", path = "vendor/gpui-pre-wgpu", features = ["test-support"] }
+ skrifa = "=0.44.0"
+ swash = "=0.2.10"
+ tiny-skia = { version = "=0.11.4", default-features = false, features = ["std", "simd"] }
+ 
+-[target.'cfg(target_os = "linux")'.dependencies]
++[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
+ gpui_linux = { package = "gpui-pre-linux", version = "=0.3.8", features = ["render-to-image"] }
+ 
+ [target.'cfg(target_os = "macos")'.dependencies]
+@@ -70,6 +70,11 @@ winresource = "0.1"
+ 
+ # gpui-shell's LLRT modules must share its quickjs-jit VM; gpui-kit's own workspace does the same.
+ [patch.crates-io]
++# Termux (Android target) port, see termux-vendor/
++gpui-pre-platform = { path = "termux-vendor/gpui-pre-platform" }
++x11rb-protocol = { path = "termux-vendor/x11rb-protocol" }
++wayland-cursor = { path = "termux-vendor/wayland-cursor" }
++zed-scap = { path = "termux-vendor/zed-scap" }
+ # HERDR: production frame capture without test-support dependencies.
+ gpui-pre = { path = "vendor/gpui-pre" }
+ gpui-pre-wgpu = { path = "vendor/gpui-pre-wgpu" }
+diff --git a/crates/ghostty-sys/build.rs b/crates/ghostty-sys/build.rs
+index 63e6a1b..20cbcba 100644
+--- a/crates/ghostty-sys/build.rs
++++ b/crates/ghostty-sys/build.rs
+@@ -9,6 +9,9 @@ fn zig_target(target: &str) -> &'static str {
+     match target {
+         "x86_64-unknown-linux-gnu" => "x86_64-linux-gnu",
+         "aarch64-unknown-linux-gnu" => "aarch64-linux-gnu",
++        // Android (Termux): Zig builds for Bionic itself.
++        "x86_64-linux-android" => "x86_64-linux-android",
++        "aarch64-linux-android" => "aarch64-linux-android",
+         "x86_64-apple-darwin" => "x86_64-macos",
+         "aarch64-apple-darwin" => "aarch64-macos",
+         "x86_64-pc-windows-msvc" => "x86_64-windows-msvc",
+@@ -32,12 +35,19 @@ fn main() {
+     println!("cargo:rerun-if-env-changed=ZIG");
+ 
+     let zig = std::env::var("ZIG").unwrap_or_else(|_| "zig".into());
+-    let status = Command::new(&zig)
++    let android = std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("android");
++    let mut build = Command::new(&zig);
++    build
+         .current_dir(&src)
+         // Only the static library is linked. Ghostty builds the xcframework whenever it finds
+         // xcodebuild, and with only the Command Line Tools /usr/bin/xcodebuild exists but fails.
+         .args(["build", "-Demit-lib-vt", "-Demit-xcframework=false", "-Doptimize=ReleaseFast"])
+-        .arg(format!("-Dtarget={}", zig_target(&std::env::var("TARGET").unwrap())))
++        .arg(format!("-Dtarget={}", zig_target(&std::env::var("TARGET").unwrap())));
++    // Ghostty's SIMD code is C++ that would need the NDK's libc++ on Android.
++    if android {
++        build.arg("-Dsimd=false");
++    }
++    let status = build
+         .arg("--prefix")
+         .arg(out.join("zig-out"))
+         .arg("--cache-dir")
+@@ -76,6 +86,20 @@ fn main() {
+         if let Ok(sdk) = Command::new("xcrun").args(["--show-sdk-path"]).output() {
+             builder = builder.clang_arg(format!("-isysroot{}", String::from_utf8_lossy(&sdk.stdout).trim()));
+         }
++    } else if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("android") {
++        // Android (Termux): the target compiler's own builtin headers match its
++        // Bionic sysroot (passed in BINDGEN_EXTRA_CLANG_ARGS); Zig's clash with it.
++        let target = std::env::var("TARGET").unwrap();
++        let cc = [format!("CC_{target}"), format!("CC_{}", target.replace('-', "_")), "TARGET_CC".into(), "CC".into()]
++            .iter()
++            .find_map(|k| std::env::var(k).ok().filter(|v| !v.is_empty()))
++            .unwrap_or_else(|| "clang".into());
++        if let Ok(out) = Command::new(&cc).arg("-print-resource-dir").output() {
++            let dir = String::from_utf8_lossy(&out.stdout).trim().to_string();
++            if !dir.is_empty() {
++                builder = builder.clang_arg(format!("-isystem{dir}/include"));
++            }
++        }
+     } else if Command::new("clang").arg("--version").output().is_err() {
+         // With a clang installed, bindgen asks it for its own builtin headers,
+         // which match its libclang; Zig's newer ones break older ones (Ubuntu
+diff --git a/src/core_bin.rs b/src/core_bin.rs
+index 8ed2ace..f659583 100644
+--- a/src/core_bin.rs
++++ b/src/core_bin.rs
+@@ -170,6 +170,10 @@ fn login_shell_path() -> Option<std::ffi::OsString> {
+ /// Installs the core's latest release with its own installer (into
+ /// ~/.local/bin, or HC_INSTALL_DIR), then finds it. Err: what went wrong.
+ pub fn install() -> Result<PathBuf, String> {
++    // Termux: upstream's installer would fetch a Linux build that can't run on Android.
++    if cfg!(target_os = "android") {
++        return Err("herdr-core comes with Herdr from tlstore: run `tlstore install herdr-gui`".into());
++    }
+     let releases = std::env::var("HERDR_RELEASES_URL").unwrap_or_else(|_| "https://releases.herdr.dev".into());
+     let mut cmd = if cfg!(windows) {
+         let mut c = crate::spawn::command("powershell");
+diff --git a/src/files.rs b/src/files.rs
+index 82ccf29..b1b2b4f 100644
+--- a/src/files.rs
++++ b/src/files.rs
+@@ -93,7 +93,7 @@ const BATCH: std::time::Duration = std::time::Duration::from_millis(150);
+ /// At most this many folders watched for mods at once.
+ const MAX_FOLDERS: usize = 64;
+ const MAX_PENDING: usize = 1024;
+-#[cfg(target_os = "linux")]
++#[cfg(any(target_os = "linux", target_os = "android"))]
+ const MAX_DIRECTORIES: usize = 4096;
+ 
+ fn folders() -> std::sync::MutexGuard<'static, std::collections::HashMap<PathBuf, Folder>> {
+@@ -129,7 +129,7 @@ pub async fn next_change(path: String) -> Result<Vec<String>, String> {
+     rx.recv().await.map_err(|_| "stopped watching".to_owned())
+ }
+ 
+-#[cfg(target_os = "linux")]
++#[cfg(any(target_os = "linux", target_os = "android"))]
+ mod linux {
+     use super::*;
+ 
+@@ -192,11 +192,11 @@ mod linux {
+ }
+ 
+ fn watch_directories(root: &Path) -> Result<HashSet<PathBuf>, String> {
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     {
+         linux::watch_directories(root)
+     }
+-    #[cfg(not(target_os = "linux"))]
++    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+     {
+         Ok(HashSet::from([root.to_path_buf()]))
+     }
+@@ -204,7 +204,7 @@ fn watch_directories(root: &Path) -> Result<HashSet<PathBuf>, String> {
+ 
+ fn folder_watch_mode() -> RecursiveMode {
+     // Inotify consumes a watch per directory; FSEvents and Windows recurse natively.
+-    if cfg!(target_os = "linux") { RecursiveMode::NonRecursive } else { RecursiveMode::Recursive }
++    if cfg!(any(target_os = "linux", target_os = "android")) { RecursiveMode::NonRecursive } else { RecursiveMode::Recursive }
+ }
+ 
+ fn add_pending(pending: &mut HashSet<String>, root: &Path, paths: impl IntoIterator<Item = PathBuf>) {
+@@ -291,7 +291,7 @@ fn start_folder(root: &Path) -> Result<std::sync::mpsc::Sender<()>, String> {
+                 pending.clear();
+                 pending.insert(root.to_string_lossy().into_owned());
+             }
+-            if cfg!(target_os = "linux") && refresh {
++            if cfg!(any(target_os = "linux", target_os = "android")) && refresh {
+                 // Rescan off the notify callback thread: adding watches blocks on it.
+                 match watch_directories(&root) {
+                     Ok(next) => {
+@@ -444,7 +444,7 @@ mod tests {
+         }
+     }
+ 
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     #[test]
+     fn git_ignored_directories_are_pruned_but_tracked_files_and_refs_stay_watched() {
+         let root = test_repo("ignore");
+@@ -466,7 +466,7 @@ mod tests {
+         std::fs::remove_dir_all(root).unwrap();
+     }
+ 
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     #[test]
+     fn new_directories_and_changed_ignore_rules_update_live_watches() {
+         use std::time::{Duration, Instant};
+@@ -527,7 +527,7 @@ mod tests {
+         std::fs::remove_dir_all(root).unwrap();
+     }
+ 
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     #[test]
+     fn separate_git_metadata_is_watched_without_its_object_tree() {
+         let root = test_repo("separate");
+@@ -542,7 +542,7 @@ mod tests {
+         std::fs::remove_dir_all(git).unwrap();
+     }
+ 
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     #[test]
+     fn oversized_trees_reject_instead_of_silently_missing_nested_changes() {
+         let root = std::env::temp_dir().join(format!("herdr-watch-limit-{}", std::process::id()));
+@@ -554,7 +554,7 @@ mod tests {
+         std::fs::remove_dir_all(root).unwrap();
+     }
+ 
+-    #[cfg(not(target_os = "linux"))]
++    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+     #[test]
+     fn native_recursive_backends_register_only_the_root() {
+         let root = test_repo("native-recursive");
+@@ -577,7 +577,7 @@ mod tests {
+         assert_eq!(removed, directories);
+     }
+ 
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     #[test]
+     fn exact_cap_counts_each_git_directory_once() {
+         let root = test_repo("exact-cap");
+diff --git a/src/keys.rs b/src/keys.rs
+index e28a011..c2a08d8 100644
+--- a/src/keys.rs
++++ b/src/keys.rs
+@@ -338,7 +338,7 @@ mod tests {
+         assert!(Keystroke::default().unshifted_key.is_none());
+     }
+ 
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     #[test]
+     fn linux_help_binding_matches_shifted_slash() {
+         // Linux reports Ctrl+Shift+/ as Ctrl+? without the Shift modifier.
+diff --git a/src/mods.rs b/src/mods.rs
+index 927d289..5db246a 100644
+--- a/src/mods.rs
++++ b/src/mods.rs
+@@ -1326,7 +1326,7 @@ mod tests {
+ 
+     #[test]
+     fn shared_bursts_persist_only_complete_snapshots_and_finish_at_final_state() {
+-        let root = if cfg!(target_os = "linux") { PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
++        let root = if cfg!(any(target_os = "linux", target_os = "android")) { PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
+         let dir = root.join(format!("herdr-shared-stress-{}", std::process::id()));
+         std::fs::create_dir_all(&dir).unwrap();
+         let path = dir.join("shared.json");
+@@ -1367,7 +1367,7 @@ mod tests {
+ 
+     #[test]
+     fn corrupt_shared_file_is_kept_before_starting_empty() {
+-        let root = if cfg!(target_os = "linux") { PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
++        let root = if cfg!(any(target_os = "linux", target_os = "android")) { PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
+         let dir = root.join(format!("herdr-shared-corrupt-{}", std::process::id()));
+         std::fs::create_dir_all(&dir).unwrap();
+         let path = dir.join("shared.json");
+diff --git a/src/place.rs b/src/place.rs
+index 32bfbfa..2c349e8 100644
+--- a/src/place.rs
++++ b/src/place.rs
+@@ -62,7 +62,7 @@ pub fn initial(cx: &App) -> (WindowBounds, Option<DisplayId>) {
+     let display = p.display.as_deref().and_then(|want| cx.displays().into_iter().find(|d| uuid(d.as_ref()).as_deref() == Some(want)));
+     let at = point(px(x), px(y));
+     let bounds = match &display {
+-        Some(d) if !cfg!(target_os = "linux") && d.bounds().contains(&at) => Bounds::new(at, size(px(w), px(h))),
++        Some(d) if !cfg!(any(target_os = "linux", target_os = "android")) && d.bounds().contains(&at) => Bounds::new(at, size(px(w), px(h))),
+         _ => Bounds::centered(display.as_ref().map(|d| d.id()), size(px(w), px(h)), cx),
+     };
+     let wb = match p.state {
+diff --git a/src/process_cwd.rs b/src/process_cwd.rs
+index e4e3b23..f7d0100 100644
+--- a/src/process_cwd.rs
++++ b/src/process_cwd.rs
+@@ -1,6 +1,6 @@
+ use std::path::PathBuf;
+ 
+-#[cfg(target_os = "linux")]
++#[cfg(any(target_os = "linux", target_os = "android"))]
+ pub fn read(pid: u64) -> Option<PathBuf> {
+     std::fs::read_link(format!("/proc/{pid}/cwd")).ok()
+ }
+@@ -28,12 +28,12 @@ pub fn read(pid: u64) -> Option<PathBuf> {
+     Some(PathBuf::from(std::ffi::OsString::from_vec(bytes[..end].to_vec())))
+ }
+ 
+-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
++#[cfg(not(any(any(target_os = "linux", target_os = "android"), target_os = "macos")))]
+ pub fn read(_pid: u64) -> Option<PathBuf> {
+     None
+ }
+ 
+-#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
++#[cfg(all(test, any(any(target_os = "linux", target_os = "android"), target_os = "macos")))]
+ mod tests {
+     use super::read;
+     use std::io::{BufRead, BufReader, Write};
+diff --git a/src/settings.rs b/src/settings.rs
+index 05fe16a..df2575c 100644
+--- a/src/settings.rs
++++ b/src/settings.rs
+@@ -735,7 +735,7 @@ fn system_text_scale() -> f32 {
+             .and_then(|o| o.split_whitespace().last().and_then(|h| u32::from_str_radix(h.trim_start_matches("0x"), 16).ok()))
+             .map_or(1.0, |p| p as f32 / 100.0);
+     }
+-    if cfg!(target_os = "linux") {
++    if cfg!(any(target_os = "linux", target_os = "android")) {
+         return run("gsettings", &["get", "org.gnome.desktop.interface", "text-scaling-factor"]).and_then(|o| o.trim().parse().ok()).unwrap_or(1.0);
+     }
+     1.0
+diff --git a/src/sprites.rs b/src/sprites.rs
+index b3e2373..5b8fe94 100644
+--- a/src/sprites.rs
++++ b/src/sprites.rs
+@@ -369,7 +369,7 @@ mod tests {
+         }
+     }
+ 
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     #[test]
+     fn rendered_braille_matches_device_pixel_layout() {
+         use gpui::{prelude::*, *};
+@@ -438,7 +438,7 @@ mod tests {
+         }
+     }
+ 
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     #[test]
+     fn rendered_rounded_corners_join_straight_lines() {
+         use gpui::{prelude::*, *};
+diff --git a/src/terminal.rs b/src/terminal.rs
+index 4d67c89..4ff8f41 100644
+--- a/src/terminal.rs
++++ b/src/terminal.rs
+@@ -482,11 +482,11 @@ impl TerminalView {
+                         if let Some(text) = clipboard {
+                             cx.write_to_clipboard(ClipboardItem::new_string(text));
+                         }
+-                        #[cfg(target_os = "linux")]
++                        #[cfg(any(target_os = "linux", target_os = "android"))]
+                         if let Some(text) = primary {
+                             cx.write_to_primary(ClipboardItem::new_string(text));
+                         }
+-                        #[cfg(not(target_os = "linux"))]
++                        #[cfg(not(any(target_os = "linux", target_os = "android")))]
+                         let _ = primary;
+                         if let Some(ch) = g.channel {
+                             g.core.credit(ch, bytes.len());
+@@ -667,7 +667,7 @@ impl TerminalView {
+             return false;
+         };
+         cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
+-        #[cfg(target_os = "linux")]
++        #[cfg(any(target_os = "linux", target_os = "android"))]
+         cx.write_to_primary(ClipboardItem::new_string(text));
+         true
+     }
+@@ -2788,7 +2788,7 @@ mod tests {
+ 
+     // The native macOS text system is private to GPUI; creating MacPlatform here
+     // requires the main thread. Exercise real shaping directly on Linux instead.
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     #[test]
+     fn ligatures_change_glyphs_without_moving_terminal_cells() {
+         use super::*;
+@@ -2826,7 +2826,7 @@ mod tests {
+         crate::settings::set((*original).clone());
+     }
+ 
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     #[test]
+     fn fallback_symbols_fit_their_terminal_cells_pixels() {
+         use super::*;
+diff --git a/src/vt.rs b/src/vt.rs
+index c348d59..71080be 100644
+--- a/src/vt.rs
++++ b/src/vt.rs
+@@ -399,7 +399,7 @@ unsafe extern "C" fn on_clipboard_write(_t: GhosttyTerminal, userdata: *mut c_vo
+     }
+     let slot = match request.location {
+         GHOSTTY_CLIPBOARD_LOCATION_STANDARD => 0,
+-        GHOSTTY_CLIPBOARD_LOCATION_PRIMARY if cfg!(target_os = "linux") => 1,
++        GHOSTTY_CLIPBOARD_LOCATION_PRIMARY if cfg!(any(target_os = "linux", target_os = "android")) => 1,
+         _ => return,
+     };
+     let text = if request.contents_len == 0 {
+@@ -2466,7 +2466,7 @@ mod tests {
+             assert_eq!(vt.take_clipboard(), [Some("hi".into()), None]);
+         }
+         vt.write(b"\x1b]52;p;aGk=\x07");
+-        let expected = if cfg!(target_os = "linux") { Some("hi".into()) } else { None };
++        let expected = if cfg!(any(target_os = "linux", target_os = "android")) { Some("hi".into()) } else { None };
+         assert_eq!(vt.take_clipboard(), [None, expected]);
+         for sequence in [b"\x1b]52;c;?\x07".as_slice(), b"\x1b]52;c;%%%\x07", b"\x1b]52;c;/w==\x07", b"\x1b]52;s;aGk=\x07"] {
+             vt.write(sequence);
+@@ -2490,7 +2490,7 @@ mod tests {
+         vt.write(b"\x1b]52;c;YQ==\x07\x1b]52;c;\x07");
+         assert_eq!(vt.take_clipboard(), [Some(String::new()), None]);
+         vt.write(b"\x1b]52;p;\x1b\\");
+-        let expected = if cfg!(target_os = "linux") { Some(String::new()) } else { None };
++        let expected = if cfg!(any(target_os = "linux", target_os = "android")) { Some(String::new()) } else { None };
+         assert_eq!(vt.take_clipboard(), [None, expected]);
+     }
+ 
+diff --git a/src/window.rs b/src/window.rs
+index b4562f4..0c7adf0 100644
+--- a/src/window.rs
++++ b/src/window.rs
+@@ -5086,7 +5086,7 @@ mod tests {
+     #[gpui::test]
+     fn image_invalidation_drops_cached_atlas_tiles_without_loading_missing_assets(cx: &mut TestAppContext) {
+         use gpui::{ImgResourceLoader, Resource};
+-        let temp = if cfg!(target_os = "linux") { std::path::PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
++        let temp = if cfg!(any(target_os = "linux", target_os = "android")) { std::path::PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
+         let home = temp.join(format!("herdr-image-atlas-test-{}", std::process::id()));
+         std::fs::create_dir_all(&home).unwrap();
+         let file = home.join("image.gif");
+@@ -5123,7 +5123,7 @@ mod tests {
+ 
+     #[test]
+     fn directory_changes_include_nested_assets() {
+-        let temp = if cfg!(target_os = "linux") { std::path::PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
++        let temp = if cfg!(any(target_os = "linux", target_os = "android")) { std::path::PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
+         let home = temp.join(format!("herdr-image-directory-test-{}", std::process::id()));
+         std::fs::create_dir_all(home.join("mods/probe/nested")).unwrap();
+         std::fs::write(home.join("mods/probe/nested/icon.svg"), "svg").unwrap();
+diff --git a/vendor/gpui-kit/crates/base/Cargo.toml b/vendor/gpui-kit/crates/base/Cargo.toml
+index 3507dea..0701121 100644
+--- a/vendor/gpui-kit/crates/base/Cargo.toml
++++ b/vendor/gpui-kit/crates/base/Cargo.toml
+@@ -75,7 +75,7 @@ objc2-foundation = { version = "0.3", features = ["NSGeometry", "NSString"] }
+ # The reduced-motion preference (SystemParametersInfoW).
+ windows = { workspace = true, features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+ 
+-[target.'cfg(target_os = "linux")'.dependencies]
++[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
+ # The reduced-motion preference, through the XDG desktop portal's Settings
+ # interface. The same version and features `gpui-pre-linux` already pulls in.
+ ashpd = { version = "0.13", default-features = false, features = ["async-io", "settings"] }
+diff --git a/vendor/gpui-kit/crates/base/src/input/base/state.rs b/vendor/gpui-kit/crates/base/src/input/base/state.rs
+index a87d26f..7387249 100644
+--- a/vendor/gpui-kit/crates/base/src/input/base/state.rs
++++ b/vendor/gpui-kit/crates/base/src/input/base/state.rs
+@@ -200,9 +200,9 @@ pub(crate) fn init(cx: &mut App) {
+         KeyBinding::new("shift-right", SelectRight, Some(CONTEXT)),
+         KeyBinding::new("shift-up", SelectUp, Some(CONTEXT)),
+         KeyBinding::new("shift-down", SelectDown, Some(CONTEXT)),
+-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
++        #[cfg(not(any(target_os = "macos", any(target_os = "linux", target_os = "android"))))]
+         KeyBinding::new("shift-alt-left", SelectLeft, Some(CONTEXT)),
+-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
++        #[cfg(not(any(target_os = "macos", any(target_os = "linux", target_os = "android"))))]
+         KeyBinding::new("shift-alt-right", SelectRight, Some(CONTEXT)),
+         // Avoid Ctrl+Alt+arrows on Linux, where desktops may reserve them.
+         #[cfg(target_os = "macos")]
+@@ -237,11 +237,11 @@ pub(crate) fn init(cx: &mut App) {
+         KeyBinding::new("shift-cmd-left", SelectToStartOfLine, Some(CONTEXT)),
+         #[cfg(target_os = "macos")]
+         KeyBinding::new("shift-cmd-right", SelectToEndOfLine, Some(CONTEXT)),
+-        #[cfg(any(target_os = "macos", target_os = "linux"))]
++        #[cfg(any(target_os = "macos", any(target_os = "linux", target_os = "android")))]
+         KeyBinding::new("alt-shift-left", SelectToPreviousWordStart, Some(CONTEXT)),
+         #[cfg(not(target_os = "macos"))]
+         KeyBinding::new("ctrl-shift-left", SelectToPreviousWordStart, Some(CONTEXT)),
+-        #[cfg(any(target_os = "macos", target_os = "linux"))]
++        #[cfg(any(target_os = "macos", any(target_os = "linux", target_os = "android")))]
+         KeyBinding::new("alt-shift-right", SelectToNextWordEnd, Some(CONTEXT)),
+         #[cfg(not(target_os = "macos"))]
+         KeyBinding::new("ctrl-shift-right", SelectToNextWordEnd, Some(CONTEXT)),
+@@ -2486,7 +2486,7 @@ impl<M: InputModeKind> InputBaseState<M> {
+         // Multi-cursor placement, multi-line only.
+         if self.is_multi_line() && event.button == MouseButton::Left {
+             if event.modifiers.alt
+-                && (event.modifiers.shift || (cfg!(target_os = "linux") && event.modifiers.control))
++                && (event.modifiers.shift || (cfg!(any(target_os = "linux", target_os = "android")) && event.modifiers.control))
+             {
+                 // Alt+Shift starts a block; Linux also accepts Ghostty's Ctrl+Alt.
+                 // Mark selecting so the drag handler extends the block.
+@@ -8514,7 +8514,7 @@ mod tests {
+                 shift: true,
+                 ..Default::default()
+             },
+-            #[cfg(target_os = "linux")]
++            #[cfg(any(target_os = "linux", target_os = "android"))]
+             gpui::Modifiers {
+                 alt: true,
+                 control: true,
+@@ -8779,16 +8779,16 @@ mod tests {
+         cx.update(|window, cx| {
+             view.input.update(cx, |state, cx| state.focus(window, cx));
+         });
+-        #[cfg(any(target_os = "macos", target_os = "linux"))]
++        #[cfg(any(target_os = "macos", any(target_os = "linux", target_os = "android")))]
+         cx.simulate_keystrokes("alt-shift-right");
+-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
++        #[cfg(not(any(target_os = "macos", any(target_os = "linux", target_os = "android"))))]
+         cx.simulate_keystrokes("ctrl-shift-right");
+         cx.simulate_keystrokes("x");
+         assert_cursors(&mut cx, &view.input, "one x|\none x|");
+         setup_cursors(&mut cx, &view.input, "one two|\none two|");
+-        #[cfg(any(target_os = "macos", target_os = "linux"))]
++        #[cfg(any(target_os = "macos", any(target_os = "linux", target_os = "android")))]
+         cx.simulate_keystrokes("alt-shift-left");
+-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
++        #[cfg(not(any(target_os = "macos", any(target_os = "linux", target_os = "android"))))]
+         cx.simulate_keystrokes("ctrl-shift-left");
+         cx.simulate_keystrokes("x");
+         assert_cursors(&mut cx, &view.input, "one x|\none x|");
+@@ -8807,9 +8807,9 @@ mod tests {
+         cx.simulate_keystrokes("ctrl-alt-up");
+         #[cfg(not(target_os = "windows"))]
+         cx.simulate_keystrokes("alt-shift-up");
+-        #[cfg(target_os = "linux")]
++        #[cfg(any(target_os = "linux", target_os = "android"))]
+         cx.simulate_keystrokes("shift-right");
+-        #[cfg(not(target_os = "linux"))]
++        #[cfg(not(any(target_os = "linux", target_os = "android")))]
+         cx.simulate_keystrokes("alt-shift-right");
+         view.input.read_with(&cx, |state, _| {
+             assert_eq!(
+@@ -8821,9 +8821,9 @@ mod tests {
+                 vec![4..5, 1..2]
+             );
+         });
+-        #[cfg(target_os = "linux")]
++        #[cfg(any(target_os = "linux", target_os = "android"))]
+         cx.simulate_keystrokes("shift-left shift-left");
+-        #[cfg(not(target_os = "linux"))]
++        #[cfg(not(any(target_os = "linux", target_os = "android")))]
+         cx.simulate_keystrokes("alt-shift-left alt-shift-left");
+         view.input.read_with(&cx, |state, _| {
+             assert_eq!(
+diff --git a/vendor/gpui-kit/crates/base/src/input/editor/display_map/text_wrapper.rs b/vendor/gpui-kit/crates/base/src/input/editor/display_map/text_wrapper.rs
+index 4c59bf2..bce6342 100644
+--- a/vendor/gpui-kit/crates/base/src/input/editor/display_map/text_wrapper.rs
++++ b/vendor/gpui-kit/crates/base/src/input/editor/display_map/text_wrapper.rs
+@@ -1092,11 +1092,11 @@ mod tests {
+     use super::*;
+     use std::rc::Rc;
+ 
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     use gpui::TestAppContext;
+     use gpui::{Boundary, FontFeatures, FontStyle, FontWeight, px};
+ 
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     fn shaped_width(text: &str, font: &Font, font_size: Pixels, cx: &App) -> Pixels {
+         gpui::WindowTextSystem::new(cx.text_system().clone())
+             .layout_line(
+@@ -1118,7 +1118,7 @@ mod tests {
+     // Linux exposes its native text engine without creating a desktop window.
+     // macOS platform creation requires the main thread, and Windows headless
+     // mode uses NoopTextSystem rather than native shaping.
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     fn shaping_test_context() -> TestAppContext {
+         let platform = gpui_platform::current_platform(true);
+         TestAppContext::build_with_text_system(
+@@ -1128,7 +1128,7 @@ mod tests {
+         )
+     }
+ 
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     #[test]
+     fn production_wrap_keeps_shaped_cjk_latin_boundary_during_edits() {
+         let cx = shaping_test_context();
+@@ -1164,7 +1164,7 @@ mod tests {
+         });
+     }
+ 
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     #[test]
+     fn production_wrap_preserves_words_and_complete_graphemes() {
+         let cx = shaping_test_context();
+diff --git a/vendor/gpui-kit/crates/base/src/reduce_motion.rs b/vendor/gpui-kit/crates/base/src/reduce_motion.rs
+index fa94208..4cd2d28 100644
+--- a/vendor/gpui-kit/crates/base/src/reduce_motion.rs
++++ b/vendor/gpui-kit/crates/base/src/reduce_motion.rs
+@@ -141,7 +141,7 @@ mod platform {
+     pub(super) fn follow(_cx: &mut App) {}
+ }
+ 
+-#[cfg(target_os = "linux")]
++#[cfg(any(target_os = "linux", target_os = "android"))]
+ mod platform {
+     use ashpd::desktop::settings::{ReducedMotion, Settings};
+     use futures::StreamExt as _;
+@@ -171,7 +171,7 @@ mod platform {
+     }
+ }
+ 
+-#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
++#[cfg(not(any(target_os = "macos", target_os = "windows", any(target_os = "linux", target_os = "android"))))]
+ mod platform {
+     use gpui::App;
+ 
+diff --git a/vendor/gpui-kit/crates/fps/Cargo.toml b/vendor/gpui-kit/crates/fps/Cargo.toml
+index ee1e76d..fae02b5 100644
+--- a/vendor/gpui-kit/crates/fps/Cargo.toml
++++ b/vendor/gpui-kit/crates/fps/Cargo.toml
+@@ -44,7 +44,7 @@ objc2-io-kit = { version = "0.3", default-features = false, features = [
+     "libc",
+ ] }
+ 
+-[target.'cfg(target_os = "linux")'.dependencies]
++[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
+ uuid = { version = "1", features = ["v5"] }
+ wayland-client = "0.31"
+ 
+diff --git a/vendor/gpui-kit/crates/fps/src/gpu.rs b/vendor/gpui-kit/crates/fps/src/gpu.rs
+index aeffe9c..1405306 100644
+--- a/vendor/gpui-kit/crates/fps/src/gpu.rs
++++ b/vendor/gpui-kit/crates/fps/src/gpu.rs
+@@ -8,9 +8,9 @@
+ 
+ #[cfg_attr(target_os = "macos", path = "gpu/macos.rs")]
+ #[cfg_attr(target_os = "windows", path = "gpu/windows.rs")]
+-#[cfg_attr(target_os = "linux", path = "gpu/linux.rs")]
++#[cfg_attr(any(target_os = "linux", target_os = "android"), path = "gpu/linux.rs")]
+ #[cfg_attr(
+-    not(any(target_os = "macos", target_os = "windows", target_os = "linux")),
++    not(any(target_os = "macos", target_os = "windows", any(target_os = "linux", target_os = "android"))),
+     path = "gpu/unsupported.rs"
+ )]
+ mod platform;
+diff --git a/vendor/gpui-kit/crates/fps/src/memory.rs b/vendor/gpui-kit/crates/fps/src/memory.rs
+index a53e9bc..613c939 100644
+--- a/vendor/gpui-kit/crates/fps/src/memory.rs
++++ b/vendor/gpui-kit/crates/fps/src/memory.rs
+@@ -20,9 +20,9 @@
+ 
+ #[cfg_attr(target_os = "macos", path = "memory/macos.rs")]
+ #[cfg_attr(target_os = "windows", path = "memory/windows.rs")]
+-#[cfg_attr(target_os = "linux", path = "memory/linux.rs")]
++#[cfg_attr(any(target_os = "linux", target_os = "android"), path = "memory/linux.rs")]
+ #[cfg_attr(
+-    not(any(target_os = "macos", target_os = "windows", target_os = "linux")),
++    not(any(target_os = "macos", target_os = "windows", any(target_os = "linux", target_os = "android"))),
+     path = "memory/unsupported.rs"
+ )]
+ mod platform;
+diff --git a/vendor/gpui-kit/crates/fps/src/refresh.rs b/vendor/gpui-kit/crates/fps/src/refresh.rs
+index 2380810..367342d 100644
+--- a/vendor/gpui-kit/crates/fps/src/refresh.rs
++++ b/vendor/gpui-kit/crates/fps/src/refresh.rs
+@@ -81,7 +81,7 @@ mod platform {
+     }
+ }
+ 
+-#[cfg(target_os = "linux")]
++#[cfg(any(target_os = "linux", target_os = "android"))]
+ mod platform {
+     use super::*;
+     use std::{collections::HashMap, sync::OnceLock};
+@@ -190,7 +190,7 @@ mod platform {
+     }
+ }
+ 
+-#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
++#[cfg(not(any(target_os = "macos", target_os = "windows", any(target_os = "linux", target_os = "android"))))]
+ mod platform {
+     use super::*;
+ 
+diff --git a/vendor/gpui-kit/crates/shell/Cargo.toml b/vendor/gpui-kit/crates/shell/Cargo.toml
+index 060d1eb..6d9d7ac 100644
+--- a/vendor/gpui-kit/crates/shell/Cargo.toml
++++ b/vendor/gpui-kit/crates/shell/Cargo.toml
+@@ -46,6 +46,8 @@ rquickjs = { package = "quickjs-jit", version = "0.12.11", git = "https://github
+     "macro",
+     "loader",
+     "jit-abi",
++    # Termux: no prebuilt bindings for the Android target, generate them.
++    "bindgen",
+ ], optional = true }
+ rquickjs-jit = { package = "quickjs-jit-runtime", version = "0.12.11", git = "https://github.com/longbridge/quickjs-jit", rev = "96593cd7a54440ac060a391b8baea7e9a3cf1393", features = ["compiler"], optional = true }
+ # The stdlib facade pins LLRT modules and shares our VM through rquickjs-compat.
+diff --git a/vendor/gpui-pre-linux/Cargo.toml b/vendor/gpui-pre-linux/Cargo.toml
+index 4ef5905..788238d 100644
+--- a/vendor/gpui-pre-linux/Cargo.toml
++++ b/vendor/gpui-pre-linux/Cargo.toml
+@@ -82,21 +82,21 @@ name = "gpui_linux"
+ path = "src/gpui_linux.rs"
+ doctest = false
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.accesskit]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.accesskit]
+ version = "0.24.0"
+ features = ["enumn"]
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.accesskit_unix]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.accesskit_unix]
+ version = "0.22"
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.anyhow]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.anyhow]
+ version = "1.0.86"
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.as-raw-xcb-connection]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.as-raw-xcb-connection]
+ version = "1"
+ optional = true
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.ashpd]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.ashpd]
+ version = "0.13"
+ features = [
+     "async-io",
+@@ -110,60 +110,60 @@ features = [
+ optional = true
+ default-features = false
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.bytemuck]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.bytemuck]
+ version = "1"
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.calloop]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.calloop]
+ version = "0.14.3"
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.calloop-wayland-source]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.calloop-wayland-source]
+ version = "0.4.1"
+ optional = true
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.collections]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.collections]
+ version = "=0.3.8"
+ package = "gpui-pre-collections"
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.filedescriptor]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.filedescriptor]
+ version = "0.8.2"
+ optional = true
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.futures]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.futures]
+ version = "0.3.34"
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.gpui]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.gpui]
+ version = "=0.3.8"
+ default-features = false
+ package = "gpui-pre"
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.gpui_util]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.gpui_util]
+ version = "=0.3.8"
+ package = "gpui-pre-util"
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.gpui_wgpu]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.gpui_wgpu]
+ version = "=0.3.8"
+ features = ["font-kit"]
+ optional = true
+ package = "gpui-pre-wgpu"
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.http_client]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.http_client]
+ version = "=0.3.8"
+ package = "gpui-pre-http-client"
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.libc]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.libc]
+ version = "0.2"
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.log]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.log]
+ version = "0.4.16"
+ features = [
+     "kv_unstable_serde",
+     "serde",
+ ]
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.notify-rust]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.notify-rust]
+ version = "4"
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.oo7]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.oo7]
+ version = "0.6"
+ features = [
+     "async-std",
+@@ -171,40 +171,40 @@ features = [
+ ]
+ default-features = false
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.open]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.open]
+ version = "5.2.0"
+ optional = true
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.parking_lot]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.parking_lot]
+ version = "0.12.1"
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.raw-window-handle]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.raw-window-handle]
+ version = "0.6"
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.scap]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.scap]
+ version = "0.0.8-zed"
+ optional = true
+ default-features = false
+ package = "zed-scap"
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.smallvec]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.smallvec]
+ version = "1.6"
+ features = [
+     "union",
+     "const_new",
+ ]
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.smol]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.smol]
+ version = "2.0"
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.strum]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.strum]
+ version = "0.28"
+ features = ["derive"]
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.url]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.url]
+ version = "2.2"
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.uuid]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.uuid]
+ version = "1.1.2"
+ features = [
+     "v4",
+@@ -213,7 +213,7 @@ features = [
+     "serde",
+ ]
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.wayland-backend]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.wayland-backend]
+ version = "0.3.15"
+ features = [
+     "client_system",
+@@ -222,15 +222,15 @@ features = [
+ ]
+ optional = true
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.wayland-client]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.wayland-client]
+ version = "0.31.11"
+ optional = true
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.wayland-cursor]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.wayland-cursor]
+ version = "0.31.11"
+ optional = true
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.wayland-protocols]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.wayland-protocols]
+ version = "0.32.9"
+ features = [
+     "client",
+@@ -239,17 +239,17 @@ features = [
+ ]
+ optional = true
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.wayland-protocols-plasma]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.wayland-protocols-plasma]
+ version = "0.3.9"
+ features = ["client"]
+ optional = true
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.wayland-protocols-wlr]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.wayland-protocols-wlr]
+ version = "0.3.9"
+ features = ["client"]
+ optional = true
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.x11rb]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.x11rb]
+ version = "0.13.1"
+ features = [
+     "allow-unsafe-code",
+@@ -263,7 +263,7 @@ features = [
+ ]
+ optional = true
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.xim]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.xim]
+ version = "0.4.0-zed"
+ features = [
+     "x11rb-xcb",
+@@ -272,7 +272,7 @@ features = [
+ optional = true
+ package = "zed-xim"
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.xkbcommon]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))'.dependencies.xkbcommon]
+ version = "0.8.0"
+ optional = true
+ default-features = false
+diff --git a/vendor/gpui-pre-linux/src/gpui_linux.rs b/vendor/gpui-pre-linux/src/gpui_linux.rs
+index a5390e7..3f81e1d 100644
+--- a/vendor/gpui-pre-linux/src/gpui_linux.rs
++++ b/vendor/gpui-pre-linux/src/gpui_linux.rs
+@@ -1,4 +1,4 @@
+-#![cfg(any(target_os = "linux", target_os = "freebsd"))]
++#![cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))]
+ mod linux;
+ 
+ pub use linux::{current_platform, linux_platform};
+diff --git a/vendor/gpui-pre-linux/src/linux/platform.rs b/vendor/gpui-pre-linux/src/linux/platform.rs
+index ca2574c..bfbb397 100644
+--- a/vendor/gpui-pre-linux/src/linux/platform.rs
++++ b/vendor/gpui-pre-linux/src/linux/platform.rs
+@@ -77,7 +77,7 @@ pub(crate) struct PlatformHandlers {
+ /// the client's event loop.
+ #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+ #[cfg_attr(
+-    not(all(target_os = "linux", any(feature = "wayland", feature = "x11"))),
++    not(all(any(target_os = "linux", target_os = "android"), any(feature = "wayland", feature = "x11"))),
+     allow(dead_code)
+ )]
+ pub(crate) enum SystemPowerEvent {
+@@ -98,7 +98,7 @@ pub(crate) struct LinuxCommon {
+     app_name: Option<String>,
+     system_notifications: crate::linux::system_notifications::SystemNotificationState,
+     #[cfg_attr(
+-        not(all(target_os = "linux", any(feature = "wayland", feature = "x11"))),
++        not(all(any(target_os = "linux", target_os = "android"), any(feature = "wayland", feature = "x11"))),
+         allow(dead_code)
+     )]
+     power_sender: Sender<SystemPowerEvent>,
+@@ -161,7 +161,7 @@ impl LinuxCommon {
+ 
+     pub(crate) fn start_power_listener(&mut self) {
+         if !self.power_listener_started {
+-            #[cfg(all(target_os = "linux", any(feature = "wayland", feature = "x11")))]
++            #[cfg(all(any(target_os = "linux", target_os = "android"), any(feature = "wayland", feature = "x11")))]
+             smol::spawn({
+                 let power_sender = self.power_sender.clone();
+                 async move {
+@@ -246,7 +246,7 @@ impl LinuxCommon {
+     }
+ }
+ 
+-#[cfg(all(target_os = "linux", any(feature = "wayland", feature = "x11")))]
++#[cfg(all(any(target_os = "linux", target_os = "android"), any(feature = "wayland", feature = "x11")))]
+ async fn listen_for_system_power_events(
+     power_sender: Sender<SystemPowerEvent>,
+ ) -> anyhow::Result<()> {
+diff --git a/vendor/gpui-pre-linux/src/linux/x11/client.rs b/vendor/gpui-pre-linux/src/linux/x11/client.rs
+index 76939e1..e6ed817 100644
+--- a/vendor/gpui-pre-linux/src/linux/x11/client.rs
++++ b/vendor/gpui-pre-linux/src/linux/x11/client.rs
+@@ -379,8 +379,15 @@ impl X11Connection {
+             .context("DISPLAY is not valid UTF-8")?;
+         let display_name =
+             std::ffi::CString::new(display).context("X display name contains a NUL byte")?;
+-        let (xcb_connection, x_root_index) = XCBConnection::connect(Some(&display_name))
+-            .with_context(|| format!("failed to connect to X server {display:?}"))?;
++        #[cfg(target_os = "android")]
++        let termux = termux_x11_connect(display);
++        #[cfg(not(target_os = "android"))]
++        let termux: Option<(XCBConnection, usize)> = None;
++        let (xcb_connection, x_root_index) = match termux {
++            Some(connected) => connected,
++            None => XCBConnection::connect(Some(&display_name))
++                .with_context(|| format!("failed to connect to X server {display:?}"))?,
++        };
+         xcb_connection.prefetch_extension_information(xkb::X11_EXTENSION_NAME)?;
+         xcb_connection.prefetch_extension_information(randr::X11_EXTENSION_NAME)?;
+         xcb_connection.prefetch_extension_information(render::X11_EXTENSION_NAME)?;
+@@ -3237,3 +3244,50 @@ mod tests {
+         assert_eq!(key_event_state.key_get_utf8(space), " ");
+     }
+ }
++
++
++/// Termux: libxcb looks for X sockets only under its build-time `$PREFIX/tmp`,
++/// but an X server started from a shell listens under that shell's `$TMPDIR`,
++/// and another Termux app id has another prefix. For a local display (`:N`,
++/// `unix:N`), connect to the socket under `$TMPDIR` or `$PREFIX/tmp` ourselves
++/// and hand the fd to libxcb. `None` falls back to the normal connect.
++#[cfg(target_os = "android")]
++fn termux_x11_connect(display: &str) -> Option<(XCBConnection, usize)> {
++    use std::os::fd::IntoRawFd;
++    unsafe extern "C" {
++        fn xcb_connect_to_fd(fd: std::ffi::c_int, auth: *mut std::ffi::c_void) -> *mut std::ffi::c_void;
++        fn xcb_connection_has_error(c: *mut std::ffi::c_void) -> std::ffi::c_int;
++        fn xcb_disconnect(c: *mut std::ffi::c_void);
++    }
++    let (host, rest) = display.rsplit_once(':')?;
++    if !matches!(host, "" | "unix") {
++        return None;
++    }
++    let (number, screen) = match rest.split_once('.') {
++        Some((n, s)) => (n, s.parse::<usize>().ok()?),
++        None => (rest, 0),
++    };
++    let number: u32 = number.parse().ok()?;
++    let dirs = [
++        std::env::var("TMPDIR").ok(),
++        std::env::var("PREFIX").ok().map(|p| format!("{p}/tmp")),
++    ];
++    let stream = dirs
++        .into_iter()
++        .flatten()
++        .filter(|d| !d.is_empty())
++        .find_map(|d| std::os::unix::net::UnixStream::connect(format!("{d}/.X11-unix/X{number}")).ok())?;
++    let fd = stream.into_raw_fd();
++    unsafe {
++        let raw = xcb_connect_to_fd(fd, std::ptr::null_mut());
++        if raw.is_null() {
++            return None;
++        }
++        if xcb_connection_has_error(raw) != 0 {
++            xcb_disconnect(raw);
++            return None;
++        }
++        let connection = XCBConnection::from_raw_xcb_connection(raw, true).ok()?;
++        Some((connection, screen))
++    }
++}
+diff --git a/vendor/gpui-pre-wgpu/src/wgpu_renderer.rs b/vendor/gpui-pre-wgpu/src/wgpu_renderer.rs
+index a700613..8dbaca5 100644
+--- a/vendor/gpui-pre-wgpu/src/wgpu_renderer.rs
++++ b/vendor/gpui-pre-wgpu/src/wgpu_renderer.rs
+@@ -2696,10 +2696,10 @@ mod tests {
+         PolychromeSprite, Quad, Shadow, Size, SubpixelSprite, Underline, linear_color_stop,
+         linear_gradient,
+     };
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     use gpui::{DevicePixels, PlatformHeadlessRenderer, Scene};
+ 
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     fn device_size(width: i32, height: i32) -> Size<DevicePixels> {
+         Size {
+             width: DevicePixels(width),
+@@ -2707,7 +2707,7 @@ mod tests {
+         }
+     }
+ 
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     fn solid_quad(x: f32, y: f32, width: f32, height: f32, color: Hsla) -> Quad {
+         let bounds = Bounds {
+             origin: Point {
+@@ -2733,7 +2733,7 @@ mod tests {
+ 
+     /// Channels are compared with a small tolerance so the assertions hold across
+     /// drivers without pinning exact rasterizer output.
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     fn assert_pixel(image: &image::RgbaImage, x: u32, y: u32, expected: [u8; 4]) {
+         let actual = image.get_pixel(x, y).0;
+         assert!(
+@@ -2745,14 +2745,14 @@ mod tests {
+         );
+     }
+ 
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     const RED: [u8; 4] = [255, 0, 0, 255];
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     const BLUE: [u8; 4] = [0, 0, 255, 255];
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     const BLACK: [u8; 4] = [0, 0, 0, 255];
+ 
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     #[test]
+     fn headless_renderer_draws_quads_with_distinct_colors() -> anyhow::Result<()> {
+         let mut renderer = WgpuHeadlessRenderer::new()?;
+@@ -2770,7 +2770,7 @@ mod tests {
+         Ok(())
+     }
+ 
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     #[test]
+     fn headless_renderer_captures_each_requested_size() -> anyhow::Result<()> {
+         let mut renderer = WgpuHeadlessRenderer::new()?;
+@@ -2796,7 +2796,7 @@ mod tests {
+         Ok(())
+     }
+ 
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     #[test]
+     fn headless_renderer_reuses_target_for_same_size() -> anyhow::Result<()> {
+         let mut renderer = WgpuHeadlessRenderer::new()?;
+@@ -2819,7 +2819,7 @@ mod tests {
+         Ok(())
+     }
+ 
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     #[test]
+     fn headless_renderer_rejects_invalid_sizes() -> anyhow::Result<()> {
+         let mut renderer = WgpuHeadlessRenderer::new()?;
+diff --git a/vendor/gpui-pre/Cargo.toml b/vendor/gpui-pre/Cargo.toml
+index 8dc7fe8..e0333ba 100644
+--- a/vendor/gpui-pre/Cargo.toml
++++ b/vendor/gpui-pre/Cargo.toml
+@@ -530,10 +530,10 @@ optional = true
+ version = "2.5.0"
+ default-features = false
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies.libc]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "android"))'.dependencies.libc]
+ version = "0.2"
+ 
+-[target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "windows"))'.dependencies.scap]
++[target.'cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd", target_os = "windows"))'.dependencies.scap]
+ version = "0.0.8-zed"
+ optional = true
+ default-features = false
+diff --git a/vendor/gpui-pre/examples/layer_shell.rs b/vendor/gpui-pre/examples/layer_shell.rs
+index 1437b05..a3b40cf 100644
+--- a/vendor/gpui-pre/examples/layer_shell.rs
++++ b/vendor/gpui-pre/examples/layer_shell.rs
+@@ -1,10 +1,10 @@
+ #![cfg_attr(target_family = "wasm", no_main)]
+ 
+ fn run_example() {
+-    #[cfg(all(target_os = "linux", feature = "wayland"))]
++    #[cfg(all(any(target_os = "linux", target_os = "android"), feature = "wayland"))]
+     example::main();
+ 
+-    #[cfg(not(all(target_os = "linux", feature = "wayland")))]
++    #[cfg(not(all(any(target_os = "linux", target_os = "android"), feature = "wayland")))]
+     panic!("This example requires the `wayland` feature and a linux system.");
+ }
+ 
+@@ -20,7 +20,7 @@ pub fn start() {
+     run_example();
+ }
+ 
+-#[cfg(all(target_os = "linux", feature = "wayland"))]
++#[cfg(all(any(target_os = "linux", target_os = "android"), feature = "wayland"))]
+ mod example {
+     use std::time::{Duration, SystemTime, UNIX_EPOCH};
+ 
+diff --git a/vendor/gpui-pre/examples/toggle_headless.rs b/vendor/gpui-pre/examples/toggle_headless.rs
+index 136e31f..dcd5743 100644
+--- a/vendor/gpui-pre/examples/toggle_headless.rs
++++ b/vendor/gpui-pre/examples/toggle_headless.rs
+@@ -119,7 +119,7 @@ fn open_window(todos: &Entity<Todos>, cx: &mut App) -> anyhow::Result<()> {
+ 
+ /// Builds the environment for `open`: the given `NAME=value` pairs, or this process's
+ /// environment when none are given.
+-#[cfg(target_os = "linux")]
++#[cfg(any(target_os = "linux", target_os = "android"))]
+ fn display_environment(arguments: &str) -> anyhow::Result<GraphicalEnvironment> {
+     if arguments.trim().is_empty() {
+         return Ok(GraphicalEnvironment::detect());
+@@ -154,7 +154,7 @@ fn display_environment(arguments: &str) -> anyhow::Result<GraphicalEnvironment>
+ }
+ 
+ /// Builds the environment for `open`, which carries nothing on this platform.
+-#[cfg(not(any(target_os = "linux", target_os = "windows", target_family = "wasm")))]
++#[cfg(not(any(any(target_os = "linux", target_os = "android"), target_os = "windows", target_family = "wasm")))]
+ fn display_environment(_arguments: &str) -> anyhow::Result<GraphicalEnvironment> {
+     Ok(GraphicalEnvironment::detect())
+ }
+@@ -204,13 +204,13 @@ fn handle_command(
+     Ok(None)
+ }
+ 
+-#[cfg(target_os = "linux")]
++#[cfg(any(target_os = "linux", target_os = "android"))]
+ const USAGE: &str = "commands: ls | create [message] | open [DISPLAY=… WAYLAND_DISPLAY=… XDG_RUNTIME_DIR=… XDG_ACTIVATION_TOKEN=…] | close | quit";
+ 
+ #[cfg(target_os = "windows")]
+ const USAGE: &str = "commands: ls | create [message] | open [SESSION=…] | close | quit";
+ 
+-#[cfg(not(any(target_os = "linux", target_os = "windows", target_family = "wasm")))]
++#[cfg(not(any(any(target_os = "linux", target_os = "android"), target_os = "windows", target_family = "wasm")))]
+ const USAGE: &str = "commands: ls | create [message] | open | close | quit";
+ 
+ #[cfg(not(target_family = "wasm"))]
+@@ -247,9 +247,9 @@ async fn run_command(
+ 
+ #[cfg(not(target_family = "wasm"))]
+ fn main() {
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     let application = gpui_platform::linux(gpui::WindowingModes::all());
+-    #[cfg(not(target_os = "linux"))]
++    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+     let application = gpui_platform::application();
+     application
+         .with_windowing(WindowingRequest::Headless)
+diff --git a/vendor/gpui-pre/src/app.rs b/vendor/gpui-pre/src/app.rs
+index 7a157e7..3d62831 100644
+--- a/vendor/gpui-pre/src/app.rs
++++ b/vendor/gpui-pre/src/app.rs
+@@ -1640,14 +1640,14 @@ impl App {
+ 
+     /// Reads data from the primary selection buffer.
+     /// Only available on Linux.
+-    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
++    #[cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))]
+     pub fn read_from_primary(&self) -> Option<ClipboardItem> {
+         self.platform.read_from_primary()
+     }
+ 
+     /// Writes data to the primary selection buffer.
+     /// Only available on Linux.
+-    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
++    #[cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))]
+     pub fn write_to_primary(&self, item: ClipboardItem) {
+         self.platform.write_to_primary(item)
+     }
+diff --git a/vendor/gpui-pre/src/gpui.rs b/vendor/gpui-pre/src/gpui.rs
+index d4da5aa..8057330 100644
+--- a/vendor/gpui-pre/src/gpui.rs
++++ b/vendor/gpui-pre/src/gpui.rs
+@@ -39,7 +39,7 @@ pub mod profiler;
+ #[cfg(any(
+     test,
+     target_os = "windows",
+-    target_os = "linux",
++    any(target_os = "linux", target_os = "android"),
+     target_family = "wasm",
+     feature = "test-support",
+     feature = "bench-support"
+@@ -194,7 +194,7 @@ pub use keymap::*;
+ pub use path_builder::*;
+ pub use platform::*;
+ pub use profiler::*;
+-#[cfg(any(target_os = "windows", target_os = "linux", target_family = "wasm"))]
++#[cfg(any(target_os = "windows", any(target_os = "linux", target_os = "android"), target_family = "wasm"))]
+ pub use queue::{PriorityQueueReceiver, PriorityQueueSender};
+ pub use refineable::*;
+ pub use scene::*;
+diff --git a/vendor/gpui-pre/src/keymap/context.rs b/vendor/gpui-pre/src/keymap/context.rs
+index 27f361b..b5ce849 100644
+--- a/vendor/gpui-pre/src/keymap/context.rs
++++ b/vendor/gpui-pre/src/keymap/context.rs
+@@ -32,13 +32,13 @@ impl KeyContext {
+         let mut context = Self::default();
+         #[cfg(target_os = "macos")]
+         context.set("os", "macos");
+-        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
++        #[cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))]
+         context.set("os", "linux");
+         #[cfg(target_os = "windows")]
+         context.set("os", "windows");
+         #[cfg(not(any(
+             target_os = "macos",
+-            target_os = "linux",
++            any(target_os = "linux", target_os = "android"),
+             target_os = "freebsd",
+             target_os = "windows"
+         )))]
+diff --git a/vendor/gpui-pre/src/platform.rs b/vendor/gpui-pre/src/platform.rs
+index dad7a36..10fffef 100644
+--- a/vendor/gpui-pre/src/platform.rs
++++ b/vendor/gpui-pre/src/platform.rs
+@@ -2,7 +2,7 @@ mod app_menu;
+ mod keyboard;
+ mod keystroke;
+ 
+-#[cfg(all(target_os = "linux", feature = "wayland"))]
++#[cfg(all(any(target_os = "linux", target_os = "android"), feature = "wayland"))]
+ #[expect(missing_docs)]
+ pub mod layer_shell;
+ 
+@@ -20,12 +20,12 @@ mod visual_test;
+ 
+ #[cfg(all(
+     feature = "screen-capture",
+-    any(target_os = "windows", target_os = "linux", target_os = "freebsd",)
++    any(target_os = "windows", any(target_os = "linux", target_os = "android"), target_os = "freebsd",)
+ ))]
+ pub mod scap_screen_capture;
+ 
+ #[cfg(all(
+-    any(target_os = "windows", target_os = "linux"),
++    any(target_os = "windows", any(target_os = "linux", target_os = "android")),
+     feature = "screen-capture"
+ ))]
+ pub(crate) type PlatformScreenCaptureFrame = scap::frame::Frame;
+@@ -44,7 +44,7 @@ use crate::{
+     ShapedRun, SharedString, Size, SvgRenderer, SystemWindowTab, Task, Window, WindowControlArea,
+     hash, point, px, size,
+ };
+-#[cfg(any(target_os = "linux", target_os = "freebsd"))]
++#[cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))]
+ use anyhow::bail;
+ use anyhow::{Context as _, Result};
+ use async_task::Runnable;
+@@ -170,7 +170,7 @@ impl ActivityGuard {
+ // TODO(jk): return an enum instead of a string
+ /// Return which compositor we're guessing we'll use.
+ /// Does not attempt to connect to the given compositor.
+-#[cfg(any(target_os = "linux", target_os = "freebsd"))]
++#[cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))]
+ #[inline]
+ pub fn guess_compositor() -> &'static str {
+     if std::env::var_os("ZED_HEADLESS").is_some() {
+@@ -187,7 +187,7 @@ pub fn guess_compositor() -> &'static str {
+ /// While connected, programs the platform launches (for example to open a URL) get these
+ /// variables instead of the ones this process started with. Apply
+ /// [`App::graphical_environment`] to the programs an app launches, for the same reason.
+-#[cfg(any(target_os = "linux", target_os = "freebsd"))]
++#[cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))]
+ #[derive(Clone, Debug, Default)]
+ pub struct GraphicalEnvironment {
+     /// `WAYLAND_DISPLAY`: a socket name relative to `xdg_runtime_dir`, or an absolute path.
+@@ -240,11 +240,11 @@ impl GraphicalEnvironment {
+ }
+ 
+ /// The graphical session to connect to. Carries nothing yet on this platform.
+-#[cfg(not(any(target_os = "linux", target_os = "freebsd", target_os = "windows")))]
++#[cfg(not(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd", target_os = "windows")))]
+ #[derive(Clone, Debug, Default)]
+ pub struct GraphicalEnvironment;
+ 
+-#[cfg(not(any(target_os = "linux", target_os = "freebsd", target_os = "windows")))]
++#[cfg(not(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd", target_os = "windows")))]
+ impl GraphicalEnvironment {
+     /// Returns the environment of this process's graphical session.
+     pub fn detect() -> Self {
+@@ -264,7 +264,7 @@ pub enum WindowingRequest {
+     Windowed(GraphicalEnvironment),
+ }
+ 
+-#[cfg(any(target_os = "linux", target_os = "freebsd"))]
++#[cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))]
+ impl GraphicalEnvironment {
+     /// Reads the display variables from this process's environment.
+     ///
+@@ -311,7 +311,7 @@ impl GraphicalEnvironment {
+     }
+ }
+ 
+-#[cfg(any(target_os = "linux", target_os = "freebsd"))]
++#[cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))]
+ bitflags::bitflags! {
+     /// The windowing modes a platform may start in or switch to.
+     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+@@ -545,9 +545,9 @@ pub trait Platform: 'static {
+         Task::ready(Ok(self.read_from_clipboard()))
+     }
+ 
+-    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
++    #[cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))]
+     fn read_from_primary(&self) -> Option<ClipboardItem>;
+-    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
++    #[cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))]
+     fn write_to_primary(&self, item: ClipboardItem);
+ 
+     #[cfg(target_os = "macos")]
+@@ -800,7 +800,7 @@ impl WindowButton {
+         }
+     }
+ 
+-    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
++    #[cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))]
+     fn index(&self) -> usize {
+         match self {
+             WindowButton::Minimize => 0,
+@@ -825,7 +825,7 @@ pub struct WindowButtonLayout {
+     pub right: [Option<WindowButton>; MAX_BUTTONS_PER_SIDE],
+ }
+ 
+-#[cfg(any(target_os = "linux", target_os = "freebsd"))]
++#[cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))]
+ impl WindowButtonLayout {
+     /// Returns Zed's built-in fallback button layout for Linux titlebars.
+     pub fn linux_default() -> Self {
+@@ -1280,7 +1280,7 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
+     }
+     fn start_window_resize(&self, _edge: ResizeEdge) {}
+     fn set_exclusive_zone(&self, _zone: Pixels) {}
+-    #[cfg(all(target_os = "linux", feature = "wayland"))]
++    #[cfg(all(any(target_os = "linux", target_os = "android"), feature = "wayland"))]
+     fn set_exclusive_edge(&self, _edge: layer_shell::Anchor) {}
+     fn set_input_region(&self, _region: Option<&[Bounds<Pixels>]>) {}
+     fn window_decorations(&self) -> Decorations {
+@@ -1921,7 +1921,7 @@ pub struct AtlasTextureId {
+ #[repr(C)]
+ #[cfg_attr(
+     all(
+-        any(target_os = "linux", target_os = "freebsd"),
++        any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"),
+         not(any(feature = "x11", feature = "wayland"))
+     ),
+     allow(dead_code)
+@@ -1959,7 +1959,7 @@ pub struct PlatformInputHandler {
+ #[expect(missing_docs)]
+ #[cfg_attr(
+     all(
+-        any(target_os = "linux", target_os = "freebsd"),
++        any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"),
+         not(any(feature = "x11", feature = "wayland"))
+     ),
+     allow(dead_code)
+@@ -1988,7 +1988,7 @@ impl PlatformInputHandler {
+     }
+ 
+     #[cfg_attr(
+-        any(target_os = "linux", target_os = "freebsd", target_os = "windows"),
++        any(any(target_os = "linux", target_os = "android"), target_os = "freebsd", target_os = "windows"),
+         allow(dead_code)
+     )]
+     pub fn text_for_range(
+@@ -2534,7 +2534,7 @@ pub struct WindowOptions {
+ #[derive(Debug)]
+ #[cfg_attr(
+     all(
+-        any(target_os = "linux", target_os = "freebsd"),
++        any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"),
+         not(any(feature = "x11", feature = "wayland"))
+     ),
+     allow(dead_code)
+@@ -2548,35 +2548,35 @@ pub struct WindowParams {
+     pub titlebar: Option<TitlebarOptions>,
+ 
+     /// The kind of window to create
+-    #[cfg_attr(any(target_os = "linux", target_os = "freebsd"), allow(dead_code))]
++    #[cfg_attr(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"), allow(dead_code))]
+     pub kind: WindowKind,
+ 
+     /// Whether the window should be movable by the user
+-    #[cfg_attr(any(target_os = "linux", target_os = "freebsd"), allow(dead_code))]
++    #[cfg_attr(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"), allow(dead_code))]
+     pub is_movable: bool,
+ 
+     /// Whether the application owns dragging of the (custom) titlebar (macOS only)
+     #[cfg_attr(
+-        any(target_os = "linux", target_os = "freebsd", target_os = "windows"),
++        any(any(target_os = "linux", target_os = "android"), target_os = "freebsd", target_os = "windows"),
+         allow(dead_code)
+     )]
+     pub app_owns_titlebar_drag: bool,
+ 
+     /// Whether the window should be resizable by the user
+-    #[cfg_attr(any(target_os = "linux", target_os = "freebsd"), allow(dead_code))]
++    #[cfg_attr(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"), allow(dead_code))]
+     pub is_resizable: bool,
+ 
+     /// Whether the window should be minimized by the user
+-    #[cfg_attr(any(target_os = "linux", target_os = "freebsd"), allow(dead_code))]
++    #[cfg_attr(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"), allow(dead_code))]
+     pub is_minimizable: bool,
+ 
+     #[cfg_attr(
+-        any(target_os = "linux", target_os = "freebsd", target_os = "windows"),
++        any(any(target_os = "linux", target_os = "android"), target_os = "freebsd", target_os = "windows"),
+         allow(dead_code)
+     )]
+     pub focus: bool,
+ 
+-    #[cfg_attr(any(target_os = "linux", target_os = "freebsd"), allow(dead_code))]
++    #[cfg_attr(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"), allow(dead_code))]
+     pub show: bool,
+ 
+     /// An image to set as the window icon (x11 only)
+@@ -2695,7 +2695,7 @@ pub enum WindowKind {
+ 
+     /// A Wayland LayerShell window, used to draw overlays or backgrounds for applications such as
+     /// docks, notifications or wallpapers.
+-    #[cfg(all(target_os = "linux", feature = "wayland"))]
++    #[cfg(all(any(target_os = "linux", target_os = "android"), feature = "wayland"))]
+     LayerShell(layer_shell::LayerShellOptions),
+ 
+     /// A window that appears on top of its parent window and blocks interaction with it
+@@ -3386,7 +3386,7 @@ impl ClipboardString {
+             .and_then(|m| serde_json::from_str(m).ok())
+     }
+ 
+-    #[cfg_attr(any(target_os = "linux", target_os = "freebsd"), allow(dead_code))]
++    #[cfg_attr(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"), allow(dead_code))]
+     /// Compute a hash of the given text for clipboard change detection.
+     pub fn text_hash(text: &str) -> u64 {
+         let mut hasher = SeaHasher::new();
+@@ -3607,7 +3607,7 @@ mod frame_signal_tests {
+     }
+ }
+ 
+-#[cfg(all(test, any(target_os = "linux", target_os = "freebsd")))]
++#[cfg(all(test, any(any(target_os = "linux", target_os = "android"), target_os = "freebsd")))]
+ mod tests {
+     use super::*;
+     use std::collections::HashSet;
+diff --git a/vendor/gpui-pre/src/platform/keystroke.rs b/vendor/gpui-pre/src/platform/keystroke.rs
+index f38ce95..b27095c 100644
+--- a/vendor/gpui-pre/src/platform/keystroke.rs
++++ b/vendor/gpui-pre/src/platform/keystroke.rs
+@@ -765,7 +765,7 @@ fn display_modifiers(modifiers: &Modifiers, f: &mut std::fmt::Formatter<'_>) ->
+         #[cfg(target_os = "macos")]
+         f.write_char('⌘')?;
+ 
+-        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
++        #[cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))]
+         f.write_char('❖')?;
+ 
+         #[cfg(target_os = "windows")]
+@@ -828,7 +828,7 @@ fn unparse(modifiers: &Modifiers, key: &str) -> String {
+         #[cfg(target_os = "macos")]
+         result.push_str("cmd-");
+ 
+-        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
++        #[cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))]
+         result.push_str("super-");
+ 
+         #[cfg(target_os = "windows")]
+diff --git a/vendor/gpui-pre/src/platform/test/platform.rs b/vendor/gpui-pre/src/platform/test/platform.rs
+index 4bf0838..4d93fe1 100644
+--- a/vendor/gpui-pre/src/platform/test/platform.rs
++++ b/vendor/gpui-pre/src/platform/test/platform.rs
+@@ -35,7 +35,7 @@ pub(crate) struct TestPlatform {
+     active_display: Rc<dyn PlatformDisplay>,
+     active_cursor: Mutex<CursorStyle>,
+     current_clipboard_item: Mutex<Option<ClipboardItem>>,
+-    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
++    #[cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))]
+     current_primary_item: Mutex<Option<ClipboardItem>>,
+     #[cfg(target_os = "macos")]
+     current_find_pasteboard_item: Mutex<Option<ClipboardItem>>,
+@@ -159,7 +159,7 @@ impl TestPlatform {
+             active_window: Default::default(),
+             expect_restart: Default::default(),
+             current_clipboard_item: Mutex::new(None),
+-            #[cfg(any(target_os = "linux", target_os = "freebsd"))]
++            #[cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))]
+             current_primary_item: Mutex::new(None),
+             #[cfg(target_os = "macos")]
+             current_find_pasteboard_item: Mutex::new(None),
+@@ -680,12 +680,12 @@ impl Platform for TestPlatform {
+         *self.current_clipboard_item.lock() = Some(item);
+     }
+ 
+-    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
++    #[cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))]
+     fn read_from_primary(&self) -> Option<ClipboardItem> {
+         self.current_primary_item.lock().clone()
+     }
+ 
+-    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
++    #[cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))]
+     fn write_to_primary(&self, item: ClipboardItem) {
+         *self.current_primary_item.lock() = Some(item);
+     }
+diff --git a/vendor/gpui-pre/src/profiler/journal.rs b/vendor/gpui-pre/src/profiler/journal.rs
+index fba75ae..548a871 100644
+--- a/vendor/gpui-pre/src/profiler/journal.rs
++++ b/vendor/gpui-pre/src/profiler/journal.rs
+@@ -856,7 +856,7 @@ pub(crate) fn observe_power(cx: &App) {
+ /// time and one that doesn't. The suspend-excluding clock is read first so
+ /// read latency can't make the difference negative. Every read is served from
+ /// memory the kernel maps into the process, without a syscall.
+-#[cfg(any(target_os = "linux", target_os = "android"))]
++#[cfg(any(any(target_os = "linux", target_os = "android"), target_os = "android"))]
+ fn system_suspended_time() -> Option<Duration> {
+     // CLOCK_BOOTTIME is CLOCK_MONOTONIC plus time spent suspended:
+     // https://man7.org/linux/man-pages/man2/clock_gettime.2.html
+@@ -900,7 +900,7 @@ fn system_suspended_time() -> Option<Duration> {
+     Some(Duration::from_nanos(u64::try_from(nanos).ok()?))
+ }
+ 
+-#[cfg(any(target_os = "linux", target_os = "android"))]
++#[cfg(any(any(target_os = "linux", target_os = "android"), target_os = "android"))]
+ fn read_clock(clock: libc::clockid_t) -> Option<Duration> {
+     let mut time = libc::timespec {
+         tv_sec: 0,
+@@ -937,7 +937,7 @@ fn system_suspended_time() -> Option<Duration> {
+ }
+ 
+ #[cfg(not(any(
+-    target_os = "linux",
++    any(target_os = "linux", target_os = "android"),
+     target_os = "android",
+     target_os = "macos",
+     target_os = "windows"
+diff --git a/vendor/gpui-pre/src/scene.rs b/vendor/gpui-pre/src/scene.rs
+index 160587a..2904849 100644
+--- a/vendor/gpui-pre/src/scene.rs
++++ b/vendor/gpui-pre/src/scene.rs
+@@ -164,7 +164,7 @@ impl Scene {
+ 
+     #[cfg_attr(
+         all(
+-            any(target_os = "linux", target_os = "freebsd"),
++            any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"),
+             not(any(feature = "x11", feature = "wayland"))
+         ),
+         allow(dead_code)
+@@ -194,7 +194,7 @@ impl Scene {
+ #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Default)]
+ #[cfg_attr(
+     all(
+-        any(target_os = "linux", target_os = "freebsd"),
++        any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"),
+         not(any(feature = "x11", feature = "wayland"))
+     ),
+     allow(dead_code)
+@@ -261,7 +261,7 @@ impl Primitive {
+ 
+ #[cfg_attr(
+     all(
+-        any(target_os = "linux", target_os = "freebsd"),
++        any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"),
+         not(any(feature = "x11", feature = "wayland"))
+     ),
+     allow(dead_code)
+@@ -468,7 +468,7 @@ impl<'a> Iterator for BatchIterator<'a> {
+ #[derive(Debug)]
+ #[cfg_attr(
+     all(
+-        any(target_os = "linux", target_os = "freebsd"),
++        any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"),
+         not(any(feature = "x11", feature = "wayland"))
+     ),
+     allow(dead_code)
+diff --git a/vendor/gpui-pre/src/svg_renderer.rs b/vendor/gpui-pre/src/svg_renderer.rs
+index 798fb2a..8c6aed3 100644
+--- a/vendor/gpui-pre/src/svg_renderer.rs
++++ b/vendor/gpui-pre/src/svg_renderer.rs
+@@ -16,7 +16,7 @@ const EMOJI_FONT_FAMILIES: &[&str] = &["Apple Color Emoji", ".AppleColorEmojiUI"
+ #[cfg(target_os = "windows")]
+ const EMOJI_FONT_FAMILIES: &[&str] = &["Segoe UI Emoji", "Segoe UI Symbol"];
+ 
+-#[cfg(any(target_os = "linux", target_os = "freebsd"))]
++#[cfg(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd"))]
+ const EMOJI_FONT_FAMILIES: &[&str] = &[
+     "Noto Color Emoji",
+     "Emoji One",
+@@ -27,7 +27,7 @@ const EMOJI_FONT_FAMILIES: &[&str] = &[
+ #[cfg(not(any(
+     target_os = "macos",
+     target_os = "windows",
+-    target_os = "linux",
++    any(target_os = "linux", target_os = "android"),
+     target_os = "freebsd",
+ )))]
+ const EMOJI_FONT_FAMILIES: &[&str] = &[];
+diff --git a/vendor/gpui-pre/src/window.rs b/vendor/gpui-pre/src/window.rs
+index 0dcdd2e..6c16bc1 100644
+--- a/vendor/gpui-pre/src/window.rs
++++ b/vendor/gpui-pre/src/window.rs
+@@ -1545,7 +1545,7 @@ impl Window {
+             window_min_size,
+             window_decorations,
+             #[cfg_attr(
+-                not(any(target_os = "linux", target_os = "freebsd")),
++                not(any(any(target_os = "linux", target_os = "android"), target_os = "freebsd")),
+                 allow(unused_variables)
+             )]
+             icon,
+@@ -2442,7 +2442,7 @@ impl Window {
+     /// This is only needed to disambiguate a corner-anchored surface; otherwise the
+     /// edge is deduced from the anchor. The edge must be a single edge the surface
+     /// is anchored to, or it is ignored. (Wayland layer-shell windows only)
+-    #[cfg(all(target_os = "linux", feature = "wayland"))]
++    #[cfg(all(any(target_os = "linux", target_os = "android"), feature = "wayland"))]
+     pub fn set_exclusive_edge(&self, edge: crate::layer_shell::Anchor) {
+         self.platform_window.set_exclusive_edge(edge);
+     }
+@@ -2874,7 +2874,7 @@ impl Window {
+     pub fn is_window_hovered(&self) -> bool {
+         if cfg!(any(
+             target_os = "windows",
+-            target_os = "linux",
++            any(target_os = "linux", target_os = "android"),
+             target_os = "freebsd"
+         )) {
+             self.hovered.get()
+diff --git a/vendor/quickjs-jit-runtime/Cargo.toml b/vendor/quickjs-jit-runtime/Cargo.toml
+index e244dd3..4701943 100644
+--- a/vendor/quickjs-jit-runtime/Cargo.toml
++++ b/vendor/quickjs-jit-runtime/Cargo.toml
+@@ -29,7 +29,7 @@ serde = { version = "1", features = ["derive"] }
+ serde_json = "1"
+ serde_yaml = "0.9"
+ 
+-[target.'cfg(all(target_endian = "little", any(target_os = "linux", target_os = "macos"), any(target_arch = "x86_64", target_arch = "aarch64")))'.dependencies]
++[target.'cfg(all(target_endian = "little", any(any(target_os = "linux", target_os = "android"), target_os = "macos"), any(target_arch = "x86_64", target_arch = "aarch64")))'.dependencies]
+ libc = "0.2"
+ 
+ [target.'cfg(all(target_endian = "little", target_os = "windows", any(target_arch = "x86_64", target_arch = "aarch64")))'.dependencies]
+diff --git a/vendor/quickjs-jit-runtime/src/compiler/baseline.rs b/vendor/quickjs-jit-runtime/src/compiler/baseline.rs
+index 5b08075..76a243f 100644
+--- a/vendor/quickjs-jit-runtime/src/compiler/baseline.rs
++++ b/vendor/quickjs-jit-runtime/src/compiler/baseline.rs
+@@ -2276,7 +2276,7 @@ fn retain_unwind_metadata(
+ struct NativeUnwindPlan {
+     info: CraneliftUnwindInfo,
+     #[cfg(all(
+-        any(target_os = "linux", target_os = "macos"),
++        any(any(target_os = "linux", target_os = "android"), target_os = "macos"),
+         target_endian = "little",
+         any(target_arch = "x86_64", target_arch = "aarch64")
+     ))]
+@@ -2292,7 +2292,7 @@ struct NativeUnwindPlan {
+ impl NativeUnwindPlan {
+     fn new(info: CraneliftUnwindInfo, isa: &dyn TargetIsa) -> Result<Self, CompileFailure> {
+         #[cfg(all(
+-            any(target_os = "linux", target_os = "macos"),
++            any(any(target_os = "linux", target_os = "android"), target_os = "macos"),
+             target_endian = "little",
+             any(target_arch = "x86_64", target_arch = "aarch64")
+         ))]
+@@ -2305,7 +2305,7 @@ impl NativeUnwindPlan {
+             None
+         };
+         #[cfg(not(all(
+-            any(target_os = "linux", target_os = "macos"),
++            any(any(target_os = "linux", target_os = "android"), target_os = "macos"),
+             target_endian = "little",
+             any(target_arch = "x86_64", target_arch = "aarch64")
+         )))]
+@@ -2313,7 +2313,7 @@ impl NativeUnwindPlan {
+         Ok(Self {
+             info,
+             #[cfg(all(
+-                any(target_os = "linux", target_os = "macos"),
++                any(any(target_os = "linux", target_os = "android"), target_os = "macos"),
+                 target_endian = "little",
+                 any(target_arch = "x86_64", target_arch = "aarch64")
+             ))]
+@@ -2421,7 +2421,7 @@ impl NativeUnwindPlan {
+         executable: &ExecutableCode,
+     ) -> Result<NativeUnwindRegistration, CodeMemoryError> {
+         #[cfg(all(
+-            any(target_os = "linux", target_os = "macos"),
++            any(any(target_os = "linux", target_os = "android"), target_os = "macos"),
+             target_endian = "little",
+             any(target_arch = "x86_64", target_arch = "aarch64")
+         ))]
+@@ -2566,7 +2566,7 @@ impl std::fmt::Debug for NativeUnwindRegistration {
+ impl Drop for NativeUnwindRegistration {
+     fn drop(&mut self) {
+         #[cfg(all(
+-            any(target_os = "linux", target_os = "macos"),
++            any(any(target_os = "linux", target_os = "android"), target_os = "macos"),
+             target_endian = "little",
+             any(target_arch = "x86_64", target_arch = "aarch64")
+         ))]
+@@ -2602,7 +2602,7 @@ impl Drop for NativeUnwindRegistration {
+ }
+ 
+ #[cfg(all(
+-    any(target_os = "linux", target_os = "macos"),
++    any(any(target_os = "linux", target_os = "android"), target_os = "macos"),
+     target_endian = "little",
+     any(target_arch = "x86_64", target_arch = "aarch64")
+ ))]
+@@ -2612,7 +2612,7 @@ fn systemv_registration_lock() -> &'static std::sync::Mutex<()> {
+ }
+ 
+ #[cfg(all(
+-    target_os = "linux",
++    any(target_os = "linux", target_os = "android"),
+     target_endian = "little",
+     any(target_arch = "x86_64", target_arch = "aarch64")
+ ))]
+@@ -2654,11 +2654,12 @@ fn systemv_registration_offset(eh_frame: &[u8]) -> Result<usize, CodeMemoryError
+ }
+ 
+ #[cfg(all(
+-    target_os = "linux",
++    any(target_os = "linux", target_os = "android"),
+     target_endian = "little",
+     any(target_arch = "x86_64", target_arch = "aarch64")
+ ))]
+-#[link(name = "gcc_s")]
++// Android: the NDK links libunwind into every binary, which provides these.
++#[cfg_attr(target_os = "linux", link(name = "gcc_s"))]
+ unsafe extern "C" {
+     #[link_name = "__register_frame"]
+     fn systemv_register_frame(begin: *const std::ffi::c_void);
+diff --git a/vendor/quickjs-jit-runtime/src/lib.rs b/vendor/quickjs-jit-runtime/src/lib.rs
+index 10b1dc8..735c850 100644
+--- a/vendor/quickjs-jit-runtime/src/lib.rs
++++ b/vendor/quickjs-jit-runtime/src/lib.rs
+@@ -44,7 +44,7 @@ const NATIVE_EXECUTION_SUPPORTED: bool = cfg!(any(
+         any(target_arch = "x86_64", target_arch = "aarch64")
+     ),
+     all(
+-        target_os = "linux",
++        any(target_os = "linux", target_os = "android"),
+         target_endian = "little",
+         any(target_arch = "x86_64", target_arch = "aarch64")
+     ),
+@@ -64,7 +64,7 @@ const NATIVE_EXECUTION_SUPPORTED: bool = cfg!(any(
+             any(target_arch = "x86_64", target_arch = "aarch64")
+         ),
+         all(
+-            target_os = "linux",
++            any(target_os = "linux", target_os = "android"),
+             target_endian = "little",
+             any(target_arch = "x86_64", target_arch = "aarch64")
+         )
+@@ -227,7 +227,7 @@ impl Jit {
+                     any(target_arch = "x86_64", target_arch = "aarch64")
+                 ),
+                 all(
+-                    target_os = "linux",
++                    any(target_os = "linux", target_os = "android"),
+                     target_endian = "little",
+                     any(target_arch = "x86_64", target_arch = "aarch64")
+                 )
+@@ -254,7 +254,7 @@ impl Jit {
+                     any(target_arch = "x86_64", target_arch = "aarch64")
+                 ),
+                 all(
+-                    target_os = "linux",
++                    any(target_os = "linux", target_os = "android"),
+                     target_endian = "little",
+                     any(target_arch = "x86_64", target_arch = "aarch64")
+                 )
+@@ -276,7 +276,7 @@ impl Jit {
+                     any(target_arch = "x86_64", target_arch = "aarch64")
+                 ),
+                 all(
+-                    target_os = "linux",
++                    any(target_os = "linux", target_os = "android"),
+                     target_endian = "little",
+                     any(target_arch = "x86_64", target_arch = "aarch64")
+                 )
+@@ -298,7 +298,7 @@ impl Jit {
+                     any(target_arch = "x86_64", target_arch = "aarch64")
+                 ),
+                 all(
+-                    target_os = "linux",
++                    any(target_os = "linux", target_os = "android"),
+                     target_endian = "little",
+                     any(target_arch = "x86_64", target_arch = "aarch64")
+                 )
+@@ -319,7 +319,7 @@ impl Jit {
+                     any(target_arch = "x86_64", target_arch = "aarch64")
+                 ),
+                 all(
+-                    target_os = "linux",
++                    any(target_os = "linux", target_os = "android"),
+                     target_endian = "little",
+                     any(target_arch = "x86_64", target_arch = "aarch64")
+                 )
+@@ -342,7 +342,7 @@ impl Jit {
+                     any(target_arch = "x86_64", target_arch = "aarch64")
+                 ),
+                 all(
+-                    target_os = "linux",
++                    any(target_os = "linux", target_os = "android"),
+                     target_endian = "little",
+                     any(target_arch = "x86_64", target_arch = "aarch64")
+                 )
+@@ -363,7 +363,7 @@ impl Jit {
+                     any(target_arch = "x86_64", target_arch = "aarch64")
+                 ),
+                 all(
+-                    target_os = "linux",
++                    any(target_os = "linux", target_os = "android"),
+                     target_endian = "little",
+                     any(target_arch = "x86_64", target_arch = "aarch64")
+                 )
+@@ -400,7 +400,7 @@ impl Jit {
+                             any(target_arch = "x86_64", target_arch = "aarch64")
+                         ),
+                         all(
+-                            target_os = "linux",
++                            any(target_os = "linux", target_os = "android"),
+                             target_endian = "little",
+                             any(target_arch = "x86_64", target_arch = "aarch64")
+                         )
+@@ -423,7 +423,7 @@ impl Jit {
+                             any(target_arch = "x86_64", target_arch = "aarch64")
+                         ),
+                         all(
+-                            target_os = "linux",
++                            any(target_os = "linux", target_os = "android"),
+                             target_endian = "little",
+                             any(target_arch = "x86_64", target_arch = "aarch64")
+                         )
+@@ -449,7 +449,7 @@ impl Jit {
+                             any(target_arch = "x86_64", target_arch = "aarch64")
+                         ),
+                         all(
+-                            target_os = "linux",
++                            any(target_os = "linux", target_os = "android"),
+                             target_endian = "little",
+                             any(target_arch = "x86_64", target_arch = "aarch64")
+                         )
+@@ -472,7 +472,7 @@ impl Jit {
+                             any(target_arch = "x86_64", target_arch = "aarch64")
+                         ),
+                         all(
+-                            target_os = "linux",
++                            any(target_os = "linux", target_os = "android"),
+                             target_endian = "little",
+                             any(target_arch = "x86_64", target_arch = "aarch64")
+                         )
+@@ -498,7 +498,7 @@ impl Jit {
+                             any(target_arch = "x86_64", target_arch = "aarch64")
+                         ),
+                         all(
+-                            target_os = "linux",
++                            any(target_os = "linux", target_os = "android"),
+                             target_endian = "little",
+                             any(target_arch = "x86_64", target_arch = "aarch64")
+                         )
+@@ -521,7 +521,7 @@ impl Jit {
+                             any(target_arch = "x86_64", target_arch = "aarch64")
+                         ),
+                         all(
+-                            target_os = "linux",
++                            any(target_os = "linux", target_os = "android"),
+                             target_endian = "little",
+                             any(target_arch = "x86_64", target_arch = "aarch64")
+                         )
+@@ -666,7 +666,7 @@ impl Jit {
+             any(target_arch = "x86_64", target_arch = "aarch64")
+         ),
+         all(
+-            target_os = "linux",
++            any(target_os = "linux", target_os = "android"),
+             target_endian = "little",
+             any(target_arch = "x86_64", target_arch = "aarch64")
+         )
+@@ -691,7 +691,7 @@ struct NoopBackend {
+             any(target_arch = "x86_64", target_arch = "aarch64")
+         ),
+         all(
+-            target_os = "linux",
++            any(target_os = "linux", target_os = "android"),
+             target_endian = "little",
+             any(target_arch = "x86_64", target_arch = "aarch64")
+         )
+@@ -787,7 +787,7 @@ const NATIVE_RETURN_FEEDBACK_PC: u32 = u32::MAX;
+             any(target_arch = "x86_64", target_arch = "aarch64")
+         ),
+         all(
+-            target_os = "linux",
++            any(target_os = "linux", target_os = "android"),
+             target_endian = "little",
+             any(target_arch = "x86_64", target_arch = "aarch64")
+         )
+@@ -1034,7 +1034,7 @@ impl ProductionProfile {
+             any(target_arch = "x86_64", target_arch = "aarch64")
+         ),
+         all(
+-            target_os = "linux",
++            any(target_os = "linux", target_os = "android"),
+             target_endian = "little",
+             any(target_arch = "x86_64", target_arch = "aarch64")
+         )
+@@ -2423,7 +2423,7 @@ mod production_osr_validation_tests {
+             any(target_arch = "x86_64", target_arch = "aarch64")
+         ),
+         all(
+-            target_os = "linux",
++            any(target_os = "linux", target_os = "android"),
+             target_endian = "little",
+             any(target_arch = "x86_64", target_arch = "aarch64")
+         )
+@@ -3528,7 +3528,7 @@ impl ProductionBackend {
+             any(target_arch = "x86_64", target_arch = "aarch64")
+         ),
+         all(
+-            target_os = "linux",
++            any(target_os = "linux", target_os = "android"),
+             target_endian = "little",
+             any(target_arch = "x86_64", target_arch = "aarch64")
+         )
+@@ -4516,7 +4516,7 @@ mod jit_runtime_drop_tests {
+             any(target_arch = "x86_64", target_arch = "aarch64")
+         ),
+         all(
+-            target_os = "linux",
++            any(target_os = "linux", target_os = "android"),
+             target_endian = "little",
+             any(target_arch = "x86_64", target_arch = "aarch64")
+         )
+diff --git a/vendor/quickjs-jit-runtime/src/platform/mod.rs b/vendor/quickjs-jit-runtime/src/platform/mod.rs
+index 7f44289..a282318 100644
+--- a/vendor/quickjs-jit-runtime/src/platform/mod.rs
++++ b/vendor/quickjs-jit-runtime/src/platform/mod.rs
+@@ -1,13 +1,13 @@
+ //! W^X executable-memory allocation for supported desktop targets.
+ 
+ #[cfg(all(
+-    target_os = "linux",
++    any(target_os = "linux", target_os = "android"),
+     target_endian = "little",
+     any(target_arch = "x86_64", target_arch = "aarch64")
+ ))]
+ mod linux;
+ #[cfg(all(
+-    target_os = "linux",
++    any(target_os = "linux", target_os = "android"),
+     target_endian = "little",
+     any(target_arch = "x86_64", target_arch = "aarch64")
+ ))]
+@@ -41,7 +41,7 @@ use windows as backend;
+ 
+ #[cfg(not(any(
+     all(
+-        target_os = "linux",
++        any(target_os = "linux", target_os = "android"),
+         target_endian = "little",
+         any(target_arch = "x86_64", target_arch = "aarch64")
+     ),
+@@ -59,7 +59,7 @@ use windows as backend;
+ mod unsupported;
+ #[cfg(not(any(
+     all(
+-        target_os = "linux",
++        any(target_os = "linux", target_os = "android"),
+         target_endian = "little",
+         any(target_arch = "x86_64", target_arch = "aarch64")
+     ),
+@@ -86,7 +86,7 @@ use std::{
+     },
+ };
+ 
+-#[cfg(any(target_os = "linux", target_os = "macos"))]
++#[cfg(any(any(target_os = "linux", target_os = "android"), target_os = "macos"))]
+ use std::ptr::NonNull;
+ 
+ use crate::code_cache::{RelocationKind, ResolvedRelocation};
+@@ -962,7 +962,7 @@ fn next_owner_id() -> u64 {
+     NEXT_OWNER_ID.fetch_add(1, Ordering::Relaxed)
+ }
+ 
+-#[cfg(any(target_os = "linux", target_os = "macos"))]
++#[cfg(any(any(target_os = "linux", target_os = "android"), target_os = "macos"))]
+ unsafe fn nonnull_mmap_address_or_cleanup(
+     address: *mut c_void,
+     len: usize,
+@@ -1071,7 +1071,7 @@ mod mac_jit_policy_tests {
+     }
+ }
+ 
+-#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
++#[cfg(all(test, any(any(target_os = "linux", target_os = "android"), target_os = "macos")))]
+ mod mmap_result_tests {
+     use super::{nonnull_mmap_address_or_cleanup, CodeMemoryError};
+     use std::ffi::c_void;

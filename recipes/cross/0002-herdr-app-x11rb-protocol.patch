@@ -1,0 +1,19 @@
+
+--- a/src/parse_display/connect_instruction.rs	2026-11-07 17:02:02.233448545 +0300
++++ b/src/parse_display/connect_instruction.rs	2026-11-07 14:41:15.463594567 +0300
+@@ -39,7 +39,14 @@
+         targets.push(ConnectAddress::Hostname(host, TCP_PORT_BASE + display));
+     } else {
+         if protocol.is_none() || protocol.as_deref() == Some("unix") {
+-            let file_name = format!("/tmp/.X11-unix/X{display}");
++            // Termux: no /tmp; the X server listens under $TMPDIR (or $PREFIX/tmp),
++            // whatever the app's prefix is.
++            let dir = std::env::var("TMPDIR")
++                .ok()
++                .filter(|t| !t.is_empty())
++                .or_else(|| std::env::var("PREFIX").ok().filter(|p| !p.is_empty()).map(|p| format!("{p}/tmp")))
++                .unwrap_or_else(|| "/tmp".into());
++            let file_name = format!("{dir}/.X11-unix/X{display}");
+             targets.push(ConnectAddress::Socket(file_name));
+         }
+ 

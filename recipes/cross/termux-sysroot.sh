@@ -28,6 +28,10 @@ set -euo pipefail
 
 TL_SYSROOT=${TL_SYSROOT:-"$PWD/sysroot"}
 TL_TERMUX_REPO=${TL_TERMUX_REPO:-"https://packages.termux.dev/apt/termux-main"}
+# Termux's x11 package source (suite x11), searched for a package main does not carry, such as
+# libxkbcommon. Empty turns it off; an edition whose own repository carries everything leaves it
+# unused.
+TL_TERMUX_X11_REPO=${TL_TERMUX_X11_REPO-"https://packages.termux.dev/apt/termux-x11"}
 TL_TERMUX_ARCH=${TL_TERMUX_ARCH:-aarch64}
 TL_CACHE=${TL_CACHE:-"$PWD/debs"}
 
@@ -64,14 +68,20 @@ if [ ! -f "$index" ]; then
     curl -fsS --max-time 120 \
         "$TL_TERMUX_REPO/dists/stable/main/binary-$TL_TERMUX_ARCH/Packages.gz" -o "$index"
 fi
+x11_index="$TL_CACHE/Packages-x11.gz"
+if [ -n "$TL_TERMUX_X11_REPO" ] && [ ! -f "$x11_index" ]; then
+    echo "Fetching the x11 package index for $TL_TERMUX_ARCH..."
+    curl -fsS --max-time 120 \
+        "$TL_TERMUX_X11_REPO/dists/x11/main/binary-$TL_TERMUX_ARCH/Packages.gz" -o "$x11_index"
+fi
 
 packages=("$@")
 if [ ${#packages[@]} -eq 0 ]; then
     packages=("${DEFAULT_PACKAGES[@]}")
 fi
 
-for package in "${packages[@]}"; do
-    filename=$(python3 - "$index" "$package" <<'PY'
+lookup() {
+    python3 - "$1" "$2" <<'PY'
 import gzip, sys
 index, want = sys.argv[1], sys.argv[2]
 text = gzip.open(index, 'rt', errors='replace').read()
@@ -81,13 +91,21 @@ for block in text.split('\n\n'):
         print(fields['Filename'])
         break
 PY
-)
+}
+
+for package in "${packages[@]}"; do
+    repo="$TL_TERMUX_REPO"
+    filename=$(lookup "$index" "$package")
+    if [ -z "$filename" ] && [ -n "$TL_TERMUX_X11_REPO" ]; then
+        repo="$TL_TERMUX_X11_REPO"
+        filename=$(lookup "$x11_index" "$package")
+    fi
     if [ -z "$filename" ]; then
         echo "warning: $package is not in the index; skipping" >&2
         continue
     fi
     deb="$TL_CACHE/$(basename "$filename")"
-    [ -f "$deb" ] || curl -fsS --max-time 300 "$TL_TERMUX_REPO/$filename" -o "$deb"
+    [ -f "$deb" ] || curl -fsS --max-time 300 "$repo/$filename" -o "$deb"
     extract_deb "$deb" "$TL_SYSROOT"
     echo "installed $package"
 done
