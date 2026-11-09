@@ -56,7 +56,7 @@
 
 set -u
 
-TLSTORE_VERSION=0.27
+TLSTORE_VERSION=0.28
 
 # The first tlstore whose `update` only refreshes and lists (Revision 19);
 # `upgrade` installs. An engine before it hands an update it has just
@@ -2011,9 +2011,15 @@ do_file() {
             return 0
         fi
         [ "$df_edited" = 0 ] || backup_existing "$df_dest"
-        cp "$df_new" "$df_dest" || return 1
+        # Renamed into place, never written over: a program running from the
+        # file (a server started from it) holds it busy, and a write fails.
+        df_tmp="$(dirname "$df_dest")/.$(basename "$df_dest").$$.part"
+        if ! cp "$df_new" "$df_tmp" || ! chmod "$df_mode" "$df_tmp" || ! mv -f "$df_tmp" "$df_dest"; then
+            rm -f "$df_tmp" "$df_new"
+            err "could not put $(basename "$df_dest") in place"
+            return 1
+        fi
         rm -f "$df_new"
-        chmod "$df_mode" "$df_dest"
         state_record "$ii_name" file "$ii_version" "$df_dest"
         say "  $df_dest"
         return 0
