@@ -1244,11 +1244,16 @@ run_suite() {
     printf 'greeting, second edition\n' > "$FX/hello2.conf"
     write_catalog "$wr_cat" 2026090690 3 fakebin-1
     sed -i "s|file://$FX/hello.conf$T$(sha "$FX/hello.conf")$T~/.config/hello.conf$T|file://$FX/hello2.conf$T$(sha "$FX/hello2.conf")$T~/.config/hello.conf$T|" "$wr_cat"
+    rm -f "$FX/hello-held"
+    ln "$TESTHOME/.config/hello.conf" "$FX/hello-held"
     TTY_KNOB=1
     STDIN_TEXT=$'y\n'
     tl upgrade hello --offline
     expect_status "an update of a config nobody edited" 0
     expect_content "it is replaced" "$TESTHOME/.config/hello.conf" "greeting, second edition"
+    # A running program holds its file busy; the new one is renamed in, never written over.
+    if cmp -s "$FX/hello.conf" "$FX/hello-held"; then pass; else fail "the old file is renamed away, not written over"; fi
+    rm -f "$FX/hello-held"
     expect_no_out "without a question" "Replace"
     if ls "$TESTHOME/.config/hello.conf".bak-* >/dev/null 2>&1; then fail "and nothing to keep a copy of"; else pass; fi
     if [ "$(wr_written)" = "$(sha "$FX/hello2.conf")" ]; then pass; else fail "the recorded digest moves with it" "$(wr_written)"; fi
