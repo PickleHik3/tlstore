@@ -164,7 +164,7 @@ zoxide	pkg	-	*	zoxide	-	-	hidden=1	Jump to the directories you use most by name.
 # repositories build for that prefix.
 x11-repo	pkg	-	com.termux	x11-repo	-	-	hidden=1;repo=1	Turns on Termux's x11 package source, where Electron comes from.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
 electron42	pkg	-	com.termux	electron42	-	x11-repo	hidden=1	Termux's Electron, which terminal-browser runs on.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
-herdr-core	archive	0.1.18+9ce385d.2	*	binaries:herdr-core@bins-2026.11.09	-	-	hidden=1;exe=bin/hc;command=hc	hc, the runtime that keeps Herdr's terminals and agents running.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
+herdr-core	archive	0.1.18+9ce385d.3	*	binaries:herdr-core@bins-2026.11.09-3	-	-	hidden=1;exe=bin/hc;command=hc	hc, the runtime that keeps Herdr's terminals and agents running.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
 herdr-core-name	file	b21e849b	*	binaries:shims/herdr-core/herdr-core@b21e849b99327920741209ea769815a2e5bfd292	~/.local/bin/herdr-core	herdr-core	hidden=1;mode=755	herdr-core, the name the Herdr app and other machines look for first: it runs hc.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
 herdr-gui-libs	pkg	-	com.termux	libxcb libxkbcommon fontconfig freetype vulkan-loader-generic	-	x11-repo	hidden=1	The X11, font and Vulkan libraries the Herdr desktop app runs on.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
 herdr-gui-libs	pkg	-	io.vaj.tl	libxcb libxkbcommon fontconfig freetype vulkan-loader-generic	-	-	hidden=1	The X11, font and Vulkan libraries the Herdr desktop app runs on.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
