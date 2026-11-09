@@ -240,6 +240,11 @@ if [ -z "${VK_ICD_FILENAMES:-}${VK_DRIVER_FILES:-}" ] && command -v launcherctl 
     done
   fi
 fi
+# A virgl profile (a drawer launch on a phone whose GPU has no Mesa driver, such as an Intel one)
+# sends Mesa's OpenGL to the virgl server, which the launcher starts for OpenGL apps only. This
+# app opens EGL while it starts, and Mesa aborts the whole process when that server is not there,
+# so its OpenGL goes back to Mesa's own choice; the drawing stays on Vulkan either way.
+[ "${GALLIUM_DRIVER:-}" != virpipe ] || unset GALLIUM_DRIVER
 
 found=
 for f in "$USR"/share/vulkan/icd.d/*.json; do
