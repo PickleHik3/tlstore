@@ -178,11 +178,13 @@ echo "Building..."
     # bindgen (ghostty-sys, quickjs-jit-sys) parses headers for the target: the NDK's sysroot and
     # its clang's own builtin headers (stdbool.h and the like).
     resource_dir=$("$NDK_BIN/clang" -print-resource-dir)
-    # ...and the NDK's own libclang to parse them with. A host libclang of another version (a CI
-    # runner's llvm-18) puts its own builtin headers after these, and clang 21's stdint.h then
-    # include_nexts into clang 18's, which its guard skips: bionic's stdint.h is never reached.
+    # bindgen also asks the first clang on PATH for its include paths and adds them; on a CI
+    # runner that is llvm-18, whose builtin headers then sit between these and bionic's, and
+    # clang 21's stdint.h include_nexts into clang 18's, which its guard skips. Naming bionic's
+    # include directories here, right after the builtins, keeps that clang's out of the way.
+    # The NDK's own libclang parses them, the same version as the builtins.
     export LIBCLANG_PATH="$TL_NDK/toolchains/llvm/prebuilt/linux-x86_64/lib"
-    export "BINDGEN_EXTRA_CLANG_ARGS_${triple_env}=--target=$TL_TRIPLE$TL_ANDROID_API --sysroot=$ndk_sysroot -isystem $resource_dir/include"
+    export "BINDGEN_EXTRA_CLANG_ARGS_${triple_env}=--target=$TL_TRIPLE$TL_ANDROID_API --sysroot=$ndk_sysroot -isystem $resource_dir/include -isystem $ndk_sysroot/usr/include/$TL_TRIPLE -isystem $ndk_sysroot/usr/include"
     # quickjs-jit-sys also runs bindgen for the build host; a libclang without a clang beside it
     # lacks the builtin headers, and Zig ships the same ones.
     if ! command -v clang >/dev/null 2>&1; then
