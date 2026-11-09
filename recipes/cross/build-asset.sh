@@ -222,7 +222,8 @@ case "$tool" in
         cp "$TL_OUT/herdr" "$TL_ASSETS/$asset"
         ;;
     herdr-core)
-        # hc, the terminal runtime under the Herdr desktop app: one bare bionic binary.
+        # hc, the terminal runtime under the Herdr desktop app: a .tar.gz app tree (an archive item),
+        # the bare bionic binary and the start script that gives it a Termux environment.
         "$SCRIPT_DIR/build-herdr-core.sh"
         cp "$TL_OUT/herdr-core" "$TL_ASSETS/$asset"
         ;;

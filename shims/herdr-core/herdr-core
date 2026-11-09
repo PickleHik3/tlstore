@@ -1,0 +1,4 @@
+#!/system/bin/sh
+# herdr-core as tlstore installs it: the name the Herdr app and other machines look for first.
+# It is the store's hc beside it, whose start script gives the core a Termux environment.
+exec "$(dirname -- "$0")/hc" "$@"

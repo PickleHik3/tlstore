@@ -3,8 +3,19 @@
 # TL_ARCH (aarch64 by default, or x86_64), built from source for <arch>-linux-android (bionic).
 #
 # One bare PIE per arch: interpreter /system/bin/linker64, NEEDED libc and libdl only, no prefix
-# baked in, so one copy serves every launcher edition. The catalog installs it as ~/.local/bin/hc,
-# the name people and agents type; herdr-app finds the core under that name too.
+# baked in, so one copy serves every launcher edition. It ships as a .tar.gz app tree (an archive
+# item, unpacked into ~/.local/lib/herdr-core):
+#
+#   bin/hc         a start script, what the catalog's exe= runs (its wrapper is ~/.local/bin/hc)
+#   libexec/hc     the stripped binary
+#   LICENSE
+#
+# The start script gives the core a Termux environment when whoever started it had none: a
+# `herdr-core connect` arriving over Termux's sshd (another machine with this phone added) gets
+# Android's bare PATH, no PREFIX and no termux-exec, and the core's server keeps that environment
+# for its whole life, for every ssh it runs and every terminal it starts. The name Herdr and
+# remote machines look for first, ~/.local/bin/herdr-core, is the catalog's herdr-core-name part,
+# which execs hc beside it.
 #
 # What it takes, all of it in this script and its patch:
 #   - upstream's Rust from the pinned commit below (upstream tags no releases in git), with the
@@ -28,6 +39,7 @@ set -euo pipefail
 CORE_URL="https://github.com/herdrdev/herdr-core.git"
 CORE_COMMIT="9ce385d9c8abb041dd4437476d770365b3fb5282"   # 0.1.18 on master
 CORE_VERSION="0.1.18"
+CORE_MTIME=1794009600   # the archive's file times, so a rebuild is byte for byte the same
 ZIG_VERSION="0.16.0"
 ZIG_SHA256=70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00
 
@@ -126,12 +138,64 @@ echo "Building..."
     cargo build --release --locked --target "$TL_TRIPLE" -p herdr-core
 )
 
+stage="$TL_BUILD_DIR/stage-$TL_ARCH"
+rm -rf "$stage"
+mkdir -p "$stage/bin" "$stage/libexec"
+"$NDK_BIN/llvm-strip" -o "$stage/libexec/hc" "$source_dir/target/$TL_TRIPLE/release/herdr-core"
+chmod 755 "$stage/libexec/hc"
+cp "$source_dir/LICENSE" "$stage/"
+
+cat > "$stage/bin/hc" <<'EOF'
+#!/system/bin/sh
+# hc (herdr-core) as tlstore ships it: built from upstream's source for Android, in ../libexec.
+SELF="$0"
+while [ -L "$SELF" ]; do
+  LINK="$(readlink "$SELF")"
+  case "$LINK" in
+    /*) SELF="$LINK" ;;
+    *) SELF="$(dirname -- "$SELF")/$LINK" ;;
+  esac
+done
+ROOT="$(CDPATH= cd -- "$(dirname -- "$SELF")/.." && pwd -P)"
+
+# A core started without Termux's environment (over Termux's sshd: Android's bare PATH, no PREFIX,
+# no termux-exec) keeps it in its server for good, so ssh, git and the agents are not found in
+# anything it runs. Put back what a Termux login sets, only where it is missing.
+# ~/.local/lib/herdr-core -> the edition's $PREFIX.
+USR="$(CDPATH= cd -- "$ROOT/../../../../usr" 2>/dev/null && pwd -P)"
+if [ -n "$USR" ] && [ -x "$USR/bin/sh" ]; then
+  [ -n "${PREFIX:-}" ] || export PREFIX="$USR"
+  case ":${PATH:-}:" in
+    *":$PREFIX/bin:"*) ;;
+    *) export PATH="$PREFIX/bin${PATH:+:$PATH}" ;;
+  esac
+  if [ -z "${LD_PRELOAD:-}" ]; then
+    for lib in "$PREFIX/lib/libtermux-exec-ld-preload.so" "$PREFIX/lib/libtermux-exec.so"; do
+      if [ -f "$lib" ]; then
+        export LD_PRELOAD="$lib"
+        break
+      fi
+    done
+  fi
+  [ -n "${TMPDIR:-}" ] || export TMPDIR="$PREFIX/tmp"
+  [ -n "${LANG:-}" ] || export LANG=en_US.UTF-8
+fi
+
+exec "$ROOT/libexec/hc" "$@"
+EOF
+chmod 755 "$stage/bin/hc"
+
+# --- the archive --------------------------------------------------------------------------------
 rm -f "$TL_OUT/herdr-core"
-"$NDK_BIN/llvm-strip" -o "$TL_OUT/herdr-core" "$source_dir/target/$TL_TRIPLE/release/herdr-core"
-chmod 755 "$TL_OUT/herdr-core"
+(
+    cd "$stage"
+    find . -mindepth 1 -printf '%P\n' | LC_ALL=C sort \
+        | tar --no-recursion -T - -cf - --format=gnu --mtime="@$CORE_MTIME" \
+            --owner=0 --group=0 --numeric-owner --mode='u+rwX,go+rX,go-w'
+) | gzip -9n > "$TL_OUT/herdr-core"
 
 echo
-echo "Built: $TL_OUT/herdr-core (herdr-core $CORE_VERSION for $TL_ARCH)"
-"$NDK_BIN/llvm-readelf" -d "$TL_OUT/herdr-core" | grep -E "NEEDED|RUNPATH" || true
+echo "Built: $TL_OUT/herdr-core (herdr-core $CORE_VERSION for $TL_ARCH, as an app tree)"
+"$NDK_BIN/llvm-readelf" -d "$stage/libexec/hc" | grep -E "NEEDED|RUNPATH" || true
 ls -l "$TL_OUT/herdr-core"
 sha256sum "$TL_OUT/herdr-core"
