@@ -17,15 +17,18 @@ again and everything is where you left it.
 
 ## Opening it
 
-In Termux Launcher, open **Herdr** from the app drawer, or run it from a terminal:
+It draws through the GPU, so it needs a graphics driver first. In Termux Launcher, open
+Settings > Linux apps > Graphics acceleration and run the benchmark once; Herdr then uses the
+driver it sets up. After that, open **Herdr** from the app drawer, or run it from a terminal:
 
 ```sh
 herdr-app
 ```
 
-On stock Termux it needs an X server. Install the Termux:X11 app first, then:
+On stock Termux it needs a driver and an X server. Install the Termux:X11 app first, then:
 
 ```sh
+pkg install mesa-vulkan-icd-freedreno   # an Adreno GPU; on any other: pkg install vulkan-icd
 pkg install termux-x11-nightly
 termux-x11 :0 &
 DISPLAY=:0 herdr-app
@@ -35,7 +38,8 @@ and switch to the Termux:X11 app to see the window.
 
 ## Good to know
 
-- It needs Android 10 or newer and a phone whose GPU has a Vulkan driver.
+- It needs Android 10 or newer. Started without a graphics driver, it says how to get one
+  instead of opening.
 - Keep it current with `tlstore upgrade herdr-gui`, like everything else from the store. The app's
   own updater and core installer are switched off here: the store installs and updates both.
 - It is separate from the store's `herdr` item, the terminal version. They run on different

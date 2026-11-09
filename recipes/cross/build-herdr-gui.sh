@@ -6,14 +6,16 @@
 #
 # The archive (an archive item, docs/SPEC.md Revision 14), top level = the app root:
 #
-#   bin/herdr-app    the stripped binary, what the catalog's exe= runs
+#   bin/herdr-app    a start script, what the catalog's exe= runs: it picks the Vulkan driver
+#                    the launcher recommends, or says how to get one, then execs ../libexec
+#   libexec/herdr-app  the stripped binary
 #   share/herdr-app.svg  upstream's app icon, named by the launcher's desktop entry
 #                    (desktop/herdr-app.<edition>.desktop, the herdr-gui-desktop part)
 #   LICENSE, THIRD-PARTY-NOTICES
 #
 # No prefix is baked in, so one copy serves every launcher edition: the binary finds Termux's
 # libraries (libxcb, libxkbcommon; fontconfig and Vulkan are dlopen()ed) through a RUNPATH
-# relative to itself, $ORIGIN/../../../../../usr/lib, which from ~/.local/lib/herdr-gui/bin is
+# relative to itself, $ORIGIN/../../../../../usr/lib, which from ~/.local/lib/herdr-gui/libexec is
 # the edition's $PREFIX/lib. It is linked against com.termux's packages (the libraries are the
 # same on every edition; only their .pc files name a prefix).
 #
@@ -204,8 +206,58 @@ echo "Building..."
 # --- the app tree -------------------------------------------------------------------------------
 stage="$TL_BUILD_DIR/stage-$TL_ARCH"
 rm -rf "$stage"
-mkdir -p "$stage/bin" "$stage/share"
-"$NDK_BIN/llvm-strip" -o "$stage/bin/herdr-app" "$source_dir/target/$TL_TRIPLE/release/herdr-app"
+mkdir -p "$stage/bin" "$stage/libexec" "$stage/share"
+"$NDK_BIN/llvm-strip" -o "$stage/libexec/herdr-app" "$source_dir/target/$TL_TRIPLE/release/herdr-app"
+chmod 755 "$stage/libexec/herdr-app"
+
+cat > "$stage/bin/herdr-app" <<'EOF'
+#!/bin/sh
+# herdr-app as tlstore ships it: built from upstream's source for Android, in ../libexec.
+SELF="$0"
+while [ -L "$SELF" ]; do
+  LINK="$(readlink "$SELF")"
+  case "$LINK" in
+    /*) SELF="$LINK" ;;
+    *) SELF="$(dirname -- "$SELF")/$LINK" ;;
+  esac
+done
+ROOT="$(CDPATH= cd -- "$(dirname -- "$SELF")/.." && pwd -P)"
+# ~/.local/lib/herdr-gui -> the edition's $PREFIX, the same walk as the binary's RUNPATH.
+USR="${PREFIX:-$ROOT/../../../../usr}"
+
+# The store installs no Vulkan driver: in Termux Launcher it is the one Graphics acceleration
+# sets up. When nothing chose one already (a launch from the app drawer carries the profile's own
+# environment), take the driver the launcher recommends, only if that driver is installed, with
+# the Vulkan settings that go with it (Turnip's TU_DEBUG, Mesa's MESA_VK_*). Its OpenGL ones
+# (Zink, virgl) are left out: this app draws through Vulkan alone.
+if [ -z "${VK_ICD_FILENAMES:-}${VK_DRIVER_FILES:-}" ] && command -v launcherctl >/dev/null 2>&1; then
+  GPU_ENV="$(launcherctl x11 gpu --env 2>/dev/null)"
+  ICD="$(printf '%s\n' "$GPU_ENV" | sed -n 's/^export VK_ICD_FILENAMES=//p' | head -n 1)"
+  if [ -n "$ICD" ] && [ -f "$ICD" ]; then
+    export VK_ICD_FILENAMES="$ICD"
+    for line in $(printf '%s\n' "$GPU_ENV" | sed -n -e 's/^export \(TU_DEBUG=[^ ]*\)$/\1/p' -e 's/^export \(MESA_VK_[A-Z_]*=[^ ]*\)$/\1/p'); do
+      export "${line?}"
+    done
+  fi
+fi
+
+found=
+for f in "$USR"/share/vulkan/icd.d/*.json; do
+  [ -f "$f" ] && found=1 && break
+done
+if [ -z "$found" ]; then
+  echo "herdr-app: no Vulkan driver is installed, and it draws through Vulkan." >&2
+  if command -v launcherctl >/dev/null 2>&1; then
+    echo "  Open Settings > Linux apps > Graphics acceleration and run the benchmark." >&2
+  else
+    echo "  On an Adreno GPU: pkg install mesa-vulkan-icd-freedreno" >&2
+    echo "  On any other:     pkg install vulkan-icd   (software, slower)" >&2
+  fi
+  exit 1
+fi
+
+exec "$ROOT/libexec/herdr-app" "$@"
+EOF
 chmod 755 "$stage/bin/herdr-app"
 cp "$source_dir/LICENSE" "$source_dir/THIRD-PARTY-NOTICES" "$stage/"
 cp "$source_dir/assets/icons/herdr-ui-icon-clean.svg" "$stage/share/herdr-app.svg"
@@ -220,6 +272,6 @@ rm -f "$TL_OUT/herdr-gui"
 
 echo
 echo "Built: $TL_OUT/herdr-gui (herdr-app $APP_VERSION for $TL_ARCH, as an app tree)"
-"$NDK_BIN/llvm-readelf" -d "$stage/bin/herdr-app" | grep -E "NEEDED|RUNPATH" || true
+"$NDK_BIN/llvm-readelf" -d "$stage/libexec/herdr-app" | grep -E "NEEDED|RUNPATH" || true
 ls -l "$TL_OUT/herdr-gui"
 sha256sum "$TL_OUT/herdr-gui"
