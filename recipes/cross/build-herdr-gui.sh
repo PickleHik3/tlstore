@@ -245,6 +245,10 @@ fi
 # app opens EGL while it starts, and Mesa aborts the whole process when that server is not there,
 # so its OpenGL goes back to Mesa's own choice; the drawing stays on Vulkan either way.
 [ "${GALLIUM_DRIVER:-}" != virpipe ] || unset GALLIUM_DRIVER
+# The same profile's LIBGL_KOPPER_DISABLE=1 steers the app off a hardware Vulkan driver it would
+# otherwise pick (an Intel ANV beside lavapipe ends up unused), and it is an OpenGL knob this
+# Vulkan app has no use for.
+unset LIBGL_KOPPER_DISABLE
 
 found=
 for f in "$USR"/share/vulkan/icd.d/*.json; do
