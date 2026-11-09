@@ -178,6 +178,10 @@ echo "Building..."
     # bindgen (ghostty-sys, quickjs-jit-sys) parses headers for the target: the NDK's sysroot and
     # its clang's own builtin headers (stdbool.h and the like).
     resource_dir=$("$NDK_BIN/clang" -print-resource-dir)
+    # ...and the NDK's own libclang to parse them with. A host libclang of another version (a CI
+    # runner's llvm-18) puts its own builtin headers after these, and clang 21's stdint.h then
+    # include_nexts into clang 18's, which its guard skips: bionic's stdint.h is never reached.
+    export LIBCLANG_PATH="$TL_NDK/toolchains/llvm/prebuilt/linux-x86_64/lib"
     export "BINDGEN_EXTRA_CLANG_ARGS_${triple_env}=--target=$TL_TRIPLE$TL_ANDROID_API --sysroot=$ndk_sysroot -isystem $resource_dir/include"
     # quickjs-jit-sys also runs bindgen for the build host; a libclang without a clang beside it
     # lacks the builtin headers, and Zig ships the same ones.
