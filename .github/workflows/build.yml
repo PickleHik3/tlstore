@@ -39,7 +39,7 @@ on:
   workflow_dispatch:
     inputs:
       tools:
-        description: "Tools to build: all, or a comma list of btop, tl-priv, tuios-cpu, kitten, tuios, sigye, herdr, terminal-browser, fastfetch, dawn, musl-loader, musl-runtime, launcher-skills"
+        description: "Tools to build: all, or a comma list of btop, tl-priv, tuios-cpu, kitten, tuios, sigye, herdr, herdr-core, herdr-gui, terminal-browser, fastfetch, dawn, musl-loader, musl-runtime, launcher-skills"
         required: false
         default: "all"
   workflow_call:
@@ -131,7 +131,7 @@ jobs:
       # sigye, herdr and terminal-browser (its pixel.node and agent-browser) are Rust, built with the
       # NDK. herdr's recipe downloads its own Zig.
       - name: Rust target
-        if: matrix.tool == 'sigye' || matrix.tool == 'herdr' || matrix.tool == 'terminal-browser'
+        if: matrix.tool == 'sigye' || matrix.tool == 'herdr' || matrix.tool == 'herdr-core' || matrix.tool == 'herdr-gui' || matrix.tool == 'terminal-browser'
         run: |
           rustup update stable
           rustup target add ${{ matrix.arch }}-linux-android

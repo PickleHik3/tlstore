@@ -1,0 +1,324 @@
+diff --git a/crates/ghostty-vt/build.rs b/crates/ghostty-vt/build.rs
+index 77cc17d..06fcea8 100644
+--- a/crates/ghostty-vt/build.rs
++++ b/crates/ghostty-vt/build.rs
+@@ -37,9 +37,15 @@ fn main() {
+     }
+     // Building for another target than this machine (the static musl Linux
+     // release), or for Windows (its libc must be named): Zig must build for it too.
+-    if target != host || windows {
++    // Android (Termux): Zig builds for Bionic itself. Ghostty's SIMD code is
++    // C++ that would need the NDK's libc++, so it is left out there.
++    let android = target.ends_with("android");
++    if target != host || windows || android {
+         build.arg(format!("-Dtarget={}", zig_target(&target)));
+     }
++    if android {
++        build.arg("-Dsimd=false");
++    }
+     let status = build
+         .arg("--prefix")
+         .arg(out.join("zig-out"))
+@@ -64,6 +70,9 @@ fn main() {
+ /// `x86_64-pc-windows-msvc` -> `x86_64-windows-msvc`.
+ fn zig_target(triple: &str) -> String {
+     let arch = triple.split('-').next().unwrap_or("native");
++    if triple.ends_with("android") {
++        return format!("{arch}-linux-android");
++    }
+     let os = if triple.contains("apple") {
+         "macos"
+     } else if triple.contains("windows") {
+diff --git a/crates/herdr-core/src/cli.rs b/crates/herdr-core/src/cli.rs
+index 1f8fe9a..13c4b8a 100644
+--- a/crates/herdr-core/src/cli.rs
++++ b/crates/herdr-core/src/cli.rs
+@@ -588,6 +588,9 @@ fn run(cmd: Option<Cmd>, json: bool, asked: bool) -> Result<Option<Out>, RpcErro
+                 let human = format!("{this} is already {v} or newer");
+                 return Ok(Some(up_to_date(&paths, v, human)?));
+             }
++            if let Some(why) = crate::platform::self_update_refused() {
++                return Err(RpcError::new("refused", why, "run `tlstore upgrade herdr-gui`"));
++            }
+             // Only when asked: hc never checks for updates on its own.
+             let scratch = crate::releases::Scratch::new()?;
+             let requested = version
+diff --git a/crates/herdr-core/src/client.rs b/crates/herdr-core/src/client.rs
+index e9a4e48..c27712e 100644
+--- a/crates/herdr-core/src/client.rs
++++ b/crates/herdr-core/src/client.rs
+@@ -55,7 +55,7 @@ pub fn build_id() -> String {
+     static BUILD: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+     BUILD
+         .get_or_init(|| {
+-            #[cfg(target_os = "linux")]
++            #[cfg(any(target_os = "linux", target_os = "android"))]
+             if let Some(id) = running_build_id() {
+                 return format!("elf:{id}");
+             }
+@@ -117,7 +117,7 @@ fn listening_elsewhere(paths: &Paths) -> Option<RpcError> {
+     ))
+ }
+ 
+-#[cfg(target_os = "linux")]
++#[cfg(any(target_os = "linux", target_os = "android"))]
+ fn running_build_id() -> Option<String> {
+     use std::io::Read;
+     let mut head = Vec::new();
+@@ -126,7 +126,7 @@ fn running_build_id() -> Option<String> {
+ }
+ 
+ /// The GNU build-id note of a 64-bit little-endian ELF, from its first bytes.
+-#[cfg(target_os = "linux")]
++#[cfg(any(target_os = "linux", target_os = "android"))]
+ fn elf_build_id(elf: &[u8]) -> Option<String> {
+     let int = |at: usize, len: usize| {
+         let bytes = elf.get(at..at.checked_add(len)?)?;
+@@ -156,7 +156,7 @@ fn elf_build_id(elf: &[u8]) -> Option<String> {
+     })
+ }
+ 
+-#[cfg(all(test, target_os = "linux"))]
++#[cfg(all(test, any(target_os = "linux", target_os = "android")))]
+ #[test]
+ fn the_build_is_named_by_the_linkers_build_id() {
+     let elf = std::fs::read("/proc/self/exe").unwrap();
+@@ -186,7 +186,7 @@ pub fn spawn_detached(paths: &Paths, args: &[&str], log: &str) -> std::io::Resul
+     // A core or holder started from inside a terminal is not that terminal's:
+     // ending the terminal must not end them.
+     cmd.args(args).env_remove(crate::sweep::VAR).env(crate::sweep::RUNTIME, "1");
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     if let Some(started) = platform::systemd::spawn(&cmd, &log) {
+         return started;
+     }
+diff --git a/crates/herdr-core/src/foreground.rs b/crates/herdr-core/src/foreground.rs
+index 4d84c41..b3e3aab 100644
+--- a/crates/herdr-core/src/foreground.rs
++++ b/crates/herdr-core/src/foreground.rs
+@@ -20,7 +20,7 @@ pub struct Foreground {
+ }
+ 
+ /// The facts about `pid`, if it is still there to read.
+-#[cfg(target_os = "linux")]
++#[cfg(any(target_os = "linux", target_os = "android"))]
+ pub fn about(pid: i32) -> Option<Foreground> {
+     let name = std::fs::read_to_string(format!("/proc/{pid}/comm")).ok()?.trim_end().to_string();
+     let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
+diff --git a/crates/herdr-core/src/platform/mod.rs b/crates/herdr-core/src/platform/mod.rs
+index ea43355..d2311d7 100644
+--- a/crates/herdr-core/src/platform/mod.rs
++++ b/crates/herdr-core/src/platform/mod.rs
+@@ -7,7 +7,7 @@ mod unix;
+ #[cfg(unix)]
+ pub use unix::*;
+ 
+-#[cfg(target_os = "linux")]
++#[cfg(any(target_os = "linux", target_os = "android"))]
+ pub mod systemd;
+ 
+ #[cfg(target_os = "macos")]
+@@ -65,6 +65,13 @@ pub fn prefer_release_bundle() -> bool {
+     true
+ }
+ 
++/// Why `hc update` must not download a release here, if it must not. On
++/// Android (Termux) hc is built for Bionic by the launcher's store, and
++/// upstream's Linux release would replace it with one that cannot run there.
++pub fn self_update_refused() -> Option<&'static str> {
++    if cfg!(target_os = "android") { Some("this hc was installed by tlstore, which keeps it up to date") } else { None }
++}
++
+ pub fn needs_bundle_update() -> bool {
+     #[cfg(target_os = "macos")]
+     {
+@@ -175,7 +182,7 @@ pub fn restart_env() -> std::io::Result<Vec<(std::ffi::OsString, Option<std::ffi
+     #[allow(unused_mut)]
+     let mut env: std::collections::BTreeMap<_, _> =
+         std::env::vars_os().map(|(key, value)| (key, Some(value))).collect();
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     for key in systemd::inherited_env()?.into_keys() {
+         env.entry(key.into()).or_insert(None);
+     }
+@@ -204,7 +211,7 @@ pub fn replace_env(
+ pub async fn program_env() -> std::collections::BTreeMap<String, String> {
+     #[allow(unused_mut)]
+     let mut env: std::collections::BTreeMap<String, String> = utf8_vars().collect();
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     {
+         env.retain(|k, _| !systemd::SERVICE.contains(&k.as_str()));
+         if let Ok(Some(manager)) = tokio::task::spawn_blocking(systemd::manager_env).await {
+diff --git a/crates/herdr-core/src/platform/unix.rs b/crates/herdr-core/src/platform/unix.rs
+index 3db8efd..4693ae4 100644
+--- a/crates/herdr-core/src/platform/unix.rs
++++ b/crates/herdr-core/src/platform/unix.rs
+@@ -223,10 +223,25 @@ pub fn own_shell() -> Vec<String> {
+     if cfg!(target_os = "macos") { vec![shell, "-l".into()] } else { vec![shell] }
+ }
+ 
++/// Where local X servers put their sockets. Termux (any app prefix) has no
++/// writable /tmp: its X server listens under `$TMPDIR`, else `$PREFIX/tmp`.
++fn x11_socket_dir() -> std::path::PathBuf {
++    if cfg!(target_os = "android") {
++        let tmp = std::env::var_os("TMPDIR")
++            .filter(|t| !t.is_empty())
++            .map(std::path::PathBuf::from)
++            .or_else(|| std::env::var_os("PREFIX").filter(|p| !p.is_empty()).map(|p| Path::new(&p).join("tmp")));
++        if let Some(tmp) = tmp {
++            return tmp.join(".X11-unix");
++        }
++    }
++    std::path::PathBuf::from("/tmp/.X11-unix")
++}
++
+ /// Drops displays whose local servers no longer accept connections.
+ pub fn drop_unreachable_displays(env: &mut std::collections::BTreeMap<String, String>) {
+     if let Some(display) = env.get("DISPLAY").cloned()
+-        && !display_is_live(&display, Path::new("/tmp/.X11-unix"))
++        && !display_is_live(&display, &x11_socket_dir())
+     {
+         env.remove("DISPLAY");
+         env.remove("XAUTHORITY");
+@@ -252,7 +267,7 @@ fn display_is_live(display: &str, sockets: &Path) -> bool {
+     if socket_is_live(&path, false) {
+         return true;
+     }
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     if socket_is_live(&path, true) {
+         return true;
+     }
+@@ -296,14 +311,14 @@ fn socket_is_live(path: &Path, abstract_socket: bool) -> bool {
+         address.sun_len = length as u8;
+     }
+     let socket_type = libc::SOCK_STREAM;
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     let socket_type = socket_type | libc::SOCK_CLOEXEC;
+     let fd = unsafe { libc::socket(libc::AF_UNIX, socket_type, 0) };
+     if fd < 0 {
+         return true;
+     }
+     let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+-    #[cfg(not(target_os = "linux"))]
++    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+     if unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
+         return true;
+     }
+@@ -355,7 +370,7 @@ mod tests {
+         drop(listener);
+         assert_socket_gone(|| display_is_live(":1", &sockets));
+         // macOS answers a connect to a regular file with an errno we treat as uncertain.
+-        #[cfg(target_os = "linux")]
++        #[cfg(any(target_os = "linux", target_os = "android"))]
+         {
+             std::fs::write(sockets.join("X2"), "").unwrap();
+             assert!(!display_is_live(":2", &sockets));
+@@ -363,7 +378,7 @@ mod tests {
+         std::fs::remove_dir_all(&sockets).unwrap();
+     }
+ 
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     #[test]
+     fn an_abstract_x_socket_needs_no_filesystem_entry() {
+         use std::os::linux::net::SocketAddrExt;
+@@ -381,7 +396,7 @@ mod tests {
+         std::fs::remove_dir_all(&sockets).unwrap();
+     }
+ 
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     #[test]
+     fn a_full_listener_backlog_does_not_block_or_remove_a_display() {
+         let runtime = dir("full-backlog");
+@@ -453,7 +468,7 @@ mod tests {
+         assert!(wayland_is_live("wayland-0", None));
+         drop(listener);
+         assert_socket_gone(|| wayland_is_live("wayland-0", Some(&runtime)));
+-        #[cfg(target_os = "linux")]
++        #[cfg(any(target_os = "linux", target_os = "android"))]
+         {
+             std::fs::write(runtime.join("regular-file"), "").unwrap();
+             assert!(!wayland_is_live("regular-file", Some(&runtime)));
+diff --git a/crates/herdr-core/src/sweep.rs b/crates/herdr-core/src/sweep.rs
+index fd0f2cd..957af84 100644
+--- a/crates/herdr-core/src/sweep.rs
++++ b/crates/herdr-core/src/sweep.rs
+@@ -38,7 +38,7 @@ fn now() -> u64 {
+ /// Linux, in clock ticks: a process's start is kept on the boot clock
+ /// (monotonic before 5.3), and a time namespace can shift the two apart, so
+ /// the lower of them.
+-#[cfg(target_os = "linux")]
++#[cfg(any(target_os = "linux", target_os = "android"))]
+ fn now() -> u64 {
+     let ns = |clock| {
+         let mut t: libc::timespec = unsafe { std::mem::zeroed() };
+@@ -131,7 +131,7 @@ pub fn members(tokens: &[String]) -> Vec<i32> {
+ 
+ /// Every live process as (pid, parent pid, start on `now()`'s clock or
+ /// later, `u64::MAX` when unknown); zombies left out.
+-#[cfg(target_os = "linux")]
++#[cfg(any(target_os = "linux", target_os = "android"))]
+ fn processes() -> Vec<(i32, i32, u64)> {
+     let stat = |pid: i32| -> Option<(i32, i32, u64)> {
+         let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+@@ -146,7 +146,7 @@ fn processes() -> Vec<(i32, i32, u64)> {
+ }
+ 
+ /// NUL-separated `KEY=value` entries; a zombie has none.
+-#[cfg(target_os = "linux")]
++#[cfg(any(target_os = "linux", target_os = "android"))]
+ fn environ(pid: i32) -> Option<Vec<u8>> {
+     std::fs::read(format!("/proc/{pid}/environ")).ok().filter(|env| !env.is_empty())
+ }
+@@ -225,7 +225,7 @@ mod tests {
+ 
+     /// Linux: the same inside a time namespace whose clocks are shifted apart.
+     #[test]
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     fn a_fresh_token_finds_its_own_in_a_shifted_time_namespace() {
+         let me = std::env::current_exe().unwrap();
+         let test = "sweep::tests::a_fresh_token_finds_its_own";
+diff --git a/crates/herdr-core/tests/distribution.rs b/crates/herdr-core/tests/distribution.rs
+index 5f9f7b5..7be91af 100644
+--- a/crates/herdr-core/tests/distribution.rs
++++ b/crates/herdr-core/tests/distribution.rs
+@@ -235,7 +235,7 @@ fn a_macos_system_install_uses_the_standalone_release() {
+     assert!(!s.root.join(".local/share/herdr-core/current").exists());
+ }
+ 
+-#[cfg(target_os = "linux")]
++#[cfg(any(target_os = "linux", target_os = "android"))]
+ #[test]
+ fn bundle_completion_skips_releases_without_a_bundle() {
+     let s = Session::new();
+diff --git a/crates/herdr-core/tests/ghosts.rs b/crates/herdr-core/tests/ghosts.rs
+index b1b8da2..c3a1c18 100644
+--- a/crates/herdr-core/tests/ghosts.rs
++++ b/crates/herdr-core/tests/ghosts.rs
+@@ -97,7 +97,7 @@ fn kept_recovery_does_not_sweep_after_a_normal_stop() {
+ }
+ 
+ #[test]
+-#[cfg(target_os = "linux")]
++#[cfg(any(target_os = "linux", target_os = "android"))]
+ fn closing_detached_terminals_releases_the_holders_pty_masters() {
+     let s = Session::new();
+     let warm = run(&s, "true");
+diff --git a/crates/herdr-core/tests/upgrade.rs b/crates/herdr-core/tests/upgrade.rs
+index 2ec75b3..069b866 100644
+--- a/crates/herdr-core/tests/upgrade.rs
++++ b/crates/herdr-core/tests/upgrade.rs
+@@ -31,7 +31,7 @@ fn says(s: &Session, t: &str, what: &str) {
+     wait_until(&format!("{t} shows {what}"), || text(s, t).contains(what));
+ }
+ 
+-#[cfg(target_os = "linux")]
++#[cfg(any(target_os = "linux", target_os = "android"))]
+ #[test]
+ fn a_materialized_or_replaced_executable_can_start_its_first_holder() {
+     for retain_old in [true, false] {

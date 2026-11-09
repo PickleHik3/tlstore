@@ -1,0 +1,19 @@
+diff --git a/pkg/wuffs/src/main.zig b/pkg/wuffs/src/main.zig
+index a99a35b..8afa0a7 100644
+--- a/pkg/wuffs/src/main.zig
++++ b/pkg/wuffs/src/main.zig
+@@ -24,8 +24,13 @@ pub const ImageData = struct {
+ // they survive, so export stubs to satisfy the link. Weak so that any real
+ // definition wins. Hidden keeps them out of the export table where the
+ // format honors it (e.g. wasm).
++//
++// Not on Android: there libghostty-vt is a static archive linked into a
++// program that always has bionic's calloc/free, and these hidden weak
++// definitions would win over bionic's for the whole program (calloc
++// returning null everywhere, free leaking).
+ comptime {
+-    if (!builtin.link_libc) {
++    if (!builtin.link_libc and !builtin.abi.isAndroid()) {
+         @export(&callocStub, .{
+             .name = "calloc",
+             .linkage = .weak,

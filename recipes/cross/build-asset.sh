@@ -4,7 +4,8 @@
 #
 #   ./build-asset.sh <tool> [edition]
 #
-#   tool      btop | tl-priv | tuios-cpu | kitten | tuios | sigye | herdr | terminal-browser | fastfetch | dawn |
+#   tool      btop | tl-priv | tuios-cpu | kitten | tuios | sigye | herdr | herdr-core | herdr-gui |
+#             terminal-browser | fastfetch | dawn |
 #             musl-loader | musl-runtime | launcher-skills
 #   edition   com.termux (default) | io.vaj.tl — only for fastfetch, dawn and musl-loader, the
 #             three whose binary carries the edition's prefix (README.md, "One build per
@@ -219,6 +220,18 @@ case "$tool" in
         # packed with a launcher script as a .tar.gz app tree (an archive item).
         "$SCRIPT_DIR/build-herdr.sh"
         cp "$TL_OUT/herdr" "$TL_ASSETS/$asset"
+        ;;
+    herdr-core)
+        # hc, the terminal runtime under the Herdr desktop app: one bare bionic binary.
+        "$SCRIPT_DIR/build-herdr-core.sh"
+        cp "$TL_OUT/herdr-core" "$TL_ASSETS/$asset"
+        ;;
+    herdr-gui)
+        # The Herdr desktop app as a .tar.gz app tree (an archive item); links Termux's libxcb and
+        # libxkbcommon, found relative to itself, so one build serves every edition.
+        sysroot libxcb libxau libxdmcp libxkbcommon fontconfig freetype libexpat libpng zlib brotli bzip2
+        "$SCRIPT_DIR/build-herdr-gui.sh"
+        cp "$TL_OUT/herdr-gui" "$TL_ASSETS/$asset"
         ;;
     terminal-browser)
         # A .tar.gz of the app tree from our fork: its JavaScript as upstream builds it, pixel.node
