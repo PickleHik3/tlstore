@@ -2,7 +2,7 @@
 # build-herdr-nightglass.sh — the Nightglass layouts for the Herdr desktop app, packed as an app
 # tree for tlstore's herdr-nightglass item (an archive item: bin/herdr-nightglass on top).
 #
-# Nothing is compiled. PickleHik3/herdr-nightglass is fetched at one pinned commit (the commit
+# Nothing is compiled. PickleHik3/herdr-nightglass (MIT; its LICENSE is packed at the top) is fetched at one pinned commit (the commit
 # hash is the pin) and its layouts/, mods/ and themes/ (tracked files only, without the editor
 # typings and the mods' .state folders) are staged under share/nightglass beside the item's
 # wrapper, recipes/cross/herdr-nightglass/herdr-nightglass. share/nightglass/BUILD is the
@@ -15,7 +15,7 @@
 # version for the item's rows (scripts/items.tsv) moved with it.
 set -euo pipefail
 
-NIGHTGLASS_COMMIT=${NIGHTGLASS_COMMIT:-1a9417aae08d3a9f91c1765c281b4a048b9082a9}
+NIGHTGLASS_COMMIT=${NIGHTGLASS_COMMIT:-1ccbc36cd4a9deafd12b247139b2d9ecbefdaf44}
 NIGHTGLASS_REPO=${NIGHTGLASS_REPO:-https://github.com/PickleHik3/herdr-nightglass.git}
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "$0")" && pwd)
@@ -55,8 +55,12 @@ for f in layouts/nightglass.json layouts/nightglass-phone.json mods/nightglass/m
 done
 
 cp "$src/README.md" "$stage/README.md"
-printf 'PickleHik3/herdr-nightglass at %s\nThe source repository has no licence file.\n' \
-    "$NIGHTGLASS_COMMIT" > "$stage/SOURCE"
+[ -f "$src/LICENSE" ] || {
+    echo "error: the Nightglass checkout has no LICENSE" >&2
+    exit 1
+}
+cp "$src/LICENSE" "$stage/LICENSE"
+printf 'PickleHik3/herdr-nightglass at %s\n' "$NIGHTGLASS_COMMIT" > "$stage/SOURCE"
 cp "$SCRIPT_DIR/herdr-nightglass/herdr-nightglass" "$stage/bin/herdr-nightglass"
 chmod 755 "$stage/bin/herdr-nightglass"
 
