@@ -262,12 +262,6 @@ fi
 if [ ! -S "${TMPDIR:-/nonexistent}/.X11-unix/X0" ] && [ -S "$USR/tmp/.X11-unix/X0" ]; then
   export TMPDIR="$USR/tmp"
 fi
-# No Xcursor theme is on the app's search path here, so a cursor asked for by name comes back
-# empty and every cursor stays an arrow. The "core" theme takes them from the X server's cursor
-# font, where the text caret is named xterm: the name the launcher's tap-on-text keyboard rule
-# reads.
-: "${XCURSOR_THEME:=core}"
-export XCURSOR_THEME
 
 found=
 for f in "$USR"/share/vulkan/icd.d/*.json; do

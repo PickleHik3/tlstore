@@ -1009,7 +1009,7 @@ index ca2574c..bfbb397 100644
      power_sender: Sender<SystemPowerEvent>,
  ) -> anyhow::Result<()> {
 diff --git a/vendor/gpui-pre-linux/src/linux/x11/client.rs b/vendor/gpui-pre-linux/src/linux/x11/client.rs
-index 76939e1..1c18fee 100644
+index 76939e1..56452d3 100644
 --- a/vendor/gpui-pre-linux/src/linux/x11/client.rs
 +++ b/vendor/gpui-pre-linux/src/linux/x11/client.rs
 @@ -379,8 +379,15 @@ impl X11Connection {
@@ -1030,13 +1030,18 @@ index 76939e1..1c18fee 100644
          xcb_connection.prefetch_extension_information(xkb::X11_EXTENSION_NAME)?;
          xcb_connection.prefetch_extension_information(randr::X11_EXTENSION_NAME)?;
          xcb_connection.prefetch_extension_information(render::X11_EXTENSION_NAME)?;
-@@ -1528,6 +1535,57 @@ impl X11Client {
+@@ -1528,6 +1535,62 @@ impl X11Client {
                      phase: gpui::TouchPhase::Ended,
                  }));
              }
 +            Event::XinputTouchBegin(event) => {
 +                let window = self.get_window(event.event)?;
++                // A touch gives no Enter event: mark the window hovered and pointer-focused
++                // here so the cursor style is applied after a tap.
++                window.set_hovered(true);
 +                let mut state = self.0.borrow_mut();
++                state.mouse_focused_window = Some(event.event);
++                state.restore_cursor_after_hide();
 +                state.modifiers = modifiers_from_xinput_info(event.mods);
 +                let position = point(
 +                    px(event.event_x as f32 / u16::MAX as f32 / state.scale_factor),
@@ -1088,7 +1093,69 @@ index 76939e1..1c18fee 100644
              _ => {}
          };
  
-@@ -3237,3 +3295,50 @@ mod tests {
+@@ -2136,6 +2199,11 @@ impl X11ClientState {
+                     }
+                 }
+             }
++            // No Xcursor theme on the search path (Termux): take the shape from the X
++            // server's own "cursor" font instead, which names it after the glyph.
++            if let Some(glyph_cursor) = create_font_glyph_cursor(&self.xcb_connection, style) {
++                break 'outer Ok(glyph_cursor);
++            }
+             if errors.is_empty() {
+                 Err(anyhow!(
+                     "errors while loading cursor icons {:?}:\n{}",
+@@ -2617,6 +2685,49 @@ fn make_scroll_wheel_event(
+     }
+ }
+ 
++/// The X11/cursorfont.h glyph (XC_*) for a cursor style; the mask is the next glyph.
++fn cursor_style_to_font_glyph(style: CursorStyle) -> u16 {
++    match style {
++        CursorStyle::Arrow => 68,                  // XC_left_ptr
++        CursorStyle::IBeam => 152,                 // XC_xterm
++        CursorStyle::IBeamCursorForVerticalLayout => 152, // XC_xterm
++        CursorStyle::Crosshair => 34,              // XC_crosshair
++        CursorStyle::ClosedHand => 58,             // XC_hand1
++        CursorStyle::OpenHand => 58,               // XC_hand1
++        CursorStyle::PointingHand => 60,           // XC_hand2
++        CursorStyle::ResizeLeft => 70,             // XC_left_side
++        CursorStyle::ResizeRight => 96,            // XC_right_side
++        CursorStyle::ResizeLeftRight => 108,       // XC_sb_h_double_arrow
++        CursorStyle::ResizeColumn => 108,          // XC_sb_h_double_arrow
++        CursorStyle::ResizeUp => 138,              // XC_top_side
++        CursorStyle::ResizeDown => 16,             // XC_bottom_side
++        CursorStyle::ResizeUpDown => 116,          // XC_sb_v_double_arrow
++        CursorStyle::ResizeRow => 116,             // XC_sb_v_double_arrow
++        CursorStyle::ResizeUpLeftDownRight => 134, // XC_top_left_corner
++        CursorStyle::ResizeUpRightDownLeft => 136, // XC_top_right_corner
++        CursorStyle::OperationNotAllowed => 0,     // XC_X_cursor
++        _ => 68,                                   // XC_left_ptr
++    }
++}
++
++fn create_font_glyph_cursor(
++    connection: &XCBConnection,
++    style: CursorStyle,
++) -> Option<xproto::Cursor> {
++    let glyph = cursor_style_to_font_glyph(style);
++    let font = connection.generate_id().ok()?;
++    connection.open_font(font, b"cursor").ok()?.check().ok()?;
++    let cursor = connection.generate_id().ok()?;
++    let created = connection
++        .create_glyph_cursor(
++            cursor, font, font, glyph, glyph + 1, 0, 0, 0, 0xffff, 0xffff, 0xffff,
++        )
++        .ok()
++        .and_then(|cookie| cookie.check().ok());
++    connection.close_font(font).ok();
++    created.map(|_| cursor)
++}
++
+ fn create_invisible_cursor(
+     connection: &XCBConnection,
+ ) -> anyhow::Result<crate::linux::x11::client::xproto::Cursor> {
+@@ -3237,3 +3348,50 @@ mod tests {
          assert_eq!(key_event_state.key_get_utf8(space), " ");
      }
  }
@@ -1778,6 +1845,21 @@ index 798fb2a..8c6aed3 100644
      target_os = "freebsd",
  )))]
  const EMOJI_FONT_FAMILIES: &[&str] = &[];
+diff --git a/vendor/gpui-pre/src/text_system.rs b/vendor/gpui-pre/src/text_system.rs
+index 333202a..e6606d1 100644
+--- a/vendor/gpui-pre/src/text_system.rs
++++ b/vendor/gpui-pre/src/text_system.rs
+@@ -254,6 +254,10 @@ impl TextSystem {
+             font_runs_pool: Mutex::default(),
+             fallback_font_stack: smallvec![
+                 // TODO: Remove this when Linux have implemented setting fallbacks.
++                // The app's embedded fonts, so an unknown family falls back instead of panicking.
++                font("Geist"),
++                font("Geist Mono"),
++                font("JetBrains Mono"),
+                 font(".ZedMono"),
+                 font(".ZedSans"),
+                 font("Helvetica"),
 diff --git a/vendor/gpui-pre/src/window.rs b/vendor/gpui-pre/src/window.rs
 index 0dcdd2e..6c16bc1 100644
 --- a/vendor/gpui-pre/src/window.rs
