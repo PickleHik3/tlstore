@@ -4,7 +4,7 @@
 #
 #   plan     scripts/bins-plan.sh turns the tools input into a matrix: one job per tool and
 #            processor (aarch64, x86_64), and per launcher edition for the tools whose binary
-#            carries an edition's prefix; one job in all for launcher-skills, which is the same
+#            carries an edition's prefix; one job in all for launcher-skills and herdr-nightglass, which are the same
 #            on every processor and lands under both processors' asset names
 #   build    recipes/cross/build-asset.sh runs the tool's recipe on ubuntu-24.04 (the NDK from
 #            sdkmanager, Go and Rust as the runner has them, Node 22 and pnpm for terminal-browser's
@@ -39,7 +39,7 @@ on:
   workflow_dispatch:
     inputs:
       tools:
-        description: "Tools to build: all, or a comma list of btop, tl-priv, tuios-cpu, kitten, tuios, sigye, herdr, herdr-core, herdr-gui, terminal-browser, fastfetch, dawn, musl-loader, musl-runtime, launcher-skills"
+        description: "Tools to build: all, or a comma list of btop, tl-priv, tuios-cpu, kitten, tuios, sigye, herdr, herdr-core, herdr-gui, terminal-browser, fastfetch, dawn, musl-loader, musl-runtime, launcher-skills, herdr-nightglass"
         required: false
         default: "all"
   workflow_call:
@@ -114,9 +114,9 @@ jobs:
             wayland-protocols libdbus-1-dev libfontconfig-dev
 
       # kitten and tuios need the NDK only on x86_64, where its link goes through the NDK's clang.
-      # musl-runtime and launcher-skills are fetched, not built.
+      # musl-runtime, launcher-skills and herdr-nightglass are fetched or packed, not built.
       - name: NDK
-        if: matrix.tool != 'musl-runtime' && matrix.tool != 'launcher-skills' && ((matrix.tool != 'kitten' && matrix.tool != 'tuios') || matrix.arch == 'x86_64')
+        if: matrix.tool != 'musl-runtime' && matrix.tool != 'launcher-skills' && matrix.tool != 'herdr-nightglass' && ((matrix.tool != 'kitten' && matrix.tool != 'tuios') || matrix.arch == 'x86_64')
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" >/dev/null
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
@@ -182,7 +182,7 @@ jobs:
             recipes/cross/build-asset.sh "${{ matrix.tool }}" "${{ matrix.edition }}"
 
       # Everything the job put in assets/: its own build, or, for a tool built once for every
-      # processor (arch "any", launcher-skills), the same file under each processor's name. A
+      # processor (arch "any": launcher-skills, herdr-nightglass), the same file under each processor's name. A
       # trial's artifacts are named trial-…, outside publish's bins-* pattern.
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

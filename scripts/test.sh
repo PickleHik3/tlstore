@@ -4711,10 +4711,12 @@ expect_out "a per-edition tool's x86_64 build for com.termux" '{"tool":"dawn","e
 expect_no_out "and none for io.vaj.tl, which is aarch64 only" '"edition":"io.vaj.tl","arch":"x86_64"'
 expect_out "the musl runtime is one job for two assets" '"asset":"musl-libgcc-aarch64,musl-libstdcxx-aarch64"'
 expect_out "on each processor" '"asset":"musl-libgcc-x86_64,musl-libstdcxx-x86_64"'
+expect_out "herdr-nightglass is one job for every processor, one tarball under both names" \
+    '{"tool":"herdr-nightglass","edition":"-","arch":"any","asset":"herdr-nightglass-aarch64,herdr-nightglass-x86_64"}'
 expect_out "the launcher skills are one job for every processor, each tarball under both names" \
     '{"tool":"launcher-skills","edition":"-","arch":"any","asset":"skill-termux-launcher-aarch64,skill-termux-launcher-x86_64,skill-termux-launcher-speak-aarch64,skill-termux-launcher-speak-x86_64"}'
 if command -v python3 >/dev/null 2>&1; then
-    if printf '%s' "$OUT" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if len(d["include"]) == 32 else 1)'; then pass; else fail "the matrix is JSON with thirty-two entries" "$OUT"; fi
+    if printf '%s' "$OUT" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if len(d["include"]) == 33 else 1)'; then pass; else fail "the matrix is JSON with thirty-three entries" "$OUT"; fi
 fi
 OUT="$(bash "$BN_ROOT/scripts/bins-plan.sh" dawn,btop 2>&1)"; ST=$?
 expect_status "bins-plan.sh with a comma list" 0
@@ -4794,6 +4796,188 @@ OUT="$(cd "$BN_ROOT" && bash scripts/bins-record.sh bins-2026.09.30 assets 2>"$B
 if [ "$ST" != 0 ]; then pass; else fail "an x86_64 build without its aarch64 one is refused"; fi
 if [ "$bn_before" = "$(sha "$BN_ROOT/SHA256SUMS") $(sha "$BN_ROOT/scripts/items.tsv")" ]; then pass; else fail "and nothing is changed"; fi
 rm -rf "$BN_ROOT"
+
+# --- herdr-nightglass and the herdr-app start script ---------------------------------------------
+# The wrapper is POSIX sh and runs under Termux's dash, so each case runs under every shell here.
+# A fake item tree sits at <fake ~>/.local/lib/herdr-nightglass, so a bare environment (no HOME)
+# finds the fake ~ by walking up from the script.
+echo
+echo "== herdr-nightglass and the herdr-app start script"
+NG_SRC="$repo/recipes/cross/herdr-nightglass/herdr-nightglass"
+NG_START="$repo/recipes/cross/build-herdr-gui.sh"
+ng_shells=(sh)
+command -v dash >/dev/null 2>&1 && ng_shells+=(dash)
+command -v busybox >/dev/null 2>&1 && ng_shells+=("busybox sh")
+for ng_entry in "${ng_shells[@]}"; do
+    IFS=' ' read -r -a SHCMD <<< "$ng_entry"
+    SHELL_LABEL="herdr-nightglass under $ng_entry"
+    NG="$(mktemp -d)"
+    NG_HOME="$NG/home"
+    NG_ITEM="$NG_HOME/.local/lib/herdr-nightglass"
+    NG_HAPP="$NG/happ"
+    mkdir -p "$NG_ITEM/bin" "$NG_ITEM/share/nightglass/layouts" "$NG_ITEM/share/nightglass/mods/nightglass" "$NG_ITEM/share/nightglass/themes"
+    cp "$NG_SRC" "$NG_ITEM/bin/herdr-nightglass"
+    chmod 755 "$NG_ITEM/bin/herdr-nightglass"
+    printf 'abc1234-000000000001\n' > "$NG_ITEM/share/nightglass/BUILD"
+    printf '{"a":1}\n' > "$NG_ITEM/share/nightglass/layouts/nightglass.json"
+    printf '{"a":2}\n' > "$NG_ITEM/share/nightglass/layouts/nightglass-phone.json"
+    printf 'main\n' > "$NG_ITEM/share/nightglass/mods/nightglass/main.js"
+    printf '<svg/>\n' > "$NG_ITEM/share/nightglass/mods/nightglass/a b.svg"
+    printf '{"t":1}\n' > "$NG_ITEM/share/nightglass/themes/nightglass.json"
+    NG_ENV="HOME=$NG_HOME HERDR_APP_HOME=$NG_HAPP"
+    # ng <args> — the wrapper in a bare environment plus $NG_ENV.
+    # shellcheck disable=SC2086
+    ng() { env -i PATH="$PATH" $NG_ENV "${SHCMD[@]}" "$NG_ITEM/bin/herdr-nightglass" "$@"; }
+
+    # a. install
+    mkdir -p "$NG_HAPP/layouts" "$NG_HAPP/mods/nightglass" "$NG_HAPP/themes"
+    printf 'mine\n' > "$NG_HAPP/layouts/mine.json"
+    printf 'extra\n' > "$NG_HAPP/mods/nightglass/extra.js"
+    printf 'old\n' > "$NG_HAPP/themes/tokyo-night.json"
+    OUT="$(ng install 2>&1)"; ST=$?
+    expect_status "install exits 0" 0
+    expect_out "install names the count" "(5 files)"
+    expect_out "install says how to switch" "Switch with: herdr-nightglass phone   or   herdr-nightglass desktop"
+    expect_out "install mentions the old tokyo-night files" "Old tokyo-night layouts, mods and themes are still in"
+    expect_content "install copies a layout" "$NG_HAPP/layouts/nightglass-phone.json" '{"a":2}'
+    expect_content "install copies a name with a space" "$NG_HAPP/mods/nightglass/a b.svg" '<svg/>'
+    expect_content "install writes the stamp" "$NG_HAPP/.nightglass-version" "abc1234-000000000001"
+    expect_content "install keeps an unrelated file" "$NG_HAPP/layouts/mine.json" mine
+    expect_content "install keeps another file of the mod's folder" "$NG_HAPP/mods/nightglass/extra.js" extra
+    expect_content "install keeps the tokyo-night theme" "$NG_HAPP/themes/tokyo-night.json" old
+    if [ "$(find "$NG_HAPP" -name '.nightglass-tmp.*' | wc -l)" = 0 ]; then pass; else fail "install leaves no temp file"; fi
+    OUT="$(ng 2>&1)"; ST=$?
+    expect_out "no argument installs" "Installed the Nightglass layouts"
+    rm -f "$NG_HAPP/themes/tokyo-night.json"
+    OUT="$(ng install 2>&1)"; ST=$?
+    expect_no_out "no tokyo-night line when there is none" "tokyo-night"
+
+    # b. where the Herdr home is
+    rm -rf "$NG/xdg"
+    OUT="$(env -i PATH="$PATH" HOME="$NG_HOME" XDG_CONFIG_HOME="$NG/xdg" "${SHCMD[@]}" "$NG_ITEM/bin/herdr-nightglass" install 2>&1)"; ST=$?
+    expect_file "XDG_CONFIG_HOME/herdr-app is used" "$NG/xdg/herdr-app/layouts/nightglass.json"
+    OUT="$(env -i PATH="$PATH" HOME="$NG_HOME" XDG_CONFIG_HOME= HERDR_APP_HOME= "${SHCMD[@]}" "$NG_ITEM/bin/herdr-nightglass" install 2>&1)"; ST=$?
+    expect_file "empty values count as unset: HOME/.config/herdr-app" "$NG_HOME/.config/herdr-app/layouts/nightglass.json"
+    rm -rf "$NG_HOME/.config"
+    OUT="$(env -i PATH="$PATH" "${SHCMD[@]}" "$NG_ITEM/bin/herdr-nightglass" install 2>&1)"; ST=$?
+    expect_status "no HOME at all still installs" 0
+    expect_file "HOME unset: the fake ~ is found from the script's place" "$NG_HOME/.config/herdr-app/layouts/nightglass.json"
+    rm -rf "$NG_HOME/.config"
+
+    # c. sync
+    rm -rf "$NG_HAPP"
+    OUT="$(ng sync 2>&1)"; ST=$?
+    expect_status "sync with no stamp exits 0" 0
+    if [ -z "$OUT" ]; then pass; else fail "sync prints nothing"; fi
+    expect_file "sync with no stamp installs" "$NG_HAPP/mods/nightglass/main.js"
+    printf 'edited\n' > "$NG_HAPP/mods/nightglass/main.js"
+    OUT="$(ng sync 2>&1)"; ST=$?
+    expect_content "sync with the stamp current does nothing" "$NG_HAPP/mods/nightglass/main.js" edited
+    printf 'older-build\n' > "$NG_HAPP/.nightglass-version"
+    OUT="$(ng sync 2>&1)"; ST=$?
+    expect_status "sync with another stamp exits 0" 0
+    if [ -z "$OUT" ]; then pass; else fail "and is silent"; fi
+    expect_content "and copies the files again" "$NG_HAPP/mods/nightglass/main.js" main
+    expect_content "and stamps the build" "$NG_HAPP/.nightglass-version" "abc1234-000000000001"
+
+    # d. remove
+    printf 'mine\n' > "$NG_HAPP/layouts/mine.json"
+    printf 'extra\n' > "$NG_HAPP/mods/nightglass/extra.js"
+    printf 'old\n' > "$NG_HAPP/themes/tokyo-night.json"
+    OUT="$(ng remove 2>&1)"; ST=$?
+    expect_status "remove exits 0" 0
+    expect_out "remove counts the files it deleted" "(5 files)"
+    expect_no_file "remove deletes a layout" "$NG_HAPP/layouts/nightglass.json"
+    expect_no_file "remove deletes a name with a space" "$NG_HAPP/mods/nightglass/a b.svg"
+    expect_no_file "remove deletes a theme" "$NG_HAPP/themes/nightglass.json"
+    expect_content "remove keeps an unrelated layout" "$NG_HAPP/layouts/mine.json" mine
+    expect_content "remove keeps the mod folder's other file" "$NG_HAPP/mods/nightglass/extra.js" extra
+    expect_content "remove keeps the tokyo-night theme" "$NG_HAPP/themes/tokyo-night.json" old
+    expect_file "remove keeps layouts/" "$NG_HAPP/layouts"
+    expect_content "remove stamps removed" "$NG_HAPP/.nightglass-version" removed
+    printf 'x\n' > "$NG_HAPP/mods/nightglass/main.js"
+    OUT="$(ng sync 2>&1)"; ST=$?
+    expect_content "sync does not put removed files back" "$NG_HAPP/mods/nightglass/main.js" x
+    rm -f "$NG_HAPP/mods/nightglass/extra.js" "$NG_HAPP/mods/nightglass/main.js"
+    OUT="$(ng remove 2>&1)"; ST=$?
+    expect_no_file "remove takes an emptied mod folder with it" "$NG_HAPP/mods/nightglass"
+    expect_file "but never mods/ itself" "$NG_HAPP/mods"
+    OUT="$(NG_ENV="HOME=$NG_HOME HERDR_APP_HOME=$NG/none" ng remove 2>&1)"; ST=$?
+    expect_status "remove with no Herdr home exits 0" 0
+    expect_out "and says nothing is installed" "Nothing is installed"
+    expect_no_file "and creates nothing" "$NG/none"
+
+    # e. phone and desktop
+    NG_GUI="$NG_HOME/.local/lib/herdr-gui"
+    mkdir -p "$NG_GUI/libexec"
+    rm -rf "$NG_HAPP"
+    printf '#!/bin/sh\nprintf "%%s|" "$@" > "%s/args"\nprintf "%%s" "$HERDR_APP_HOME" > "%s/apphome"\n' "$NG" "$NG" > "$NG_GUI/libexec/herdr-app"
+    chmod 755 "$NG_GUI/libexec/herdr-app"
+    OUT="$(ng phone 2>&1)"; ST=$?
+    expect_status "phone with a window open exits 0" 0
+    expect_out "and says it switched" "Switched the Herdr app to nightglass-phone\."
+    expect_out "and installed first when the stamp was missing" "Installed the Nightglass layouts"
+    expect_content "the client got the layout.switch call" "$NG/args" "do|layout.switch|--name|nightglass-phone|"
+    expect_content "and the Herdr home" "$NG/apphome" "$NG_HAPP"
+    OUT="$(ng desktop 2>&1)"; ST=$?
+    expect_content "desktop passes nightglass" "$NG/args" "do|layout.switch|--name|nightglass|"
+    expect_no_out "and does not install again" "Installed"
+    printf '#!/bin/sh\necho "herdr-app: no Herdr window at /x: refused" >&2\nexit 1\n' > "$NG_GUI/libexec/herdr-app"
+    OUT="$(ng phone 2>&1)"; ST=$?
+    expect_status "no window open exits 0" 0
+    expect_out "and says the app is not open" "The Herdr app is not open\. The layout is installed"
+    printf '#!/bin/sh\necho "herdr-app: something broke" >&2\nexit 1\n' > "$NG_GUI/libexec/herdr-app"
+    OUT="$(ng phone 2>&1)"; ST=$?
+    expect_status "another failure exits 1" 1
+    expect_out "and shows the client's message" "something broke"
+    rm -rf "$NG_GUI"
+    OUT="$(ng phone 2>&1)"; ST=$?
+    expect_status "no client exits 1" 1
+    expect_out "and names the item to install" "tlstore install herdr-gui"
+
+    # f. help
+    OUT="$(ng --help 2>&1)"; ST=$?
+    expect_status "--help exits 0" 0
+    expect_out "--help lists sync" "sync "
+    expect_out "--help shows the Herdr home" "$NG_HAPP"
+    OUT="$(ng bogus 2>&1)"; ST=$?
+    expect_status "an unknown argument exits 2" 2
+    rm -rf "$NG"
+done
+
+# The start script, extracted from the recipe, runs the item's sync before the app and never stops
+# the app because of it.
+for ng_entry in "${ng_shells[@]}"; do
+    IFS=' ' read -r -a SHCMD <<< "$ng_entry"
+    SHELL_LABEL="herdr-app start script under $ng_entry"
+    NG="$(mktemp -d)"
+    mkdir -p "$NG/lib/herdr-gui/bin" "$NG/lib/herdr-gui/libexec" "$NG/usr/share/vulkan/icd.d"
+    awk '/^cat > "\$stage\/bin\/herdr-app" <<.EOF.$/ { on = 1; next } /^EOF$/ { on = 0 } on' "$NG_START" > "$NG/lib/herdr-gui/bin/herdr-app"
+    chmod 755 "$NG/lib/herdr-gui/bin/herdr-app"
+    printf '{}\n' > "$NG/usr/share/vulkan/icd.d/x.json"
+    printf '#!/bin/sh\necho "ran $*" > "%s/ran"\n' "$NG" > "$NG/lib/herdr-gui/libexec/herdr-app"
+    chmod 755 "$NG/lib/herdr-gui/libexec/herdr-app"
+    # ngs <args> — the start script in a bare environment.
+    ngs() { env -i PATH="$PATH" HOME="$NG/home" PREFIX="$NG/usr" "${SHCMD[@]}" "$NG/lib/herdr-gui/bin/herdr-app" "$@"; }
+    OUT="$(ngs one two 2>&1)"; ST=$?
+    expect_status "the start script runs with no nightglass item" 0
+    expect_content "and the app got its arguments" "$NG/ran" "ran one two"
+    expect_no_file "and no Herdr home was made" "$NG/home"
+    rm -f "$NG/ran"
+    mkdir -p "$NG/lib/herdr-nightglass/bin"
+    printf '#!/bin/sh\necho "$1" > "%s/called"\n' "$NG" > "$NG/lib/herdr-nightglass/bin/herdr-nightglass"
+    chmod 755 "$NG/lib/herdr-nightglass/bin/herdr-nightglass"
+    OUT="$(ngs go 2>&1)"; ST=$?
+    expect_content "the item is called with sync" "$NG/called" sync
+    expect_content "and the app still ran" "$NG/ran" "ran go"
+    rm -f "$NG/ran" "$NG/called"
+    printf '#!/bin/sh\necho "nightglass broke" >&2\necho "and said so"\nexit 3\n' > "$NG/lib/herdr-nightglass/bin/herdr-nightglass"
+    OUT="$(ngs again 2>&1)"; ST=$?
+    expect_status "an item that fails does not stop the app" 0
+    expect_content "the app ran" "$NG/ran" "ran again"
+    if [ -z "$OUT" ]; then pass; else fail "and nothing from the item is printed"; fi
+    rm -rf "$NG"
+done
 
 # --- upstream-watch.sh: ours against theirs, and the bump, with a +tl.N row ---
 # The script runs from a copy of the tree (it writes the items.tsv and the recipes beside it),
@@ -5073,7 +5257,7 @@ fi
 echo
 if command -v shellcheck >/dev/null 2>&1; then
     echo "== shellcheck -s sh"
-    if shellcheck -s sh "$TLSTORE" "$repo/scripts/install.sh"; then
+    if shellcheck -s sh "$TLSTORE" "$repo/scripts/install.sh" "$repo/recipes/cross/herdr-nightglass/herdr-nightglass"; then
         echo "   clean"
     else
         FAIL=$((FAIL + 1))

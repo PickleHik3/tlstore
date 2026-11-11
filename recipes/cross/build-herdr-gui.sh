@@ -250,6 +250,19 @@ fi
 # Vulkan app has no use for.
 unset LIBGL_KOPPER_DISABLE
 
+# A terminal opened while the display was down has no DISPLAY, and without one the app runs with
+# no window at all. The launcher's display is :0, its socket under the edition's own tmp.
+if [ -z "${DISPLAY:-}" ] && [ -S "$USR/tmp/.X11-unix/X0" ]; then
+  export DISPLAY=:0
+fi
+# The app looks for the display's socket under TMPDIR, and a launcher terminal's TMPDIR is a
+# folder in HOME, where there is none: the clipboard's own connection then times out and the app
+# stops. Point it at the tmp the socket is in. (The socket is what is tested: an empty .X11-unix
+# folder can be left behind in the other tmp.)
+if [ ! -S "${TMPDIR:-/nonexistent}/.X11-unix/X0" ] && [ -S "$USR/tmp/.X11-unix/X0" ]; then
+  export TMPDIR="$USR/tmp"
+fi
+
 found=
 for f in "$USR"/share/vulkan/icd.d/*.json; do
   [ -f "$f" ] && found=1 && break
@@ -263,6 +276,13 @@ if [ -z "$found" ]; then
     echo "  On any other:     pkg install vulkan-icd   (software, slower)" >&2
   fi
   exit 1
+fi
+
+# The store's herdr-nightglass item (the Nightglass layouts), when it is installed beside this one:
+# bring the Herdr home's copy up to it before the app reads its layouts. It never stops the app.
+NIGHTGLASS="$ROOT/../herdr-nightglass/bin/herdr-nightglass"
+if [ -x "$NIGHTGLASS" ]; then
+  "$NIGHTGLASS" sync >/dev/null 2>&1 || true
 fi
 
 exec "$ROOT/libexec/herdr-app" "$@"

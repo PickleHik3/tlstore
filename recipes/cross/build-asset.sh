@@ -6,14 +6,15 @@
 #
 #   tool      btop | tl-priv | tuios-cpu | kitten | tuios | sigye | herdr | herdr-core | herdr-gui |
 #             terminal-browser | fastfetch | dawn |
-#             musl-loader | musl-runtime | launcher-skills
+#             musl-loader | musl-runtime | launcher-skills | herdr-nightglass
 #   edition   com.termux (default) | io.vaj.tl — only for fastfetch, dawn and musl-loader, the
 #             three whose binary carries the edition's prefix (README.md, "One build per
 #             launcher edition"); the others build once for every edition
 #
 # launcher-skills is the launcher's agent skills, two tarballs packed once for every processor:
 # skill-termux-launcher-<arch> and skill-termux-launcher-speak-<arch>, for both arches, from one
-# run.
+# run. herdr-nightglass (the Nightglass layouts for the Herdr app) is one tarball packed once and
+# published as herdr-nightglass-aarch64 and herdr-nightglass-x86_64, the same file.
 #
 # Runs the tool's recipe (assembling the edition's Termux sysroot first where one is needed)
 # and copies the result into $TL_ASSETS as <tool>-<arch>, or <tool>-<package>-<arch> for an
@@ -43,29 +44,38 @@ edition="${2:-com.termux}"
 TL_WORK=${TL_WORK:-"$PWD"}
 TL_ASSETS=${TL_ASSETS:-"$TL_WORK/assets"}
 
-# launcher-skills is text, the same on every processor and edition: one job (TL_ARCH any, or
-# unset) packs it, and each tarball lands under both processors' asset names, byte for byte the
-# same, because a bare binaries: source resolves to <asset>-<arch> on the phone and every bins
-# script expects that pair (docs/SPEC.md, Revision 18).
-if [ "$tool" = launcher-skills ]; then
-    if [ "$edition" != com.termux ]; then
-        echo "build-asset: launcher-skills is packed once for every edition; drop the edition argument" >&2
-        exit 2
-    fi
-    export TL_OUT="$TL_WORK/out-launcher-skills"
-    export TL_BUILD_DIR="$TL_WORK/build-launcher-skills"
-    mkdir -p "$TL_ASSETS"
-    echo "== launcher-skills for every processor"
-    "$SCRIPT_DIR/fetch-launcher-skills.sh"
-    echo
-    for name in termux-launcher termux-launcher-speak; do
-        for arch in aarch64 x86_64; do
-            cp "$TL_OUT/$name.tar.gz" "$TL_ASSETS/skill-$name-$arch"
-            printf '%s  %s\n' "$(sha256sum "$TL_ASSETS/skill-$name-$arch" | cut -d' ' -f1)" "skill-$name-$arch"
+# launcher-skills and herdr-nightglass are text, the same on every processor and edition: one job
+# (TL_ARCH any, or unset) packs them, and each tarball lands under both processors' asset names,
+# byte for byte the same, because a bare binaries: source resolves to <asset>-<arch> on the phone
+# and every bins script expects that pair (docs/SPEC.md, Revision 18).
+case "$tool" in
+    launcher-skills|herdr-nightglass)
+        if [ "$edition" != com.termux ]; then
+            echo "build-asset: $tool is packed once for every edition; drop the edition argument" >&2
+            exit 2
+        fi
+        export TL_OUT="$TL_WORK/out-$tool"
+        export TL_BUILD_DIR="$TL_WORK/build-$tool"
+        mkdir -p "$TL_ASSETS"
+        echo "== $tool for every processor"
+        # pairs: <file the recipe wrote>:<asset name without the -<arch> suffix>
+        if [ "$tool" = launcher-skills ]; then
+            "$SCRIPT_DIR/fetch-launcher-skills.sh"
+            pairs="termux-launcher.tar.gz:skill-termux-launcher termux-launcher-speak.tar.gz:skill-termux-launcher-speak"
+        else
+            "$SCRIPT_DIR/build-herdr-nightglass.sh"
+            pairs="herdr-nightglass:herdr-nightglass"
+        fi
+        echo
+        for pair in $pairs; do
+            for arch in aarch64 x86_64; do
+                cp "$TL_OUT/${pair%%:*}" "$TL_ASSETS/${pair#*:}-$arch"
+                printf '%s  %s\n' "$(sha256sum "$TL_ASSETS/${pair#*:}-$arch" | cut -d' ' -f1)" "${pair#*:}-$arch"
+            done
         done
-    done
-    exit 0
-fi
+        exit 0
+        ;;
+esac
 
 NDK_VERSION=29.0.14206865
 # The launcher's minSdk: what the compilers this script picks itself are pointed at.

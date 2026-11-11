@@ -283,6 +283,7 @@ feature, never into a released binary.
 - Sigye — MIT, `licenses/sigye-MIT.txt`, modified by `recipes/termux/sigye/0001-termux-clipboard.patch`
 - musl (the loader) — MIT, `licenses/musl-MIT.txt`
 - dawn — MIT, `licenses/dawn-MIT.txt`, modified in the fork [PickleHik3/dawn](https://github.com/PickleHik3/dawn) (branch `tl`)
+- Nightglass (`herdr-nightglass`, layouts for the Herdr app) — MIT, `licenses/herdr-nightglass-MIT.txt`, unmodified; the asset carries its `LICENSE` too
 - `libstdc++.so.6` and `libgcc_s.so.1` — GCC 14.2.0, GPL-3.0-or-later with the GCC Runtime Library
   Exception, `licenses/gcc-runtime-GPL-3.0-with-exception.txt`, unmodified. The corresponding
   source is GCC 14.2.0 as Alpine builds it:

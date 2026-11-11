@@ -14,7 +14,8 @@
 # musl-runtime is the pair of GCC libraries fetch-musl-runtime.sh takes out of Alpine, published
 # as two assets from one job. A tool whose editions column is `any` is the same bytes on every
 # processor and edition: one job, arch "any", whose assets are each name under every processor's
-# suffix (launcher-skills, the launcher's agent skills, recipes/cross/fetch-launcher-skills.sh).
+# suffix (launcher-skills, the launcher's agent skills, recipes/cross/fetch-launcher-skills.sh;
+# herdr-nightglass, the Herdr app's Nightglass layouts, recipes/cross/build-herdr-nightglass.sh).
 set -euo pipefail
 
 # The processors tlstore serves (engine/tlstore, ARCH). One run builds every tool it is asked for
@@ -41,6 +42,7 @@ dawn         com.termux,io.vaj.tl  -
 musl-loader  com.termux,io.vaj.tl  -
 musl-runtime -                     musl-libgcc,musl-libstdcxx
 launcher-skills any                skill-termux-launcher,skill-termux-launcher-speak
+herdr-nightglass any               herdr-nightglass
 '
 
 known() { printf '%s\n' "$TOOLS" | awk 'NF { print $1 }'; }

@@ -1,0 +1,175 @@
+#!/bin/sh
+# herdr-nightglass: the Nightglass layouts, mods and themes for the Herdr app, copied into the
+# Herdr app's home. Shipped by the store's herdr-nightglass item; see `herdr-nightglass help`.
+SELF="$0"
+while [ -L "$SELF" ]; do
+  LINK="$(readlink "$SELF")"
+  case "$LINK" in
+    /*) SELF="$LINK" ;;
+    *) SELF="$(dirname -- "$SELF")/$LINK" ;;
+  esac
+done
+ROOT="$(CDPATH='' cd -P -- "$(dirname -- "$SELF")/.." && pwd -P)"
+SHARE="$ROOT/share/nightglass"
+BUILD="$(cat "$SHARE/BUILD")"
+
+# ~/.local/lib/herdr-nightglass -> ~
+if [ -z "${HOME:-}" ]; then
+  HOME="$(CDPATH='' cd -P -- "$ROOT/../../.." && pwd -P)"
+fi
+if [ -n "${HERDR_APP_HOME:-}" ]; then
+  HAPP="$HERDR_APP_HOME"
+elif [ -n "${XDG_CONFIG_HOME:-}" ]; then
+  HAPP="$XDG_CONFIG_HOME/herdr-app"
+else
+  HAPP="$HOME/.config/herdr-app"
+fi
+STAMP="$HAPP/.nightglass-version"
+
+usage() {
+  cat <<USAGE
+Usage: herdr-nightglass [command]
+
+  install    copy the Nightglass layouts, mods and themes into the Herdr app's home
+             (the default with no command)
+  phone      install if needed, then switch the open Herdr app to the phone layout
+  desktop    install if needed, then switch the open Herdr app to the desktop layout
+  remove     delete the files install copied
+  sync       what the Herdr app runs at start: install when this item changed
+
+The Herdr app's home: $HAPP
+USAGE
+}
+
+# Every regular file of the payload, relative to $SHARE, one per line.
+payload() {
+  for top in layouts mods themes; do
+    [ -d "$SHARE/$top" ] || continue
+    find "$SHARE/$top" -type f | LC_ALL=C sort | while IFS= read -r f; do
+      printf '%s\n' "${f#"$SHARE"/}"
+    done
+  done
+}
+
+install_all() {
+  n=0
+  list="$(payload)"
+  nl='
+'
+  oldifs="$IFS"
+  IFS="$nl"
+  for rel in $list; do
+    IFS="$oldifs"
+    dest="$HAPP/$rel"
+    dir="$(dirname -- "$dest")"
+    tmp="$dir/.nightglass-tmp.$$"
+    if ! mkdir -p "$dir" || ! cp "$SHARE/$rel" "$tmp" || ! mv -f "$tmp" "$dest"; then
+      rm -f "$tmp"
+      echo "herdr-nightglass: could not copy $rel into $HAPP" >&2
+      return 1
+    fi
+    n=$((n + 1))
+    IFS="$nl"
+  done
+  IFS="$oldifs"
+  printf '%s\n' "$BUILD" > "$STAMP" || {
+    echo "herdr-nightglass: could not write $STAMP" >&2
+    return 1
+  }
+  echo "Installed the Nightglass layouts in $HAPP ($n files)."
+  echo "Switch with: herdr-nightglass phone   or   herdr-nightglass desktop"
+  old=
+  for f in "$HAPP"/layouts/tokyo-night*.json "$HAPP"/mods/tokyo-night* "$HAPP"/themes/tokyo-night*; do
+    [ -e "$f" ] && old=1
+  done
+  if [ -n "$old" ]; then
+    echo "Old tokyo-night layouts, mods and themes are still in $HAPP; they can be deleted."
+  fi
+  return 0
+}
+
+remove_all() {
+  if [ ! -d "$HAPP" ]; then
+    echo "Nothing is installed: $HAPP does not exist."
+    return 0
+  fi
+  n=0
+  list="$(payload)"
+  nl='
+'
+  oldifs="$IFS"
+  IFS="$nl"
+  for rel in $list; do
+    IFS="$oldifs"
+    if [ -e "$HAPP/$rel" ]; then
+      n=$((n + 1))
+    fi
+    rm -f "$HAPP/$rel"
+    IFS="$nl"
+  done
+  IFS="$oldifs"
+  # The payload's own folders below layouts/, mods/ and themes/, deepest first; rmdir leaves
+  # any that still hold a file of the user's.
+  for top in layouts mods themes; do
+    [ -d "$SHARE/$top" ] || continue
+    find "$SHARE/$top" -mindepth 1 -type d | awk '{ print length($0) " " $0 }' | sort -rn \
+      | while IFS= read -r line; do
+        d="${line#* }"
+        rmdir "$HAPP/${d#"$SHARE"/}" 2>/dev/null || true
+      done
+  done
+  printf 'removed\n' > "$STAMP"
+  echo "Removed the Nightglass files from $HAPP ($n files). herdr-nightglass install puts them back."
+  return 0
+}
+
+stamp_is() {
+  [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$1" ]
+}
+
+switch() {
+  layout="$1"
+  if ! stamp_is "$BUILD"; then
+    install_all || return 1
+  fi
+  client=
+  if [ -x "$ROOT/../herdr-gui/libexec/herdr-app" ]; then
+    client="$ROOT/../herdr-gui/libexec/herdr-app"
+  else
+    client="$(command -v herdr-app 2>/dev/null || true)"
+  fi
+  if [ -z "$client" ]; then
+    echo "The Herdr app is not installed: tlstore install herdr-gui" >&2
+    return 1
+  fi
+  out="$(HERDR_APP_HOME="$HAPP" "$client" "do" layout.switch --name "$layout" 2>&1)"
+  status=$?
+  if [ "$status" -eq 0 ]; then
+    echo "Switched the Herdr app to $layout."
+    return 0
+  fi
+  case "$out" in
+    *"no Herdr window"*)
+      echo "The Herdr app is not open. The layout is installed: open Herdr and pick $layout with ctrl-shift-l, or run this again while it is open."
+      return 0
+      ;;
+  esac
+  printf '%s\n' "$out" >&2
+  return 1
+}
+
+case "${1:-install}" in
+  install) install_all; exit $? ;;
+  sync)
+    if stamp_is "$BUILD" || stamp_is removed; then
+      exit 0
+    fi
+    install_all >/dev/null
+    exit $?
+    ;;
+  phone) switch nightglass-phone; exit $? ;;
+  desktop) switch nightglass; exit $? ;;
+  remove) remove_all; exit $? ;;
+  -h|--help|help) usage; exit 0 ;;
+  *) usage >&2; exit 2 ;;
+esac
