@@ -143,6 +143,43 @@ index 63e6a1b..20cbcba 100644
      } else if Command::new("clang").arg("--version").output().is_err() {
          // With a clang installed, bindgen asks it for its own builtin headers,
          // which match its libclang; Zig's newer ones break older ones (Ubuntu
+diff --git a/defaults/AGENTS.md b/defaults/AGENTS.md
+index cfaa93a..31af645 100644
+--- a/defaults/AGENTS.md
++++ b/defaults/AGENTS.md
+@@ -266,6 +266,16 @@ Properties any node can have:
+   right-clicks (including Shift+right-click). Omit it for the shipped `menu`;
+   an unknown mod logs a warning and falls back to `menu`. Clone a shipped
+   layout before changing this field. Other menus are unchanged.
++- Root only: `"toasts": {...}` places the toast notifications; every field is
++  optional and sizes are px at zoom 1. `anchor`: `"bottom-right"` (default),
++  `"bottom-center"`, `"top-center"` or `"top-right"`; `offset` (16): distance
++  from that window edge (top anchors stack downward, bottom anchors upward);
++  `width` (340), `height` (72), `gap` (8) between toasts; `max`: only the newest
++  `max` toasts stay (default no limit). `over`: a node id (e.g. `"term"`): while
++  that node is visible, toasts sit inside it, centered, the first `offset` px
++  below its top edge and the rest stacking downward; hidden or unknown, `anchor`
++  applies. Width never exceeds the window (or node) width minus 16.
++  Example: `"toasts": {"over": "term", "anchor": "top-center", "width": 300, "max": 3}`.
+ - Colors are theme names (`border`, `accent`, `surface`, ...) or `#rrggbb[aa]`.
+ 
+ A personal terminal menu replaces the whole menu; it doesn't merge items.
+diff --git a/defaults/herdr.d.ts b/defaults/herdr.d.ts
+index 454f4f4..b2032f1 100644
+--- a/defaults/herdr.d.ts
++++ b/defaults/herdr.d.ts
+@@ -234,6 +234,11 @@ export function focused(): { space: string; tab: string; pane: string | null; te
+ /** The shown layout (layouts/<name>.json). Its name is shared("layout").
+  *  Root `terminal_menu?: string` chooses a terminal right-click menu mod (default: "menu").
+  *  Unknown names warn and fall back to "menu". This replaces the menu, not its items.
++ *  Root `toasts?: {over?: string; anchor?: "bottom-right" | "bottom-center" | "top-center" | "top-right";
++ *  offset?: number; width?: number; height?: number; gap?: number; max?: number}` places toast
++ *  notifications (px at zoom 1; defaults: anchor bottom-right, offset 16, 340 x 72, gap 8, no max).
++ *  `over` is a node id: while visible, toasts sit centered inside it, `offset` below its top edge,
++ *  stacking downward; otherwise `anchor` applies. `max` keeps only the newest toasts.
+  *  Opens a pointer popup with mod.json overlay width/height (default 220×260). */
+ export function layout(): unknown;
+ 
 diff --git a/src/commands.rs b/src/commands.rs
 index 5350999..a2c760f 100644
 --- a/src/commands.rs
@@ -293,6 +330,56 @@ index e28a011..c2a08d8 100644
      #[test]
      fn linux_help_binding_matches_shifted_slash() {
          // Linux reports Ctrl+Shift+/ as Ctrl+? without the Shift modifier.
+diff --git a/src/layout.rs b/src/layout.rs
+index 6206ce8..0412aee 100644
+--- a/src/layout.rs
++++ b/src/layout.rs
+@@ -378,6 +378,37 @@ pub struct Node {
+     /// Dragging this node moves the window; a double-click maximizes it.
+     #[serde(default, skip_serializing_if = "is_false")]
+     pub window_drag: bool,
++    /// Root only: where toast notifications sit, how big they are and how many show.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub toasts: Option<Toasts>,
++}
++
++/// Root only: how toast notifications are placed. Every field is optional; sizes are px at zoom 1.
++#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
++pub struct Toasts {
++    /// A node id: while that node is laid out and visible, toasts sit inside it, centered
++    /// horizontally, the first `offset` px below its top edge, later ones stacking downward.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub over: Option<String>,
++    /// `bottom-right` (default), `bottom-center`, `top-center` or `top-right`. An unknown name
++    /// is `bottom-right`.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub anchor: Option<String>,
++    /// Distance from the anchored window edge (or from the `over` node's top), default 16.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub offset: Option<f32>,
++    /// Default 340; never wider than the window (or `over` node) minus 16.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub width: Option<f32>,
++    /// Default 72.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub height: Option<f32>,
++    /// Space between toasts, default 8.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub gap: Option<f32>,
++    /// Most toasts shown at once (default: no limit): older ones are closed.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub max: Option<usize>,
+ }
+ 
+ #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+@@ -415,6 +446,7 @@ impl Node {
+             preview: None,
+             terminal_menu: None,
+             window_drag: false,
++            toasts: None,
+         }
+     }
+ 
 diff --git a/src/mods.rs b/src/mods.rs
 index 927d289..5db246a 100644
 --- a/src/mods.rs
@@ -636,7 +723,7 @@ index c348d59..71080be 100644
      }
  
 diff --git a/src/window.rs b/src/window.rs
-index b4562f4..1e7de34 100644
+index b4562f4..510dd3a 100644
 --- a/src/window.rs
 +++ b/src/window.rs
 @@ -1412,6 +1412,20 @@ impl AppWindow {
@@ -675,7 +762,23 @@ index b4562f4..1e7de34 100644
              "app.quit" => cx.quit(),
              "app.update" => {
                  if !crate::update::apply() {
-@@ -3749,6 +3771,7 @@ impl AppWindow {
+@@ -3621,6 +3643,15 @@ impl AppWindow {
+         } else {
+             self.publish_shown_copies();
+         }
++        // The layout's `toasts.max`: only the newest toasts stay.
++        if kind == OverlayKind::Toast
++            && let Some(max) = self.chrome.toasts.as_ref().and_then(|t| t.max)
++        {
++            let toasts: Vec<String> = self.overlays.iter().filter(|o| o.kind == OverlayKind::Toast).map(|o| o.id.clone()).collect();
++            for old in toasts.iter().take(toasts.len().saturating_sub(max.max(1))) {
++                self.remove_overlay(old, window, cx);
++            }
++        }
+         cx.notify();
+     }
+ 
+@@ -3749,6 +3780,7 @@ impl AppWindow {
              return json!({
                  "zoom": round(settings::zoom()),
                  "font_size": round(settings::font_size()),
@@ -683,7 +786,78 @@ index b4562f4..1e7de34 100644
                  "ui_font_size": round(settings::ui_font_size()),
                  "space": self.model.active,
                  "tab": self.model.active_tab().map(|c| c.id.clone()),
-@@ -5086,7 +5109,7 @@ mod tests {
+@@ -4284,7 +4316,28 @@ impl AppWindow {
+ 
+     fn render_overlays(&self, viewport: Size<Pixels>, cx: &mut Context<Self>) -> Vec<AnyElement> {
+         let mut out = Vec::new();
+-        let mut toast_y = 16.0;
++        // The layout's `toasts` (root): where they sit, how big, how far apart.
++        let toasts = self.chrome.toasts.clone();
++        let styled = toasts.is_some();
++        let toasts = toasts.unwrap_or_default();
++        let (t_w, t_h) = (toasts.width.unwrap_or(340.0).max(1.0), toasts.height.unwrap_or(72.0).max(1.0));
++        let (t_gap, t_off) = (toasts.gap.unwrap_or(8.0).max(0.0), toasts.offset.unwrap_or(16.0));
++        // `over`: the node's bounds from its last paint, only while it is visible in the layout.
++        let region = toasts
++            .over
++            .as_deref()
++            .filter(|id| visible_nodes(&self.chrome).iter().any(|n| n.id == *id))
++            .and_then(|id| self.bounds.borrow().get(id).copied())
++            .filter(|b| b.size.width > px(0.0) && b.size.height > px(0.0));
++        let toast_w = settings::z(t_w).min(region.map_or(viewport.width, |b| b.size.width) - settings::z(16.0)).max(px(1.0));
++        let (bottom, centered) = match toasts.anchor.as_deref() {
++            Some("bottom-center") => (true, true),
++            Some("top-center") => (false, true),
++            Some("top-right") => (false, false),
++            _ => (true, false),
++        };
++        let mut toast_y = t_off;
++        let mut top_y = t_off;
+         // Drawn last, so it stays clickable over an open dialog.
+         let pill = self.render_update_pill(cx);
+         if pill.is_some() {
+@@ -4297,7 +4350,11 @@ impl AppWindow {
+             let id = o.id.clone();
+             // Up to 1: a share of the window (terminals in overlays want room, not px).
+             let span = |v: f32, full: Pixels| if v <= 1.0 { full * v } else { settings::z(v) };
+-            let (w, h) = (span(o.size.width, viewport.width), span(o.size.height, viewport.height));
++            let (w, h) = if styled && o.kind == OverlayKind::Toast {
++                (toast_w, settings::z(t_h))
++            } else {
++                (span(o.size.width, viewport.width), span(o.size.height, viewport.height))
++            };
+             let sized = |v: f32| v > 0.0 || o.kind != OverlayKind::Window;
+             let content = match &o.layout {
+                 Some(l) => self.render_node(l, &HashSet::new(), None, cx),
+@@ -4352,8 +4409,25 @@ impl AppWindow {
+                     );
+                 }
+                 OverlayKind::Toast => {
+-                    out.push(div().absolute().right(settings::z(16.0)).bottom(settings::z(toast_y)).child(body).into_any_element());
+-                    toast_y += o.size.height + 8.0;
++                    let slot_h = if styled { t_h } else { o.size.height };
++                    let el = div().absolute();
++                    let el = if let Some(r) = region {
++                        let y = top_y;
++                        top_y += slot_h + t_gap;
++                        el.left(r.origin.x + (r.size.width - w) / 2.0).top(r.origin.y + settings::z(y))
++                    } else {
++                        let across = |el: gpui::Div| if centered { el.left((viewport.width - w) / 2.0) } else { el.right(settings::z(16.0)) };
++                        if bottom {
++                            let y = toast_y;
++                            toast_y += slot_h + t_gap;
++                            across(el).bottom(settings::z(y))
++                        } else {
++                            let y = top_y;
++                            top_y += slot_h + t_gap;
++                            across(el).top(settings::z(y))
++                        }
++                    };
++                    out.push(el.child(body).into_any_element());
+                 }
+             }
+         }
+@@ -5086,7 +5160,7 @@ mod tests {
      #[gpui::test]
      fn image_invalidation_drops_cached_atlas_tiles_without_loading_missing_assets(cx: &mut TestAppContext) {
          use gpui::{ImgResourceLoader, Resource};
@@ -692,7 +866,7 @@ index b4562f4..1e7de34 100644
          let home = temp.join(format!("herdr-image-atlas-test-{}", std::process::id()));
          std::fs::create_dir_all(&home).unwrap();
          let file = home.join("image.gif");
-@@ -5123,7 +5146,7 @@ mod tests {
+@@ -5123,7 +5197,7 @@ mod tests {
  
      #[test]
      fn directory_changes_include_nested_assets() {
