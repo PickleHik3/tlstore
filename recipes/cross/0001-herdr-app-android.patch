@@ -143,6 +143,20 @@ index 63e6a1b..20cbcba 100644
      } else if Command::new("clang").arg("--version").output().is_err() {
          // With a clang installed, bindgen asks it for its own builtin headers,
          // which match its libclang; Zig's newer ones break older ones (Ubuntu
+diff --git a/src/commands.rs b/src/commands.rs
+index 5350999..a2c760f 100644
+--- a/src/commands.rs
++++ b/src/commands.rs
+@@ -96,6 +96,9 @@ pub const COMMANDS: &[Command] = &[
+     cmd("app.zoom_in", &[], "Make everything bigger."),
+     cmd("app.zoom_out", &[], "Make everything smaller."),
+     cmd("app.zoom_reset", &[], "Back to normal size."),
++    cmd("terminal.zoom_in", &[], "Make the terminals' text bigger."),
++    cmd("terminal.zoom_out", &[], "Make the terminals' text smaller."),
++    cmd("terminal.zoom_reset", &[], "Back to the set text size in the terminals."),
+     cmd("app.update", &[], "Restart into the update Herdr downloaded (your terminals keep running)."),
+     cmd("app.quit", &[], "Quit (macOS)."),
+     cmd("app.hide", &[], "Hide the app (macOS)."),
 diff --git a/src/core_bin.rs b/src/core_bin.rs
 index 8ed2ace..f659583 100644
 --- a/src/core_bin.rs
@@ -342,10 +356,81 @@ index e4e3b23..f7d0100 100644
      use super::read;
      use std::io::{BufRead, BufReader, Write};
 diff --git a/src/settings.rs b/src/settings.rs
-index 05fe16a..df2575c 100644
+index 05fe16a..064d004 100644
 --- a/src/settings.rs
 +++ b/src/settings.rs
-@@ -735,7 +735,7 @@ fn system_text_scale() -> f32 {
+@@ -369,6 +369,10 @@ fn resolve(p: &Palette, overrides: &BTreeMap<String, String>) -> Theme {
+ pub struct Person {
+     /// How big the whole app is drawn (1 = as designed). The zoom keys change it.
+     pub zoom: f32,
++    /// How big the terminals' text is drawn on top of the layout's or person's font size
++    /// (1 = as set). The pinch gesture, Ctrl+wheel and terminal.zoom_* change it.
++    #[serde(skip_serializing_if = "is_one")]
++    pub terminal_zoom: f32,
+     pub sounds: Sounds,
+     /// The herdr-core to use, when it isn't where Herdr looks (core_bin.rs).
+     #[serde(skip_serializing_if = "Option::is_none")]
+@@ -442,10 +446,15 @@ fn is_true(b: &bool) -> bool {
+     *b
+ }
+ 
++fn is_one(v: &f32) -> bool {
++    *v == 1.0
++}
++
+ impl Default for Person {
+     fn default() -> Self {
+         Person {
+             zoom: 1.0,
++            terminal_zoom: 1.0,
+             sounds: Sounds::default(),
+             core: None,
+             font: None,
+@@ -476,6 +485,8 @@ pub struct Settings {
+     pub ui_font_size: f32,
+     /// How big the whole app is drawn (1 = as designed). The zoom keys change it.
+     pub zoom: f32,
++    /// The terminals' text size factor (1 = the font size as set); only terminal text follows it.
++    pub terminal_zoom: f32,
+     /// The theme showing: a preset or a file in themes/.
+     pub theme: String,
+     /// The layout's theme for each appearance (the same one twice when it names one).
+@@ -525,6 +536,7 @@ impl Default for Settings {
+             ui_font_family: "Geist".into(),
+             ui_font_size: 13.0,
+             zoom: 1.0,
++            terminal_zoom: 1.0,
+             theme: DEFAULT_DARK.into(),
+             theme_light: DEFAULT_LIGHT.into(),
+             theme_dark: DEFAULT_DARK.into(),
+@@ -563,6 +575,7 @@ impl Settings {
+             ui_font_family: look.ui_font.clone().or(person.ui_font.clone()).unwrap_or(d.ui_font_family),
+             ui_font_size: d.ui_font_size,
+             zoom: person.zoom,
++            terminal_zoom: person.terminal_zoom,
+             theme: if dark { theme_dark.clone() } else { theme_light.clone() },
+             theme_light,
+             theme_dark,
+@@ -640,6 +653,8 @@ thread_local! {
+ 
+ const ZOOM_MIN: f32 = 0.5;
+ const ZOOM_MAX: f32 = 3.0;
++pub const TERMINAL_ZOOM_MIN: f32 = 0.5;
++pub const TERMINAL_ZOOM_MAX: f32 = 3.0;
+ 
+ pub fn get() -> Rc<Settings> {
+     CURRENT.with(|c| c.borrow().0.clone())
+@@ -671,6 +686,9 @@ pub fn load_person() -> Result<Person, String> {
+     if !(ZOOM_MIN..=ZOOM_MAX).contains(&person.zoom) {
+         return Err(format!("zoom {} is outside {ZOOM_MIN}..{ZOOM_MAX}", person.zoom));
+     }
++    if !(TERMINAL_ZOOM_MIN..=TERMINAL_ZOOM_MAX).contains(&person.terminal_zoom) {
++        return Err(format!("terminal_zoom {} is outside {TERMINAL_ZOOM_MIN}..{TERMINAL_ZOOM_MAX}", person.terminal_zoom));
++    }
+     Ok(person)
+ }
+ 
+@@ -735,7 +753,7 @@ fn system_text_scale() -> f32 {
              .and_then(|o| o.split_whitespace().last().and_then(|h| u32::from_str_radix(h.trim_start_matches("0x"), 16).ok()))
              .map_or(1.0, |p| p as f32 / 100.0);
      }
@@ -354,6 +439,28 @@ index 05fe16a..df2575c 100644
          return run("gsettings", &["get", "org.gnome.desktop.interface", "text-scaling-factor"]).and_then(|o| o.trim().parse().ok()).unwrap_or(1.0);
      }
      1.0
+@@ -758,8 +776,20 @@ pub fn z(v: f32) -> Pixels {
+     px(v * zoom())
+ }
+ 
++/// The terminals' text size in px: the font size as set, at the app zoom and the terminal zoom.
+ pub fn font_size() -> f32 {
+-    get().font_size * zoom()
++    get().font_size * zoom() * get().terminal_zoom
++}
++
++pub fn terminal_zoom() -> f32 {
++    get().terminal_zoom
++}
++
++/// The terminal zoom that draws terminal text `size` px high: snapped to half a pixel (so the
++/// grid is not laid out again for every pinch event) and kept within the allowed range.
++pub fn terminal_zoom_for_size(size: f32) -> f32 {
++    let base = get().font_size * zoom();
++    ((size * 2.0).round() / 2.0 / base).clamp(TERMINAL_ZOOM_MIN, TERMINAL_ZOOM_MAX)
+ }
+ 
+ pub fn ui_font_size() -> f32 {
 diff --git a/src/sprites.rs b/src/sprites.rs
 index b3e2373..5b8fe94 100644
 --- a/src/sprites.rs
@@ -377,10 +484,41 @@ index b3e2373..5b8fe94 100644
      fn rendered_rounded_corners_join_straight_lines() {
          use gpui::{prelude::*, *};
 diff --git a/src/terminal.rs b/src/terminal.rs
-index 4d67c89..ebf5a77 100644
+index 4d67c89..4d712d3 100644
 --- a/src/terminal.rs
 +++ b/src/terminal.rs
-@@ -482,11 +482,11 @@ impl TerminalView {
+@@ -49,6 +49,10 @@ pub enum TerminalEvent {
+     Ended,
+     /// Right-click where the program doesn't take the mouse: the pane menu.
+     ContextMenu(Point<Pixels>),
++    /// A pinch over the terminal: the terminal zoom it asks for (`done` at the gesture's end).
++    Zoom { zoom: f32, done: bool },
++    /// Ctrl+wheel: this many px bigger (negative: smaller).
++    ZoomSteps(i32),
+ }
+ 
+ /// What the canvas closures need, shared outside the entity so prepaint can resize.
+@@ -118,6 +122,10 @@ pub struct TerminalView {
+     typed_at: Cell<Option<Instant>>,
+     /// Scrolled this gesture, in lines, toward the next whole one.
+     scrolled: Point<f32>,
++    /// A pinch in progress: the terminal zoom it began at and the scale gathered so far.
++    pinch: (f32, f32),
++    /// Ctrl+wheel gathered toward the next whole step.
++    wheel_zoom: f32,
+     /// Search UI and query belong to this terminal view, not the window. Each
+     /// terminal in a tab therefore keeps its own query and match position.
+     search_open: bool,
+@@ -273,6 +281,8 @@ impl TerminalView {
+             shown_in: Cell::new(0),
+             typed_at: Cell::new(None),
+             scrolled: point(0.0, 0.0),
++            pinch: (1.0, 1.0),
++            wheel_zoom: 0.0,
+             search_open: false,
+             search_keys: false,
+             search_query: String::new(),
+@@ -482,11 +492,11 @@ impl TerminalView {
                          if let Some(text) = clipboard {
                              cx.write_to_clipboard(ClipboardItem::new_string(text));
                          }
@@ -394,7 +532,7 @@ index 4d67c89..ebf5a77 100644
                          let _ = primary;
                          if let Some(ch) = g.channel {
                              g.core.credit(ch, bytes.len());
-@@ -667,7 +667,7 @@ impl TerminalView {
+@@ -667,7 +677,7 @@ impl TerminalView {
              return false;
          };
          cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
@@ -403,15 +541,52 @@ index 4d67c89..ebf5a77 100644
          cx.write_to_primary(ClipboardItem::new_string(text));
          true
      }
-@@ -1935,6 +1935,7 @@ impl Render for TerminalView {
+@@ -807,8 +817,33 @@ impl TerminalView {
+         }
+     }
+ 
+-    fn scroll(&mut self, ev: &ScrollWheelEvent, _w: &mut Window, cx: &mut Context<Self>) {
++    /// Pinch: pinching out makes the text bigger. `delta` is the change of the scale since the
++    /// last event, so they add up to the gesture's scale.
++    fn pinch(&mut self, ev: &PinchEvent, cx: &mut Context<Self>) {
+         cx.stop_propagation();
++        match ev.phase {
++            TouchPhase::Started => self.pinch = (crate::settings::terminal_zoom(), 1.0),
++            TouchPhase::Moved => {
++                self.pinch.1 = (self.pinch.1 + ev.delta).max(0.05);
++                cx.emit(TerminalEvent::Zoom { zoom: self.pinch.0 * self.pinch.1, done: false });
++            }
++            _ => cx.emit(TerminalEvent::Zoom { zoom: self.pinch.0 * self.pinch.1, done: true }),
++        }
++    }
++
++    fn scroll(&mut self, ev: &ScrollWheelEvent, w: &mut Window, cx: &mut Context<Self>) {
++        cx.stop_propagation();
++        // Ctrl+wheel resizes the text, unless the program has the mouse.
++        if ev.modifiers.control && !self.grid.borrow().vt.mouse_tracking() {
++            let dy = ev.delta.pixel_delta(w.line_height()).y;
++            self.wheel_zoom += f32::from(dy) / f32::from(w.line_height());
++            let steps = self.wheel_zoom.trunc();
++            if steps != 0.0 {
++                self.wheel_zoom -= steps;
++                cx.emit(TerminalEvent::ZoomSteps(steps as i32));
++            }
++            return;
++        }
+         let mut g = self.grid.borrow_mut();
+         let steps = scroll_delta_steps(&mut self.scrolled, ev.delta, ev.touch_phase, g.cell, g.vt.cols, g.vt.rows);
+         let n = steps.y.unsigned_abs() as usize;
+@@ -1934,7 +1969,9 @@ impl Render for TerminalView {
+             .on_key_down(cx.listener(Self::key_down))
              .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.dropped(paths.paths().to_vec(), cx)))
              .on_scroll_wheel(cx.listener(Self::scroll))
++            .on_pinch(cx.listener(|this, ev: &PinchEvent, _, cx| this.pinch(ev, cx)))
              .when(self.link.is_some(), |d| d.cursor_pointer())
 +            .when(self.link.is_none(), |d| d.cursor_text())
              .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
                  if !hovered {
                      this.grid.borrow_mut().hover = None;
-@@ -2788,7 +2789,7 @@ mod tests {
+@@ -2788,7 +2825,7 @@ mod tests {
  
      // The native macOS text system is private to GPUI; creating MacPlatform here
      // requires the main thread. Exercise real shaping directly on Linux instead.
@@ -420,7 +595,7 @@ index 4d67c89..ebf5a77 100644
      #[test]
      fn ligatures_change_glyphs_without_moving_terminal_cells() {
          use super::*;
-@@ -2826,7 +2827,7 @@ mod tests {
+@@ -2826,7 +2863,7 @@ mod tests {
          crate::settings::set((*original).clone());
      }
  
@@ -461,10 +636,54 @@ index c348d59..71080be 100644
      }
  
 diff --git a/src/window.rs b/src/window.rs
-index b4562f4..0c7adf0 100644
+index b4562f4..1e7de34 100644
 --- a/src/window.rs
 +++ b/src/window.rs
-@@ -5086,7 +5086,7 @@ mod tests {
+@@ -1412,6 +1412,20 @@ impl AppWindow {
+                 TerminalEvent::Peek(address) => this.peek_terminal(address, window, cx),
+                 TerminalEvent::TitleChanged => this.publish(cx),
+                 TerminalEvent::Ended => this.terminal_ended(&block, window, cx),
++                // A pinch applies as it goes (kept in memory) and is written when it ends.
++                TerminalEvent::Zoom { zoom, done } => {
++                    let zoom = settings::terminal_zoom_for_size(zoom * settings::get().font_size * settings::zoom());
++                    if *done {
++                        this.write_person(|p| p.terminal_zoom = zoom, window, cx);
++                    } else if this.person.terminal_zoom != zoom {
++                        this.person.terminal_zoom = zoom;
++                        this.apply_look(window, cx);
++                    }
++                }
++                TerminalEvent::ZoomSteps(steps) => {
++                    let zoom = settings::terminal_zoom_for_size(settings::font_size() + *steps as f32);
++                    this.write_person(|p| p.terminal_zoom = zoom, window, cx);
++                }
+                 TerminalEvent::ContextMenu(at) => {
+                     this.open_menu("pane", json!({ "pane": block.trim_end_matches(SWAP), "terminal": addr }), Some(*at), window, cx)
+                 }
+@@ -3399,6 +3413,14 @@ impl AppWindow {
+                 });
+                 self.write_person(|p| p.zoom = zoom, window, cx);
+             }
++            "terminal.zoom_in" | "terminal.zoom_out" | "terminal.zoom_reset" => {
++                let zoom = match name {
++                    "terminal.zoom_in" => settings::terminal_zoom_for_size(settings::font_size() + 1.0),
++                    "terminal.zoom_out" => settings::terminal_zoom_for_size(settings::font_size() - 1.0),
++                    _ => 1.0,
++                };
++                self.write_person(|p| p.terminal_zoom = zoom, window, cx);
++            }
+             "app.quit" => cx.quit(),
+             "app.update" => {
+                 if !crate::update::apply() {
+@@ -3749,6 +3771,7 @@ impl AppWindow {
+             return json!({
+                 "zoom": round(settings::zoom()),
+                 "font_size": round(settings::font_size()),
++                "terminal_zoom": round(settings::terminal_zoom()),
+                 "ui_font_size": round(settings::ui_font_size()),
+                 "space": self.model.active,
+                 "tab": self.model.active_tab().map(|c| c.id.clone()),
+@@ -5086,7 +5109,7 @@ mod tests {
      #[gpui::test]
      fn image_invalidation_drops_cached_atlas_tiles_without_loading_missing_assets(cx: &mut TestAppContext) {
          use gpui::{ImgResourceLoader, Resource};
@@ -473,7 +692,7 @@ index b4562f4..0c7adf0 100644
          let home = temp.join(format!("herdr-image-atlas-test-{}", std::process::id()));
          std::fs::create_dir_all(&home).unwrap();
          let file = home.join("image.gif");
-@@ -5123,7 +5123,7 @@ mod tests {
+@@ -5123,7 +5146,7 @@ mod tests {
  
      #[test]
      fn directory_changes_include_nested_assets() {
