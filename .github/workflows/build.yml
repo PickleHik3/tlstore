@@ -116,7 +116,7 @@ jobs:
       # kitten and tuios need the NDK only on x86_64, where its link goes through the NDK's clang.
       # musl-runtime, launcher-skills and herdr-nightglass are fetched or packed, not built.
       - name: NDK
-        if: matrix.tool != 'musl-runtime' && matrix.tool != 'launcher-skills' && matrix.tool != 'herdr-nightglass' &&((matrix.tool != 'kitten' && matrix.tool != 'tuios') || matrix.arch == 'x86_64')
+        if: matrix.tool != 'musl-runtime' && matrix.tool != 'launcher-skills' && matrix.tool != 'herdr-nightglass' && ((matrix.tool != 'kitten' && matrix.tool != 'tuios') || matrix.arch == 'x86_64')
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" >/dev/null
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
