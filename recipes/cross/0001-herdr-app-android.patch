@@ -377,7 +377,7 @@ index b3e2373..5b8fe94 100644
      fn rendered_rounded_corners_join_straight_lines() {
          use gpui::{prelude::*, *};
 diff --git a/src/terminal.rs b/src/terminal.rs
-index 4d67c89..4ff8f41 100644
+index 4d67c89..ebf5a77 100644
 --- a/src/terminal.rs
 +++ b/src/terminal.rs
 @@ -482,11 +482,11 @@ impl TerminalView {
@@ -403,7 +403,15 @@ index 4d67c89..4ff8f41 100644
          cx.write_to_primary(ClipboardItem::new_string(text));
          true
      }
-@@ -2788,7 +2788,7 @@ mod tests {
+@@ -1935,6 +1935,7 @@ impl Render for TerminalView {
+             .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.dropped(paths.paths().to_vec(), cx)))
+             .on_scroll_wheel(cx.listener(Self::scroll))
+             .when(self.link.is_some(), |d| d.cursor_pointer())
++            .when(self.link.is_none(), |d| d.cursor_text())
+             .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                 if !hovered {
+                     this.grid.borrow_mut().hover = None;
+@@ -2788,7 +2789,7 @@ mod tests {
  
      // The native macOS text system is private to GPUI; creating MacPlatform here
      // requires the main thread. Exercise real shaping directly on Linux instead.
@@ -412,7 +420,7 @@ index 4d67c89..4ff8f41 100644
      #[test]
      fn ligatures_change_glyphs_without_moving_terminal_cells() {
          use super::*;
-@@ -2826,7 +2826,7 @@ mod tests {
+@@ -2826,7 +2827,7 @@ mod tests {
          crate::settings::set((*original).clone());
      }
  
@@ -1001,7 +1009,7 @@ index ca2574c..bfbb397 100644
      power_sender: Sender<SystemPowerEvent>,
  ) -> anyhow::Result<()> {
 diff --git a/vendor/gpui-pre-linux/src/linux/x11/client.rs b/vendor/gpui-pre-linux/src/linux/x11/client.rs
-index 76939e1..e6ed817 100644
+index 76939e1..1c18fee 100644
 --- a/vendor/gpui-pre-linux/src/linux/x11/client.rs
 +++ b/vendor/gpui-pre-linux/src/linux/x11/client.rs
 @@ -379,8 +379,15 @@ impl X11Connection {
@@ -1022,7 +1030,65 @@ index 76939e1..e6ed817 100644
          xcb_connection.prefetch_extension_information(xkb::X11_EXTENSION_NAME)?;
          xcb_connection.prefetch_extension_information(randr::X11_EXTENSION_NAME)?;
          xcb_connection.prefetch_extension_information(render::X11_EXTENSION_NAME)?;
-@@ -3237,3 +3244,50 @@ mod tests {
+@@ -1528,6 +1535,57 @@ impl X11Client {
+                     phase: gpui::TouchPhase::Ended,
+                 }));
+             }
++            Event::XinputTouchBegin(event) => {
++                let window = self.get_window(event.event)?;
++                let mut state = self.0.borrow_mut();
++                state.modifiers = modifiers_from_xinput_info(event.mods);
++                let position = point(
++                    px(event.event_x as f32 / u16::MAX as f32 / state.scale_factor),
++                    px(event.event_y as f32 / u16::MAX as f32 / state.scale_factor),
++                );
++                drop(state);
++                window.handle_input(PlatformInput::Touch(gpui::TouchEvent {
++                    id: gpui::TouchId(event.detail as u64),
++                    phase: TouchPhase::Started,
++                    position,
++                    predicted_position: None,
++                    force: None,
++                }));
++            }
++            Event::XinputTouchUpdate(event) => {
++                let window = self.get_window(event.event)?;
++                let mut state = self.0.borrow_mut();
++                state.modifiers = modifiers_from_xinput_info(event.mods);
++                let position = point(
++                    px(event.event_x as f32 / u16::MAX as f32 / state.scale_factor),
++                    px(event.event_y as f32 / u16::MAX as f32 / state.scale_factor),
++                );
++                drop(state);
++                window.handle_input(PlatformInput::Touch(gpui::TouchEvent {
++                    id: gpui::TouchId(event.detail as u64),
++                    phase: TouchPhase::Moved,
++                    position,
++                    predicted_position: None,
++                    force: None,
++                }));
++            }
++            Event::XinputTouchEnd(event) => {
++                let window = self.get_window(event.event)?;
++                let mut state = self.0.borrow_mut();
++                state.modifiers = modifiers_from_xinput_info(event.mods);
++                let position = point(
++                    px(event.event_x as f32 / u16::MAX as f32 / state.scale_factor),
++                    px(event.event_y as f32 / u16::MAX as f32 / state.scale_factor),
++                );
++                drop(state);
++                window.handle_input(PlatformInput::Touch(gpui::TouchEvent {
++                    id: gpui::TouchId(event.detail as u64),
++                    phase: TouchPhase::Ended,
++                    position,
++                    predicted_position: None,
++                    force: None,
++                }));
++            }
+             _ => {}
+         };
+ 
+@@ -3237,3 +3295,50 @@ mod tests {
          assert_eq!(key_event_state.key_get_utf8(space), " ");
      }
  }
@@ -1073,6 +1139,24 @@ index 76939e1..e6ed817 100644
 +        Some((connection, screen))
 +    }
 +}
+diff --git a/vendor/gpui-pre-linux/src/linux/x11/window.rs b/vendor/gpui-pre-linux/src/linux/x11/window.rs
+index d14e94f..46bb2bd 100644
+--- a/vendor/gpui-pre-linux/src/linux/x11/window.rs
++++ b/vendor/gpui-pre-linux/src/linux/x11/window.rs
+@@ -720,7 +720,12 @@ impl X11WindowState {
+                 | xinput::XIEventMask::BUTTON_PRESS
+                 | xinput::XIEventMask::BUTTON_RELEASE
+                 | xinput::XIEventMask::ENTER
+-                | xinput::XIEventMask::LEAVE;
++                | xinput::XIEventMask::LEAVE
++                // Touch events (XI 2.2): without them the server pointer-emulates the
++                // first finger and GPUI never sees a touch.
++                | xinput::XIEventMask::TOUCH_BEGIN
++                | xinput::XIEventMask::TOUCH_UPDATE
++                | xinput::XIEventMask::TOUCH_END;
+             if supports_xinput_gestures {
+                 // x11rb 0.13 doesn't define XIEventMask constants for gesture
+                 // events, so we construct them from the event opcodes (each
 diff --git a/vendor/gpui-pre-wgpu/src/wgpu_renderer.rs b/vendor/gpui-pre-wgpu/src/wgpu_renderer.rs
 index a700613..8dbaca5 100644
 --- a/vendor/gpui-pre-wgpu/src/wgpu_renderer.rs
