@@ -250,6 +250,24 @@ fi
 # Vulkan app has no use for.
 unset LIBGL_KOPPER_DISABLE
 
+# A terminal opened while the display was down has no DISPLAY, and without one the app runs with
+# no window at all. The launcher's display is :0, its socket under the edition's own tmp.
+if [ -z "${DISPLAY:-}" ] && [ -S "$USR/tmp/.X11-unix/X0" ]; then
+  export DISPLAY=:0
+fi
+# The app looks for the display's socket under TMPDIR, and a launcher terminal's TMPDIR is a
+# folder in HOME, where there is none: the clipboard's own connection then times out and the app
+# stops. Point it at the tmp the socket is in.
+if [ ! -d "${TMPDIR:-/nonexistent}/.X11-unix" ] && [ -d "$USR/tmp/.X11-unix" ]; then
+  export TMPDIR="$USR/tmp"
+fi
+# No Xcursor theme is on the app's search path here, so a cursor asked for by name comes back
+# empty and every cursor stays an arrow. The "core" theme takes them from the X server's cursor
+# font, where the text caret is named xterm: the name the launcher's tap-on-text keyboard rule
+# reads.
+: "${XCURSOR_THEME:=core}"
+export XCURSOR_THEME
+
 found=
 for f in "$USR"/share/vulkan/icd.d/*.json; do
   [ -f "$f" ] && found=1 && break
