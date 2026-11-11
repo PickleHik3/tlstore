@@ -318,10 +318,19 @@ index 82ccf29..b1b2b4f 100644
      fn exact_cap_counts_each_git_directory_once() {
          let root = test_repo("exact-cap");
 diff --git a/src/keys.rs b/src/keys.rs
-index e28a011..c2a08d8 100644
+index e28a011..b095169 100644
 --- a/src/keys.rs
 +++ b/src/keys.rs
-@@ -338,7 +338,7 @@ mod tests {
+@@ -268,6 +268,8 @@ pub fn install(bindings: Vec<KeyBinding>, cx: &mut App) {
+     cx.bind_keys([
+         KeyBinding::new(ESCAPE_HATCH, ShellAction::new("app.reset"), None),
+         KeyBinding::new("escape", ShellAction::new("overlay.close"), Some("Overlay")),
++        // Android's Back reaches the launcher's X display as XF86Back, which gpui names "back".
++        KeyBinding::new("back", ShellAction::new("overlay.close"), Some("Overlay")),
+     ]);
+ }
+ 
+@@ -338,7 +340,7 @@ mod tests {
          assert!(Keystroke::default().unshifted_key.is_none());
      }
  
@@ -723,7 +732,7 @@ index c348d59..71080be 100644
      }
  
 diff --git a/src/window.rs b/src/window.rs
-index b4562f4..510dd3a 100644
+index b4562f4..91d3736 100644
 --- a/src/window.rs
 +++ b/src/window.rs
 @@ -1412,6 +1412,20 @@ impl AppWindow {
@@ -816,7 +825,7 @@ index b4562f4..510dd3a 100644
          // Drawn last, so it stays clickable over an open dialog.
          let pill = self.render_update_pill(cx);
          if pill.is_some() {
-@@ -4297,7 +4350,11 @@ impl AppWindow {
+@@ -4297,7 +4350,17 @@ impl AppWindow {
              let id = o.id.clone();
              // Up to 1: a share of the window (terminals in overlays want room, not px).
              let span = |v: f32, full: Pixels| if v <= 1.0 { full * v } else { settings::z(v) };
@@ -824,12 +833,37 @@ index b4562f4..510dd3a 100644
 +            let (w, h) = if styled && o.kind == OverlayKind::Toast {
 +                (toast_w, settings::z(t_h))
 +            } else {
-+                (span(o.size.width, viewport.width), span(o.size.height, viewport.height))
++                let (w, h) = (span(o.size.width, viewport.width), span(o.size.height, viewport.height));
++                // A popup or dialog never outgrows the window: 8 designed px of margin each side.
++                if matches!(o.kind, OverlayKind::Popup | OverlayKind::Dialog) {
++                    (w.min((viewport.width - settings::z(16.0)).max(px(1.0))), h.min((viewport.height - settings::z(16.0)).max(px(1.0))))
++                } else {
++                    (w, h)
++                }
 +            };
              let sized = |v: f32| v > 0.0 || o.kind != OverlayKind::Window;
              let content = match &o.layout {
                  Some(l) => self.render_node(l, &HashSet::new(), None, cx),
-@@ -4352,8 +4409,25 @@ impl AppWindow {
+@@ -4342,18 +4405,42 @@ impl AppWindow {
+                         div()
+                             .absolute()
+                             .inset_0()
+-                            .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, w, cx| this.close_overlay(&id, w, cx)))
++                            .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, w, cx| {
++                                // Consumed: the button under the press (the one that toggles this popup) never sees it.
++                                cx.stop_propagation();
++                                this.close_overlay(&id, w, cx)
++                            }))
+                             .on_mouse_down(MouseButton::Right, cx.listener({
+                                 let id = o.id.clone();
+-                                move |this, _, w, cx| this.close_overlay(&id, w, cx)
++                                move |this, _, w, cx| {
++                                    cx.stop_propagation();
++                                    this.close_overlay(&id, w, cx)
++                                }
+                             }))
+                             .child(position_popup(at, body))
+                             .into_any_element(),
                      );
                  }
                  OverlayKind::Toast => {
@@ -857,7 +891,7 @@ index b4562f4..510dd3a 100644
                  }
              }
          }
-@@ -5086,7 +5160,7 @@ mod tests {
+@@ -5086,7 +5173,7 @@ mod tests {
      #[gpui::test]
      fn image_invalidation_drops_cached_atlas_tiles_without_loading_missing_assets(cx: &mut TestAppContext) {
          use gpui::{ImgResourceLoader, Resource};
@@ -866,7 +900,7 @@ index b4562f4..510dd3a 100644
          let home = temp.join(format!("herdr-image-atlas-test-{}", std::process::id()));
          std::fs::create_dir_all(&home).unwrap();
          let file = home.join("image.gif");
-@@ -5123,7 +5197,7 @@ mod tests {
+@@ -5123,7 +5210,7 @@ mod tests {
  
      #[test]
      fn directory_changes_include_nested_assets() {
