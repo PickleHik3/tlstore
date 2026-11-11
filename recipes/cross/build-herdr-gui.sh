@@ -257,8 +257,9 @@ if [ -z "${DISPLAY:-}" ] && [ -S "$USR/tmp/.X11-unix/X0" ]; then
 fi
 # The app looks for the display's socket under TMPDIR, and a launcher terminal's TMPDIR is a
 # folder in HOME, where there is none: the clipboard's own connection then times out and the app
-# stops. Point it at the tmp the socket is in.
-if [ ! -d "${TMPDIR:-/nonexistent}/.X11-unix" ] && [ -d "$USR/tmp/.X11-unix" ]; then
+# stops. Point it at the tmp the socket is in. (The socket is what is tested: an empty .X11-unix
+# folder can be left behind in the other tmp.)
+if [ ! -S "${TMPDIR:-/nonexistent}/.X11-unix/X0" ] && [ -S "$USR/tmp/.X11-unix/X0" ]; then
   export TMPDIR="$USR/tmp"
 fi
 # No Xcursor theme is on the app's search path here, so a cursor asked for by name comes back
