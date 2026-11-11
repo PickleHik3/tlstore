@@ -278,6 +278,13 @@ if [ -z "$found" ]; then
   exit 1
 fi
 
+# The store's herdr-nightglass item (the Nightglass layouts), when it is installed beside this one:
+# bring the Herdr home's copy up to it before the app reads its layouts. It never stops the app.
+NIGHTGLASS="$ROOT/../herdr-nightglass/bin/herdr-nightglass"
+if [ -x "$NIGHTGLASS" ]; then
+  "$NIGHTGLASS" sync >/dev/null 2>&1 || true
+fi
+
 exec "$ROOT/libexec/herdr-app" "$@"
 EOF
 chmod 755 "$stage/bin/herdr-app"
