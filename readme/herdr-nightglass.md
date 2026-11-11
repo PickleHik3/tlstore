@@ -41,7 +41,9 @@ or press `ctrl-shift-l` in the app and pick it. `herdr-nightglass --help` lists 
   `layouts/nightglass-phone.json`. An update of this item writes its files again, so add it back
   after one.
 - It replaces the app's toast mod (`mods/toast`) for every layout. `herdr-nightglass remove` takes
-  out only the files it put there; switch to another layout first.
+  out only the files it put there; switch to another layout first. Removing the store item
+  leaves the copied files in place, so run `herdr-nightglass remove` before
+  `tlstore remove herdr-nightglass` if you want them gone.
 - It used to be called tokyo-night. Old `tokyo-night` layouts, mods and themes are left where they
   are: delete them from `~/.config/herdr-app` by hand.
 - The source is [PickleHik3/herdr-nightglass](https://github.com/PickleHik3/herdr-nightglass).
