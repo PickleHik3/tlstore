@@ -1637,7 +1637,7 @@ diff --git a/vendor/gpui-pre-linux/src/linux/x11/window.rs b/vendor/gpui-pre-lin
 index d14e94f..46bb2bd 100644
 --- a/vendor/gpui-pre-linux/src/linux/x11/window.rs
 +++ b/vendor/gpui-pre-linux/src/linux/x11/window.rs
-@@ -720,7 +720,12 @@ impl X11WindowState {
+@@ -720,7 +720,16 @@ impl X11WindowState {
                  | xinput::XIEventMask::BUTTON_PRESS
                  | xinput::XIEventMask::BUTTON_RELEASE
                  | xinput::XIEventMask::ENTER
@@ -1647,7 +1647,11 @@ index d14e94f..46bb2bd 100644
 +                // first finger and GPUI never sees a touch.
 +                | xinput::XIEventMask::TOUCH_BEGIN
 +                | xinput::XIEventMask::TOUCH_UPDATE
-+                | xinput::XIEventMask::TOUCH_END;
++                | xinput::XIEventMask::TOUCH_END
++                // Touches while another client owns them: a window manager's click-to-focus
++                // grab (xfwm4) holds every tap on an unfocused window, and without this the
++                // window never sees it. The ownership notices themselves are not needed.
++                | xinput::XIEventMask::TOUCH_OWNERSHIP;
              if supports_xinput_gestures {
                  // x11rb 0.13 doesn't define XIEventMask constants for gesture
                  // events, so we construct them from the event opcodes (each
