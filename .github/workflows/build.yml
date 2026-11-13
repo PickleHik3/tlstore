@@ -42,6 +42,11 @@ on:
         description: "Tools to build: all, or a comma list of btop, tl-priv, tuios-cpu, kitten, tuios, sigye, herdr, herdr-core, herdr-gui, terminal-browser, fastfetch, dawn, musl-loader, musl-runtime, launcher-skills, herdr-nightglass"
         required: false
         default: "all"
+      trial:
+        description: "Build only: artifacts named trial-…, no release, nothing recorded"
+        type: boolean
+        required: false
+        default: false
   workflow_call:
     inputs:
       tools:
