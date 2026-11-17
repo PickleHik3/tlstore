@@ -15,7 +15,7 @@
 # version for the item's rows (scripts/items.tsv) moved with it.
 set -euo pipefail
 
-NIGHTGLASS_COMMIT=${NIGHTGLASS_COMMIT:-25aebe5ad1b0258eacf49f098c23ca538e72eedf}
+NIGHTGLASS_COMMIT=${NIGHTGLASS_COMMIT:-d1c6caf0f2eff0fabbb6fa71735159abd9ce31c9}
 NIGHTGLASS_REPO=${NIGHTGLASS_REPO:-https://github.com/PickleHik3/herdr-nightglass.git}
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "$0")" && pwd)
