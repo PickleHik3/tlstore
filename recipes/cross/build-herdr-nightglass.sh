@@ -15,7 +15,7 @@
 # version for the item's rows (scripts/items.tsv) moved with it.
 set -euo pipefail
 
-NIGHTGLASS_COMMIT=${NIGHTGLASS_COMMIT:-ce590328803d16892db366521d5f8bac76c4e4ed}
+NIGHTGLASS_COMMIT=${NIGHTGLASS_COMMIT:-25aebe5ad1b0258eacf49f098c23ca538e72eedf}
 NIGHTGLASS_REPO=${NIGHTGLASS_REPO:-https://github.com/PickleHik3/herdr-nightglass.git}
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "$0")" && pwd)
@@ -47,7 +47,7 @@ find "$stage/share/nightglass" \( -name gpui-kit.d.ts -o -name jsconfig.json \) 
 find "$stage/share/nightglass" -name .state -type d -prune -exec rm -rf {} +
 
 for f in layouts/nightglass.json layouts/nightglass-phone.json mods/nightglass/mod.json \
-    mods/nightglass-phone/mod.json mods/toast/mod.json; do
+    mods/nightglass-phone/mod.json mods/nightglass-toast/mod.json; do
     [ -f "$stage/share/nightglass/$f" ] || {
         echo "error: $f is missing from the Nightglass checkout" >&2
         exit 1

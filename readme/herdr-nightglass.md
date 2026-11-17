@@ -2,7 +2,8 @@
 
 Nightglass is a glass look for the Herdr desktop app: a wallpaper behind everything, see-through
 panels and a tint per machine. It comes as two layouts, `nightglass` for a desktop window and
-`nightglass-phone` for a phone held upright, with ten colour themes to pick from.
+`nightglass-phone`, an inbox of your agents, for a phone held upright, with ten colour themes to
+pick from.
 
 ## Using it
 
@@ -23,27 +24,32 @@ or press `ctrl-shift-l` in the app and pick it. `herdr-nightglass --help` lists 
 
 ## The phone layout
 
-- **Panel button**, the last one in the top bar: opens the panel with your machines, actions and
-  spaces with their agents. Picking an agent closes it again.
-- **Grip** at the bottom of the panel: a tap switches it between normal and full height.
-- **Finished count**, the green button in the top bar: shows the agents that are done as chips;
-  tap one to open it, or Clear.
-- **Keyboard button**, at the start of the tab row (a red chat bubble while the agent in front
-  waits on you): opens a message box that sends to that terminal.
-- **Stats rings**: cpu, memory and disk of the machine in front; tap them for the numbers.
-- A tab closes with two taps on the x of the active tab.
+It opens on an inbox of the agents that need you.
+
+- **Header**: usage pills, a search button and a `+` button. `+` offers a new space, terminal,
+  files, changes, settings and one chip per agent you have installed.
+- **Machine tiles**: tap one to show only that machine, All machines for everything. Tap the
+  selected one again to pick its colour. Each shows cpu, memory and disk rings.
+- **Needs you / All agents**: two tabs with counts. Needs you lists agents that wait or finished.
+- **Cards**: answer a permission prompt with Yes, Always or No, or a question with one tap on an
+  option. Open shows that terminal full height; Dismiss clears a finished one.
+- **Open**: the terminal with a message box under it that sends to that terminal, and Files and
+  Changes buttons in the bar. Inbox goes back.
 
 ## Good to know
 
-- Toasts at the top of the terminal and popups that fit a narrow window need the store's build of
-  the Herdr app; elsewhere toasts stay bottom right and popups can run past the edge.
-- An AI-usage widget is off by default: add `"usage": true` to the top bar's `props` in
-  `layouts/nightglass-phone.json`. An update of this item writes its files again, so add it back
-  after one.
-- It replaces the app's toast mod (`mods/toast`) for every layout. `herdr-nightglass remove` takes
-  out only the files it put there; switch to another layout first. Removing the store item
-  leaves the copied files in place, so run `herdr-nightglass remove` before
-  `tlstore remove herdr-nightglass` if you want them gone.
+- Toasts at the top of the terminal need the store's build of the Herdr app; elsewhere toasts stay
+  bottom right.
+- An AI-usage widget is off by default. Add `"usage": "<machine>"` to the props of the sidebar
+  block in `layouts/nightglass.json`, or of the `inbox` block in `layouts/nightglass-phone.json`,
+  naming the machine that has `ai-usage-tui`. An update of this item writes its files again, so
+  add it back after one.
+- The layouts no longer replace Herdr's own toast mod: they use their own, `mods/nightglass-toast`.
+  An edited copy of the old one that Herdr moved to `mods/toast-edited` is deleted by
+  `herdr-nightglass` when it is unchanged.
+- `herdr-nightglass remove` takes out only the files it put there; switch to another layout first.
+  Removing the store item leaves the copied files in place, so run `herdr-nightglass remove`
+  before `tlstore remove herdr-nightglass` if you want them gone.
 - It used to be called tokyo-night. Old `tokyo-night` layouts, mods and themes are left where they
   are: delete them from `~/.config/herdr-app` by hand.
 - The source is [PickleHik3/herdr-nightglass](https://github.com/PickleHik3/herdr-nightglass).
