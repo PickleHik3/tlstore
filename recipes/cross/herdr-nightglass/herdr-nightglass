@@ -51,6 +51,25 @@ payload() {
   done
 }
 
+# Earlier builds of this item copied a toast mod into mods/toast; Herdr has since moved such an
+# edited copy aside to mods/toast-edited (or toast-edited<N>). Delete one only when its main.js
+# is byte for byte the toast mod this item shipped (sha256 below); any other folder is the
+# user's and stays, and so does the shipped mods/toast.
+OLD_TOAST_SHA=6d6b2a05ad2725304306d52c5f1c75945d14f0f80d77f8b7bc985e1ad12d96cd
+
+drop_old_toast() {
+  command -v sha256sum >/dev/null 2>&1 || return 0
+  for d in "$HAPP"/mods/toast-edited "$HAPP"/mods/toast-edited[0-9]*; do
+    [ -d "$d" ] && [ -f "$d/main.js" ] || continue
+    sum="$(sha256sum < "$d/main.js" 2>/dev/null)"
+    [ "${sum%% *}" = "$OLD_TOAST_SHA" ] || continue
+    if rm -rf "$d"; then
+      echo "Removed ${d#"$HAPP"/}, the old toast mod this item used to copy."
+    fi
+  done
+  return 0
+}
+
 install_all() {
   n=0
   list="$(payload)"
@@ -78,6 +97,7 @@ install_all() {
   }
   echo "Installed the Nightglass layouts in $HAPP ($n files)."
   echo "Switch with: herdr-nightglass phone   or   herdr-nightglass desktop"
+  drop_old_toast
   old=
   for f in "$HAPP"/layouts/tokyo-night*.json "$HAPP"/mods/tokyo-night* "$HAPP"/themes/tokyo-night*; do
     [ -e "$f" ] && old=1
