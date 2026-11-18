@@ -22,6 +22,15 @@ herdr-nightglass phone      # or: herdr-nightglass desktop
 
 or press `ctrl-shift-l` in the app and pick it. `herdr-nightglass --help` lists the rest.
 
+## The desktop layout
+
+- **Sidebar**: every machine as a tile (its icon on its colour), each machine's spaces and agents
+  below, cpu, memory and disk bars at the bottom.
+- **Needs you bar**: under the tabs, one chip per agent that waits or finished; click one to open
+  it. It keeps one height, so the terminal never jumps.
+- **Board**: the Board pill before the tabs shows every agent in four columns, Needs you, Working,
+  Done and Idle, with the question each waiting agent asks. A tab takes you back.
+
 ## The phone layout
 
 It opens on an inbox of the agents that need you.
