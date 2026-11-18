@@ -1,5 +1,5 @@
 diff --git a/Cargo.lock b/Cargo.lock
-index 56ec781..1d645bd 100644
+index 56ec781..709174f 100644
 --- a/Cargo.lock
 +++ b/Cargo.lock
 @@ -3265,8 +3265,6 @@ dependencies = [
@@ -11,7 +11,15 @@ index 56ec781..1d645bd 100644
  dependencies = [
   "anyhow",
   "console_error_panic_hook",
-@@ -6512,6 +6510,7 @@ name = "quickjs-jit-sys"
+@@ -3453,6 +3451,7 @@ dependencies = [
+  "tiny-skia",
+  "ttf-parser",
+  "unicode-bidi",
++ "unicode-script",
+  "unicode-segmentation",
+  "web-sys",
+  "wgpu",
+@@ -6512,6 +6511,7 @@ name = "quickjs-jit-sys"
  version = "0.12.11"
  source = "git+https://github.com/longbridge/quickjs-jit?rev=96593cd7a54440ac060a391b8baea7e9a3cf1393#96593cd7a54440ac060a391b8baea7e9a3cf1393"
  dependencies = [
@@ -19,7 +27,7 @@ index 56ec781..1d645bd 100644
   "cc",
  ]
  
-@@ -8958,8 +8957,6 @@ dependencies = [
+@@ -8958,8 +8958,6 @@ dependencies = [
  [[package]]
  name = "wayland-cursor"
  version = "0.31.14"
@@ -28,7 +36,7 @@ index 56ec781..1d645bd 100644
  dependencies = [
   "rustix",
   "wayland-client",
-@@ -9973,8 +9970,6 @@ dependencies = [
+@@ -9973,8 +9971,6 @@ dependencies = [
  [[package]]
  name = "x11rb-protocol"
  version = "0.13.2"
@@ -37,7 +45,7 @@ index 56ec781..1d645bd 100644
  
  [[package]]
  name = "x25519-dalek"
-@@ -10242,8 +10237,6 @@ dependencies = [
+@@ -10242,8 +10238,6 @@ dependencies = [
  [[package]]
  name = "zed-scap"
  version = "0.0.8-zed"
@@ -1855,7 +1863,7 @@ index 76939e1..56452d3 100644
 +    }
 +}
 diff --git a/vendor/gpui-pre-linux/src/linux/x11/window.rs b/vendor/gpui-pre-linux/src/linux/x11/window.rs
-index d14e94f..46bb2bd 100644
+index d14e94f..fe0c490 100644
 --- a/vendor/gpui-pre-linux/src/linux/x11/window.rs
 +++ b/vendor/gpui-pre-linux/src/linux/x11/window.rs
 @@ -720,7 +720,16 @@ impl X11WindowState {
@@ -1876,6 +1884,168 @@ index d14e94f..46bb2bd 100644
              if supports_xinput_gestures {
                  // x11rb 0.13 doesn't define XIEventMask constants for gesture
                  // events, so we construct them from the event opcodes (each
+diff --git a/vendor/gpui-pre-wgpu/Cargo.toml b/vendor/gpui-pre-wgpu/Cargo.toml
+index fb74314..5e9dec6 100644
+--- a/vendor/gpui-pre-wgpu/Cargo.toml
++++ b/vendor/gpui-pre-wgpu/Cargo.toml
+@@ -68,6 +68,9 @@ package = "gpui-pre-collections"
+ [dependencies.cosmic-text]
+ version = "0.19.0"
+ 
++[dependencies.unicode-script]
++version = "0.5.8"
++
+ [dependencies.etagere]
+ version = "0.2"
+ 
+diff --git a/vendor/gpui-pre-wgpu/src/cosmic_text_system.rs b/vendor/gpui-pre-wgpu/src/cosmic_text_system.rs
+index 6f787f2..981a96f 100644
+--- a/vendor/gpui-pre-wgpu/src/cosmic_text_system.rs
++++ b/vendor/gpui-pre-wgpu/src/cosmic_text_system.rs
+@@ -144,6 +144,9 @@ impl CosmicTextSystem {
+     }
+ 
+     pub fn new(system_font_fallback: &str) -> Self {
++        #[cfg(target_os = "android")]
++        let font_system = android_fonts::font_system();
++        #[cfg(not(target_os = "android"))]
+         let font_system = FontSystem::new();
+ 
+         Self(RwLock::new(CosmicTextSystemState {
+@@ -2200,3 +2203,133 @@ mod tests {
+         assert!(spans.is_empty());
+     }
+ }
++
++/// On Android fontdb loads no system fonts (it reads no fontconfig there) and cosmic-text has no
++/// fallback list, so the app would see only the fonts it bundles and draw every other character
++/// (✻, ⎿, ⏺, braille, CJK…) as a missing-glyph box. Load the fonts shipped beside the app, the
++/// edition's $PREFIX/share/fonts, the home font folders and Android's /system/fonts, and fall back
++/// through them the way cosmic-text does on a Linux desktop.
++#[cfg(target_os = "android")]
++mod android_fonts {
++    use cosmic_text::{Fallback, FontSystem, fontdb};
++    use std::path::PathBuf;
++    use unicode_script::Script;
++
++    pub(super) fn font_system() -> FontSystem {
++        let mut db = fontdb::Database::new();
++        let mut seen = Vec::new();
++        for dir in font_dirs() {
++            let Ok(real) = dir.canonicalize() else { continue };
++            if seen.contains(&real) {
++                continue;
++            }
++            db.load_fonts_dir(&real);
++            seen.push(real);
++        }
++        db.set_sans_serif_family("DejaVu Sans");
++        db.set_serif_family("DejaVu Serif");
++        db.set_monospace_family("DejaVu Sans Mono");
++        FontSystem::new_with_locale_and_db_and_fallback(locale(), db, AndroidFallback)
++    }
++
++    /// <root>/share/fonts for an app installed as <root>/libexec/<binary>, then the edition's
++    /// prefix (from $PREFIX, else four levels above <root>, as the binary's RUNPATH finds it),
++    /// the home font folders and the system's.
++    fn font_dirs() -> Vec<PathBuf> {
++        let mut dirs = Vec::new();
++        let root = std::env::current_exe()
++            .ok()
++            .and_then(|exe| Some(exe.parent()?.parent()?.to_path_buf()));
++        if let Some(root) = &root {
++            dirs.push(root.join("share/fonts"));
++        }
++        if let Some(prefix) = std::env::var_os("PREFIX").filter(|p| !p.is_empty()) {
++            dirs.push(PathBuf::from(prefix).join("share/fonts"));
++        }
++        if let Some(root) = &root {
++            dirs.push(root.join("../../../../usr/share/fonts"));
++        }
++        if let Some(home) = std::env::var_os("HOME").filter(|h| !h.is_empty()) {
++            let home = PathBuf::from(home);
++            dirs.push(home.join(".local/share/fonts"));
++            dirs.push(home.join(".fonts"));
++        }
++        dirs.push(PathBuf::from("/system/fonts"));
++        dirs
++    }
++
++    /// The BCP 47 tag from $LANG (en_US.UTF-8 → en-US); en-US when unset or C/POSIX.
++    fn locale() -> String {
++        std::env::var("LANG")
++            .ok()
++            .and_then(|lang| lang.split(['.', '@']).next().map(|l| l.replace('_', "-")))
++            .filter(|l| !l.is_empty() && l != "C" && l != "POSIX")
++            .unwrap_or_else(|| "en-US".to_string())
++    }
++
++    struct AndroidFallback;
++
++    impl Fallback for AndroidFallback {
++        fn common_fallback(&self) -> &[&'static str] {
++            &[
++                // Monospace first, so terminal symbols keep to their cells where they can.
++                "DejaVu Sans Mono",
++                // Shipped with the app: dingbats, arrows, braille, ⏺ (Symbols 2) and ⎿ (Symbols).
++                "Noto Sans Symbols 2",
++                "Noto Sans Symbols",
++                "DejaVu Sans",
++                "Roboto",
++                "Noto Color Emoji",
++            ]
++        }
++
++        fn forbidden_fallback(&self) -> &[&'static str] {
++            &[]
++        }
++
++        fn script_fallback(&self, script: Script, locale: &str) -> &[&'static str] {
++            match script {
++                Script::Arabic => &["Noto Naskh Arabic", "Noto Sans Arabic"],
++                Script::Armenian => &["Noto Sans Armenian"],
++                Script::Bengali => &["Noto Sans Bengali"],
++                Script::Bopomofo | Script::Han => han(locale),
++                Script::Braille => &["Noto Sans Symbols 2", "DejaVu Sans"],
++                Script::Cherokee => &["Noto Sans Cherokee"],
++                Script::Devanagari => &["Noto Sans Devanagari"],
++                Script::Ethiopic => &["Noto Sans Ethiopic"],
++                Script::Georgian => &["Noto Sans Georgian"],
++                Script::Gujarati => &["Noto Sans Gujarati"],
++                Script::Gurmukhi => &["Noto Sans Gurmukhi"],
++                Script::Hangul => han("ko"),
++                Script::Hebrew => &["Noto Sans Hebrew"],
++                Script::Hiragana | Script::Katakana => han("ja"),
++                Script::Kannada => &["Noto Sans Kannada"],
++                Script::Khmer => &["Noto Sans Khmer"],
++                Script::Lao => &["Noto Sans Lao"],
++                Script::Malayalam => &["Noto Sans Malayalam"],
++                Script::Mongolian => &["Noto Sans Mongolian"],
++                Script::Myanmar => &["Noto Sans Myanmar"],
++                Script::Oriya => &["Noto Sans Oriya"],
++                Script::Sinhala => &["Noto Sans Sinhala"],
++                Script::Syriac => &["Noto Sans Syriac Estrangela", "Noto Sans Syriac"],
++                Script::Tamil => &["Noto Sans Tamil"],
++                Script::Telugu => &["Noto Sans Telugu"],
++                Script::Thaana => &["Noto Sans Thaana"],
++                Script::Thai => &["Noto Sans Thai"],
++                Script::Tibetan => &["Noto Serif Tibetan"],
++                Script::Yi => &["Noto Sans Yi", "Noto Sans CJK SC"],
++                _ => &[],
++            }
++        }
++    }
++
++    fn han(locale: &str) -> &'static [&'static str] {
++        match locale {
++            l if l.starts_with("ja") => &["Noto Sans CJK JP"],
++            l if l.starts_with("ko") => &["Noto Sans CJK KR"],
++            "zh-HK" => &["Noto Sans CJK HK"],
++            "zh-TW" => &["Noto Sans CJK TC"],
++            _ => &["Noto Sans CJK SC"],
++        }
++    }
++}
 diff --git a/vendor/gpui-pre-wgpu/src/wgpu_renderer.rs b/vendor/gpui-pre-wgpu/src/wgpu_renderer.rs
 index a700613..8dbaca5 100644
 --- a/vendor/gpui-pre-wgpu/src/wgpu_renderer.rs

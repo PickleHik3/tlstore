@@ -12,6 +12,10 @@
 #   share/herdr-app.svg  herdr's official logo (herdr-gui/herdr-logo.svg, from herdr's
 #                    assets/logo.svg), named by the launcher's desktop entry
 #                    (desktop/herdr-app.<edition>.desktop, the herdr-gui-desktop part)
+#   share/fonts/     Noto Sans Symbols and Noto Sans Symbols 2 (OFL-1.1, google/fonts at
+#                    NOTO_COMMIT) with their OFL.txt: the fallback for what no font on the phone
+#                    draws (⎿, ⏺); the app patch loads this folder, $PREFIX/share/fonts and
+#                    /system/fonts, and falls back through them
 #   LICENSE, THIRD-PARTY-NOTICES
 #
 # No prefix is baked in, so one copy serves every launcher edition: the binary finds Termux's
@@ -54,6 +58,13 @@ gpui-pre-platform 0.3.8 e200b7b78836f1a0fc70767d971768e88f29d8b91b697285c15fb8e3
 wayland-cursor 0.31.14 4a52d18780be9b1314328a3de5f930b73d2200112e3849ca6cb11822793fb34d
 x11rb-protocol 0.13.2 ea6fc2961e4ef194dcbfe56bb845534d0dc8098940c7e5c012a258bfec6701bd
 zed-scap 0.0.8-zed b6b338d705ae33a43ca00287c11129303a7a0aa57b101b72a1c08c863f698ac8
+'
+# path-in-google/fonts sha256 name-in-share/fonts — the app's own fallback fonts
+NOTO_COMMIT=7af0d90b4d532ffa4b041937b560c6df4e7b1e95
+NOTO_FONTS='
+ofl/notosanssymbols/NotoSansSymbols%5Bwght%5D.ttf f7e7e04b4a24b6c78893d50cbfd2b2f6cae49617ab047bfef668d252adb128f7 NotoSansSymbols.ttf
+ofl/notosanssymbols2/NotoSansSymbols2-Regular.ttf 7d5fb73b7ca67a6798101741f5d280a3d016a56a197afcd4199dbb57b4b82a21 NotoSansSymbols2-Regular.ttf
+ofl/notosanssymbols2/OFL.txt - OFL.txt
 '
 # Every entry's mtime in the archive: a fixed date, so a rebuild of the same pin is the same asset.
 APP_MTIME=1794009600
@@ -291,6 +302,18 @@ EOF
 chmod 755 "$stage/bin/herdr-app"
 cp "$source_dir/LICENSE" "$source_dir/THIRD-PARTY-NOTICES" "$stage/"
 cp "$SCRIPT_DIR/herdr-gui/herdr-logo.svg" "$stage/share/herdr-app.svg"
+mkdir -p "$stage/share/fonts"
+printf '%s\n' "$NOTO_FONTS" | while read -r path sha name; do
+    [ -n "$path" ] || continue
+    font="$TL_BUILD_DIR/noto-$NOTO_COMMIT-$name"
+    [ -f "$font" ] || curl -fsSL -o "$font" "https://raw.githubusercontent.com/google/fonts/$NOTO_COMMIT/$path"
+    if [ "$sha" != - ] && ! echo "$sha  $font" | sha256sum -c - >/dev/null; then
+        echo "error: $name does not match its pinned sha256" >&2
+        rm -f "$font"
+        exit 1
+    fi
+    cp "$font" "$stage/share/fonts/$name"
+done
 
 rm -f "$TL_OUT/herdr-gui"
 (
