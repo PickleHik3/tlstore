@@ -9,7 +9,8 @@
 #   bin/herdr-app    a start script, what the catalog's exe= runs: it picks the Vulkan driver
 #                    the launcher recommends, or says how to get one, then execs ../libexec
 #   libexec/herdr-app  the stripped binary
-#   share/herdr-app.svg  upstream's app icon, named by the launcher's desktop entry
+#   share/herdr-app.svg  herdr's official logo (herdr-gui/herdr-logo.svg, from herdr's
+#                    assets/logo.svg), named by the launcher's desktop entry
 #                    (desktop/herdr-app.<edition>.desktop, the herdr-gui-desktop part)
 #   LICENSE, THIRD-PARTY-NOTICES
 #
@@ -289,7 +290,7 @@ exec "$ROOT/libexec/herdr-app" "$@"
 EOF
 chmod 755 "$stage/bin/herdr-app"
 cp "$source_dir/LICENSE" "$source_dir/THIRD-PARTY-NOTICES" "$stage/"
-cp "$source_dir/assets/icons/herdr-ui-icon-clean.svg" "$stage/share/herdr-app.svg"
+cp "$SCRIPT_DIR/herdr-gui/herdr-logo.svg" "$stage/share/herdr-app.svg"
 
 rm -f "$TL_OUT/herdr-gui"
 (
