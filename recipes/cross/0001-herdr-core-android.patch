@@ -1,8 +1,8 @@
-diff --git a/crates/ghostty-vt/build.rs b/crates/ghostty-vt/build.rs
-index 77cc17d..06fcea8 100644
---- a/crates/ghostty-vt/build.rs
-+++ b/crates/ghostty-vt/build.rs
-@@ -37,9 +37,15 @@ fn main() {
+diff --git i/crates/ghostty-vt/build.rs w/crates/ghostty-vt/build.rs
+index 2c32394..bf15308 100644
+--- i/crates/ghostty-vt/build.rs
++++ w/crates/ghostty-vt/build.rs
+@@ -43,9 +43,15 @@ fn main() {
      }
      // Building for another target than this machine (the static musl Linux
      // release), or for Windows (its libc must be named): Zig must build for it too.
@@ -19,7 +19,7 @@ index 77cc17d..06fcea8 100644
      let status = build
          .arg("--prefix")
          .arg(out.join("zig-out"))
-@@ -64,6 +70,9 @@ fn main() {
+@@ -70,6 +76,9 @@ fn main() {
  /// `x86_64-pc-windows-msvc` -> `x86_64-windows-msvc`.
  fn zig_target(triple: &str) -> String {
      let arch = triple.split('-').next().unwrap_or("native");
@@ -29,11 +29,11 @@ index 77cc17d..06fcea8 100644
      let os = if triple.contains("apple") {
          "macos"
      } else if triple.contains("windows") {
-diff --git a/crates/herdr-core/src/cli.rs b/crates/herdr-core/src/cli.rs
-index 1f8fe9a..13c4b8a 100644
---- a/crates/herdr-core/src/cli.rs
-+++ b/crates/herdr-core/src/cli.rs
-@@ -588,6 +588,9 @@ fn run(cmd: Option<Cmd>, json: bool, asked: bool) -> Result<Option<Out>, RpcErro
+diff --git i/crates/herdr-core/src/cli.rs w/crates/herdr-core/src/cli.rs
+index 87a9e7b..754d9fe 100644
+--- i/crates/herdr-core/src/cli.rs
++++ w/crates/herdr-core/src/cli.rs
+@@ -574,6 +574,9 @@ fn run(cmd: Option<Cmd>, json: bool, asked: bool) -> Result<Option<Out>, RpcErro
                  let human = format!("{this} is already {v} or newer");
                  return Ok(Some(up_to_date(&paths, v, human)?));
              }
@@ -43,10 +43,10 @@ index 1f8fe9a..13c4b8a 100644
              // Only when asked: hc never checks for updates on its own.
              let scratch = crate::releases::Scratch::new()?;
              let requested = version
-diff --git a/crates/herdr-core/src/client.rs b/crates/herdr-core/src/client.rs
-index e9a4e48..c27712e 100644
---- a/crates/herdr-core/src/client.rs
-+++ b/crates/herdr-core/src/client.rs
+diff --git i/crates/herdr-core/src/client.rs w/crates/herdr-core/src/client.rs
+index b510dc7..1fe319a 100644
+--- i/crates/herdr-core/src/client.rs
++++ w/crates/herdr-core/src/client.rs
 @@ -55,7 +55,7 @@ pub fn build_id() -> String {
      static BUILD: std::sync::OnceLock<String> = std::sync::OnceLock::new();
      BUILD
@@ -56,7 +56,7 @@ index e9a4e48..c27712e 100644
              if let Some(id) = running_build_id() {
                  return format!("elf:{id}");
              }
-@@ -117,7 +117,7 @@ fn listening_elsewhere(paths: &Paths) -> Option<RpcError> {
+@@ -140,7 +140,7 @@ fn listening_elsewhere(paths: &Paths) -> Option<RpcError> {
      ))
  }
  
@@ -65,7 +65,7 @@ index e9a4e48..c27712e 100644
  fn running_build_id() -> Option<String> {
      use std::io::Read;
      let mut head = Vec::new();
-@@ -126,7 +126,7 @@ fn running_build_id() -> Option<String> {
+@@ -149,7 +149,7 @@ fn running_build_id() -> Option<String> {
  }
  
  /// The GNU build-id note of a 64-bit little-endian ELF, from its first bytes.
@@ -74,7 +74,7 @@ index e9a4e48..c27712e 100644
  fn elf_build_id(elf: &[u8]) -> Option<String> {
      let int = |at: usize, len: usize| {
          let bytes = elf.get(at..at.checked_add(len)?)?;
-@@ -156,7 +156,7 @@ fn elf_build_id(elf: &[u8]) -> Option<String> {
+@@ -179,7 +179,7 @@ fn elf_build_id(elf: &[u8]) -> Option<String> {
      })
  }
  
@@ -83,7 +83,7 @@ index e9a4e48..c27712e 100644
  #[test]
  fn the_build_is_named_by_the_linkers_build_id() {
      let elf = std::fs::read("/proc/self/exe").unwrap();
-@@ -186,7 +186,7 @@ pub fn spawn_detached(paths: &Paths, args: &[&str], log: &str) -> std::io::Resul
+@@ -209,7 +209,7 @@ pub fn spawn_detached(paths: &Paths, args: &[&str], log: &str) -> std::io::Resul
      // A core or holder started from inside a terminal is not that terminal's:
      // ending the terminal must not end them.
      cmd.args(args).env_remove(crate::sweep::VAR).env(crate::sweep::RUNTIME, "1");
@@ -92,10 +92,10 @@ index e9a4e48..c27712e 100644
      if let Some(started) = platform::systemd::spawn(&cmd, &log) {
          return started;
      }
-diff --git a/crates/herdr-core/src/foreground.rs b/crates/herdr-core/src/foreground.rs
-index 4d84c41..b3e3aab 100644
---- a/crates/herdr-core/src/foreground.rs
-+++ b/crates/herdr-core/src/foreground.rs
+diff --git i/crates/herdr-core/src/foreground.rs w/crates/herdr-core/src/foreground.rs
+index ac6004e..db5e32a 100644
+--- i/crates/herdr-core/src/foreground.rs
++++ w/crates/herdr-core/src/foreground.rs
 @@ -20,7 +20,7 @@ pub struct Foreground {
  }
  
@@ -105,20 +105,20 @@ index 4d84c41..b3e3aab 100644
  pub fn about(pid: i32) -> Option<Foreground> {
      let name = std::fs::read_to_string(format!("/proc/{pid}/comm")).ok()?.trim_end().to_string();
      let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
-diff --git a/crates/herdr-core/src/platform/mod.rs b/crates/herdr-core/src/platform/mod.rs
-index ea43355..d2311d7 100644
---- a/crates/herdr-core/src/platform/mod.rs
-+++ b/crates/herdr-core/src/platform/mod.rs
-@@ -7,7 +7,7 @@ mod unix;
- #[cfg(unix)]
- pub use unix::*;
+diff --git i/crates/herdr-core/src/platform/mod.rs w/crates/herdr-core/src/platform/mod.rs
+index c1a4751..fab4fa6 100644
+--- i/crates/herdr-core/src/platform/mod.rs
++++ w/crates/herdr-core/src/platform/mod.rs
+@@ -12,7 +12,7 @@ pub use unix::*;
  
+ #[cfg(target_os = "linux")]
+ mod linux_login;
 -#[cfg(target_os = "linux")]
 +#[cfg(any(target_os = "linux", target_os = "android"))]
  pub mod systemd;
  
- #[cfg(target_os = "macos")]
-@@ -65,6 +65,13 @@ pub fn prefer_release_bundle() -> bool {
+ /// Only a new SSH-started Linux core imports login settings; holders inherit the core.
+@@ -144,6 +144,13 @@ pub fn prefer_release_bundle() -> bool {
      true
  }
  
@@ -132,16 +132,7 @@ index ea43355..d2311d7 100644
  pub fn needs_bundle_update() -> bool {
      #[cfg(target_os = "macos")]
      {
-@@ -175,7 +182,7 @@ pub fn restart_env() -> std::io::Result<Vec<(std::ffi::OsString, Option<std::ffi
-     #[allow(unused_mut)]
-     let mut env: std::collections::BTreeMap<_, _> =
-         std::env::vars_os().map(|(key, value)| (key, Some(value))).collect();
--    #[cfg(target_os = "linux")]
-+    #[cfg(any(target_os = "linux", target_os = "android"))]
-     for key in systemd::inherited_env()?.into_keys() {
-         env.entry(key.into()).or_insert(None);
-     }
-@@ -204,7 +211,7 @@ pub fn replace_env(
+@@ -340,7 +347,7 @@ pub(crate) fn restored_environment(
  pub async fn program_env() -> std::collections::BTreeMap<String, String> {
      #[allow(unused_mut)]
      let mut env: std::collections::BTreeMap<String, String> = utf8_vars().collect();
@@ -150,11 +141,11 @@ index ea43355..d2311d7 100644
      {
          env.retain(|k, _| !systemd::SERVICE.contains(&k.as_str()));
          if let Ok(Some(manager)) = tokio::task::spawn_blocking(systemd::manager_env).await {
-diff --git a/crates/herdr-core/src/platform/unix.rs b/crates/herdr-core/src/platform/unix.rs
-index 3db8efd..4693ae4 100644
---- a/crates/herdr-core/src/platform/unix.rs
-+++ b/crates/herdr-core/src/platform/unix.rs
-@@ -223,10 +223,25 @@ pub fn own_shell() -> Vec<String> {
+diff --git i/crates/herdr-core/src/platform/unix.rs w/crates/herdr-core/src/platform/unix.rs
+index dd508aa..00a729b 100644
+--- i/crates/herdr-core/src/platform/unix.rs
++++ w/crates/herdr-core/src/platform/unix.rs
+@@ -282,10 +282,25 @@ pub fn own_shell() -> Vec<String> {
      if cfg!(target_os = "macos") { vec![shell, "-l".into()] } else { vec![shell] }
  }
  
@@ -181,7 +172,7 @@ index 3db8efd..4693ae4 100644
      {
          env.remove("DISPLAY");
          env.remove("XAUTHORITY");
-@@ -252,7 +267,7 @@ fn display_is_live(display: &str, sockets: &Path) -> bool {
+@@ -311,7 +326,7 @@ fn display_is_live(display: &str, sockets: &Path) -> bool {
      if socket_is_live(&path, false) {
          return true;
      }
@@ -190,7 +181,7 @@ index 3db8efd..4693ae4 100644
      if socket_is_live(&path, true) {
          return true;
      }
-@@ -296,14 +311,14 @@ fn socket_is_live(path: &Path, abstract_socket: bool) -> bool {
+@@ -355,14 +370,14 @@ fn socket_is_live(path: &Path, abstract_socket: bool) -> bool {
          address.sun_len = length as u8;
      }
      let socket_type = libc::SOCK_STREAM;
@@ -207,7 +198,7 @@ index 3db8efd..4693ae4 100644
      if unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
          return true;
      }
-@@ -355,7 +370,7 @@ mod tests {
+@@ -414,7 +429,7 @@ mod tests {
          drop(listener);
          assert_socket_gone(|| display_is_live(":1", &sockets));
          // macOS answers a connect to a regular file with an errno we treat as uncertain.
@@ -216,7 +207,7 @@ index 3db8efd..4693ae4 100644
          {
              std::fs::write(sockets.join("X2"), "").unwrap();
              assert!(!display_is_live(":2", &sockets));
-@@ -363,7 +378,7 @@ mod tests {
+@@ -422,7 +437,7 @@ mod tests {
          std::fs::remove_dir_all(&sockets).unwrap();
      }
  
@@ -225,7 +216,7 @@ index 3db8efd..4693ae4 100644
      #[test]
      fn an_abstract_x_socket_needs_no_filesystem_entry() {
          use std::os::linux::net::SocketAddrExt;
-@@ -381,7 +396,7 @@ mod tests {
+@@ -440,7 +455,7 @@ mod tests {
          std::fs::remove_dir_all(&sockets).unwrap();
      }
  
@@ -234,7 +225,7 @@ index 3db8efd..4693ae4 100644
      #[test]
      fn a_full_listener_backlog_does_not_block_or_remove_a_display() {
          let runtime = dir("full-backlog");
-@@ -453,7 +468,7 @@ mod tests {
+@@ -512,7 +527,7 @@ mod tests {
          assert!(wayland_is_live("wayland-0", None));
          drop(listener);
          assert_socket_gone(|| wayland_is_live("wayland-0", Some(&runtime)));
@@ -243,10 +234,10 @@ index 3db8efd..4693ae4 100644
          {
              std::fs::write(runtime.join("regular-file"), "").unwrap();
              assert!(!wayland_is_live("regular-file", Some(&runtime)));
-diff --git a/crates/herdr-core/src/sweep.rs b/crates/herdr-core/src/sweep.rs
+diff --git i/crates/herdr-core/src/sweep.rs w/crates/herdr-core/src/sweep.rs
 index fd0f2cd..957af84 100644
---- a/crates/herdr-core/src/sweep.rs
-+++ b/crates/herdr-core/src/sweep.rs
+--- i/crates/herdr-core/src/sweep.rs
++++ w/crates/herdr-core/src/sweep.rs
 @@ -38,7 +38,7 @@ fn now() -> u64 {
  /// Linux, in clock ticks: a process's start is kept on the boot clock
  /// (monotonic before 5.3), and a time namespace can shift the two apart, so
@@ -283,10 +274,10 @@ index fd0f2cd..957af84 100644
      fn a_fresh_token_finds_its_own_in_a_shifted_time_namespace() {
          let me = std::env::current_exe().unwrap();
          let test = "sweep::tests::a_fresh_token_finds_its_own";
-diff --git a/crates/herdr-core/tests/distribution.rs b/crates/herdr-core/tests/distribution.rs
-index 5f9f7b5..7be91af 100644
---- a/crates/herdr-core/tests/distribution.rs
-+++ b/crates/herdr-core/tests/distribution.rs
+diff --git i/crates/herdr-core/tests/distribution.rs w/crates/herdr-core/tests/distribution.rs
+index ca3c395..4d56ec8 100644
+--- i/crates/herdr-core/tests/distribution.rs
++++ w/crates/herdr-core/tests/distribution.rs
 @@ -235,7 +235,7 @@ fn a_macos_system_install_uses_the_standalone_release() {
      assert!(!s.root.join(".local/share/herdr-core/current").exists());
  }
@@ -296,10 +287,10 @@ index 5f9f7b5..7be91af 100644
  #[test]
  fn bundle_completion_skips_releases_without_a_bundle() {
      let s = Session::new();
-diff --git a/crates/herdr-core/tests/ghosts.rs b/crates/herdr-core/tests/ghosts.rs
+diff --git i/crates/herdr-core/tests/ghosts.rs w/crates/herdr-core/tests/ghosts.rs
 index b1b8da2..c3a1c18 100644
---- a/crates/herdr-core/tests/ghosts.rs
-+++ b/crates/herdr-core/tests/ghosts.rs
+--- i/crates/herdr-core/tests/ghosts.rs
++++ w/crates/herdr-core/tests/ghosts.rs
 @@ -97,7 +97,7 @@ fn kept_recovery_does_not_sweep_after_a_normal_stop() {
  }
  
@@ -309,11 +300,11 @@ index b1b8da2..c3a1c18 100644
  fn closing_detached_terminals_releases_the_holders_pty_masters() {
      let s = Session::new();
      let warm = run(&s, "true");
-diff --git a/crates/herdr-core/tests/upgrade.rs b/crates/herdr-core/tests/upgrade.rs
-index 2ec75b3..069b866 100644
---- a/crates/herdr-core/tests/upgrade.rs
-+++ b/crates/herdr-core/tests/upgrade.rs
-@@ -31,7 +31,7 @@ fn says(s: &Session, t: &str, what: &str) {
+diff --git i/crates/herdr-core/tests/upgrade.rs w/crates/herdr-core/tests/upgrade.rs
+index 1fd798b..df9188d 100644
+--- i/crates/herdr-core/tests/upgrade.rs
++++ w/crates/herdr-core/tests/upgrade.rs
+@@ -93,7 +93,7 @@ fn says(s: &Session, t: &str, what: &str) {
      wait_until(&format!("{t} shows {what}"), || text(s, t).contains(what));
  }
  

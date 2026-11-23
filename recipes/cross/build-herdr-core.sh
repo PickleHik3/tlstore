@@ -18,7 +18,7 @@
 # which execs hc beside it.
 #
 # What it takes, all of it in this script and its patch:
-#   - upstream's Rust from the pinned commit below (upstream tags no releases in git), with the
+#   - upstream's Rust from the pinned commit below (a lightweight tag, v0.1.22, and no GitHub releases), with the
 #     cargo target <arch>-linux-android linked by the NDK's clang at API 29;
 #   - libghostty-vt from the vendor/ghostty submodule, which crates/ghostty-vt/build.rs builds with
 #     `zig build` for <arch>-linux-android: Zig 0.16.0, pinned by version and sha256 below. SIMD is
@@ -37,8 +37,8 @@
 set -euo pipefail
 
 CORE_URL="https://github.com/herdrdev/herdr-core.git"
-CORE_COMMIT="9ce385d9c8abb041dd4437476d770365b3fb5282"   # 0.1.18 on master
-CORE_VERSION="0.1.18"
+CORE_COMMIT="6e2984629fcd600b0165f69b2e5b0bda5985ec1c"   # v0.1.22
+CORE_VERSION="0.1.22"
 CORE_MTIME=1794009600   # the archive's file times, so a rebuild is byte for byte the same
 ZIG_VERSION="0.16.0"
 ZIG_SHA256=70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00
