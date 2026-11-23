@@ -28,6 +28,8 @@
 #   - 0001-herdr-core-android.patch: the Linux cfgs also true on Android, the X11 socket under
 #     $TMPDIR/$PREFIX, the Zig target, and `hc update` refused (the store updates hc; upstream's
 #     release is a Linux build that cannot run here). `hc update --from` still works;
+#   - zig-prefetch.sh seeds Zig's package cache with curl (retries, time limits) before the build,
+#     since Zig 0.16's own downloads fail at random and have no timeout;
 #   - 0001-ghostty-android-no-libc-stubs.patch, on vendor/ghostty: with SIMD off the vt module
 #     links no libc, so wuffs exports hidden weak calloc/free stubs, and in the final executable
 #     those win over bionic's for every caller (calloc returns null, free leaks). Not on Android.
@@ -128,6 +130,10 @@ if [ "$(cat "$source_dir/.tl-prepared" 2>/dev/null || true)" != "$prepared" ]; t
     }
     printf '%s\n' "$prepared" > "$source_dir/.tl-prepared"
 fi
+
+# Zig's own HTTP fetch is fragile and has no timeout: seed its cache with curl so the build
+# downloads nothing.
+bash "$SCRIPT_DIR/zig-prefetch.sh" "$source_dir/vendor/ghostty"
 
 echo "Building..."
 (
