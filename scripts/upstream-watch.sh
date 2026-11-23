@@ -47,7 +47,10 @@ released_catalog="$repo/dist/catalog.tsv"
 # item's row in items.tsv and (for a built one) its recipe in recipes/cross and scripts/bins-plan.sh.
 #
 #   item       its name in items.tsv
-#   upstream   owner/repo on GitHub
+#   upstream   owner/repo on GitHub. owner/repo@tags is an upstream that publishes no GitHub
+#              releases, only git tags: "theirs" is then its highest stable vX.Y.Z tag (a tag
+#              with a pre-release suffix is ignored; versions compare numerically), read with
+#              git ls-remote, not releases/latest
 #   style      how the recipe pins it:
 #     commit     <VAR>_COMMIT="<sha>"   # v<version>   and   <VAR>_VERSION="<version>"
 #                (the tag's commit is pinned, so a moved tag never changes a build silently)
@@ -72,6 +75,8 @@ fastfetch  fastfetch-cli/fastfetch  commit                    recipes/cross/buil
 kitten     kovidgoyal/kitty         tag                       recipes/cross/build-kitten.sh     KITTY_TAG  kitten
 tuios      Gaurav-Gosain/tuios      tag                       recipes/cross/build-tuios.sh      TUIOS_TAG  tuios
 sigye      am2rican5/sigye          commit                    recipes/cross/build-sigye.sh      SIGYE      sigye
+herdr-gui  herdrdev/herdr-app@tags  commit                    recipes/cross/build-herdr-gui.sh  APP        herdr-gui
+herdr-core herdrdev/herdr-core@tags commit                    recipes/cross/build-herdr-core.sh CORE       herdr-core
 fisher     jorgebucaran/fisher      url                       -                                 -          -
 '
 
@@ -87,12 +92,14 @@ usage() {
 
 watched() { printf '%s\n' "$WATCH" | awk 'NF && $1 !~ /^#/ { print $1 }'; }
 
-# Sets upstream, style, file, var, tool for an item.
+# Sets upstream, tagsrc (1 when "theirs" comes from git tags), style, file, var, tool for an item.
 load() {
     local line
     line="$(printf '%s\n' "$WATCH" | awk -v i="$1" '$1 == i')"
     [ -n "$line" ] || die "not a watched item: $1 (one of: $(watched | paste -sd' ' -))"
     read -r _ upstream style file var tool <<<"$line"
+    tagsrc=0
+    case "$upstream" in *@tags) tagsrc=1; upstream="${upstream%@tags}" ;; esac
 }
 
 is_version() { [[ "$1" =~ ^v?[0-9]+(\.[0-9]+)*$ ]]; }
@@ -100,9 +107,20 @@ is_version() { [[ "$1" =~ ^v?[0-9]+(\.[0-9]+)*$ ]]; }
 # Exit 0 when $2 is a later version than $1.
 newer() { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)" = "$2" ]; }
 
-# The tag of the upstream's latest release (never a draft or a prerelease).
+# The tag of the upstream's latest release (never a draft or a prerelease); with $2 = 1, of an
+# upstream without releases: its highest vX.Y.Z tag, numerically (annotated tags' ^{} lines and
+# anything with a pre-release suffix are ignored). Fails when there is none.
 latest_tag() {
-    gh api "repos/$1/releases/latest" --jq .tag_name
+    if [ "${2:-0}" = 1 ]; then
+        local t
+        t="$(git ls-remote --tags "https://github.com/$1.git" |
+            sed -n 's#^[0-9a-f]*[[:space:]]*refs/tags/\(v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)\(\^{}\)\{0,1\}$#\1#p' |
+            sort -uV | tail -1)" || return 1
+        [ -n "$t" ] || return 1
+        printf '%s\n' "$t"
+    else
+        gh api "repos/$1/releases/latest" --jq .tag_name
+    fi
 }
 
 # The version every items.tsv row of the item carries, or "mixed" when they differ.
@@ -136,7 +154,7 @@ ours() {
 }
 
 check() {
-    local tsv="$1" item upstream style file var tool our row theirs tag status released owed
+    local tsv="$1" item upstream tagsrc style file var tool our row theirs tag status released owed
     if [ "$tsv" = 1 ]; then
         printf '# item\tours\ttheirs\ttag\tstatus\treleased\towed\ttool\n'
     fi
@@ -145,7 +163,7 @@ check() {
         our="$(ours)"
         row="$(row_version "$item")"
         tag="-"; theirs="-"
-        if ! tag="$(latest_tag "$upstream" 2>/dev/null)" || [ -z "$tag" ]; then
+        if ! tag="$(latest_tag "$upstream" "$tagsrc" 2>/dev/null)" || [ -z "$tag" ]; then
             tag="-"; status=error
         elif ! is_version "$tag"; then
             # Printed for a human only, and never followed: kept to characters that are safe in
@@ -196,16 +214,16 @@ rewrite() {
 }
 
 bump() {
-    local item="$1" tag="${2:-}" our row suffix ver row_ver commit url="" from arch asset digest want got dir tmp_items files
+    local item="$1" tag="${2:-}" upstream tagsrc style file var tool our row suffix ver row_ver commit url="" from arch asset digest want got dir tmp_items files
     load "$item"
     our="$(ours)"
     row="$(row_version "$item")"
     [ "$(upstream_of "$row")" = "$our" ] || die "$item: items.tsv says $row, the recipe $our; settle that by hand first"
     suffix="${row#"$our"}"
-    [ -z "$suffix" ] || [[ "$suffix" =~ ^\+tl\.[0-9]+$ ]] ||
-        die "$item: items.tsv says $row; a bump moves only a +tl.N suffix, so settle this one by hand"
+    [ -z "$suffix" ] || [[ "$suffix" =~ ^\+tl\.[0-9]+$ ]] || [[ "$suffix" =~ ^\+[0-9a-f]{7,8}\.[0-9]+$ ]] ||
+        die "$item: items.tsv says $row; a bump moves only a +tl.N or +<commit>.N suffix, so settle this one by hand"
     if [ -z "$tag" ]; then
-        tag="$(latest_tag "$upstream")" || die "$item: could not read the latest release of $upstream"
+        tag="$(latest_tag "$upstream" "$tagsrc")" || die "$item: could not read the latest release of $upstream"
     fi
     is_version "$tag" || die "$item: upstream tag $tag does not read as a version"
     ver="${tag#v}"
@@ -224,6 +242,10 @@ bump() {
             commit="$(git ls-remote "https://github.com/$upstream.git" "refs/tags/$tag" "refs/tags/$tag^{}" |
                 awk '$2 ~ /\^\{\}$/ { peeled = $1 } { plain = $1 } END { print (peeled != "" ? peeled : plain) }')"
             [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || die "$item: tag $tag not found in $upstream"
+            # A +<commit>.N row (herdr-gui, herdr-core) names the commit it was built from.
+            if [[ "$suffix" =~ ^\+([0-9a-f]+)\.[0-9]+$ ]]; then
+                row_ver="$ver+${commit:0:${#BASH_REMATCH[1]}}.0"
+            fi
             ;;
         asset=*)
             dir="$(mktemp -d)"

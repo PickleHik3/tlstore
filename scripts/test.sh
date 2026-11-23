@@ -4994,7 +4994,7 @@ mkdir -p "$UW/scripts" "$UW/recipes/cross" "$UW/dist" "$UW/bin" "$UW/fx/assets"
 # supported for an upstream's own release binary, is covered by a fixture: the copy's herdr row is
 # the old asset one, over a fixture recipe with an asset recipe's pin lines. The commit style is
 # covered below, against the real build-herdr.sh.
-sed 's#^herdr .*#herdr      herdrdev/herdr           asset=herdr-linux-{arch}  recipes/cross/fetch-herdr.sh      HERDR      herdr#' \
+sed -e '/^herdr-\(gui\|core\) /d' -e 's#^herdr .*#herdr      herdrdev/herdr           asset=herdr-linux-{arch}  recipes/cross/fetch-herdr.sh      HERDR      herdr#' \
     "$repo/scripts/upstream-watch.sh" > "$UW/scripts/upstream-watch.sh"
 grep -q 'fetch-herdr.sh' "$UW/scripts/upstream-watch.sh" || fail "the fixture row replaced herdr's"
 cat > "$UW/recipes/cross/fetch-herdr.sh" <<'EOF'
@@ -5129,6 +5129,43 @@ expect_status "--bump herdr, commit style" 0
 if grep -qx 'HERDR_COMMIT="0123456789abcdef0123456789abcdef01234567"   # v99.0.0' "$UW/recipes/cross/build-herdr.sh" &&
     grep -qx 'HERDR_VERSION="99.0.0"' "$UW/recipes/cross/build-herdr.sh"; then pass; else fail "the commit and version pins move"; fi
 if [ "$(uw_ver herdr)" = "99.0.0+tl.0" ]; then pass; else fail "and the row goes to 99.0.0+tl.0" "$(uw_ver herdr)"; fi
+rm -rf "$UW"
+
+# The @tags source (herdr-gui, herdr-core: upstreams with git tags and no releases): "theirs" is the
+# highest stable vX.Y.Z tag from git ls-remote, and a +<commit>.N row bumps to <ver>+<commit>.0.
+UW="$(mktemp -d)"
+mkdir -p "$UW/scripts" "$UW/recipes/cross" "$UW/dist" "$UW/bin" "$UW/fx"
+sed "/^\(herdr\|btop\|fastfetch\|kitten\|tuios\|sigye\|fisher\) /d" "$repo/scripts/upstream-watch.sh" > "$UW/scripts/upstream-watch.sh"
+cp "$repo/recipes/cross/build-herdr-gui.sh" "$repo/recipes/cross/build-herdr-core.sh" "$UW/recipes/cross/"
+cat > "$UW/bin/gh" <<'EOF'
+#!/bin/sh
+exit 1
+EOF
+cat > "$UW/bin/git" <<'EOF'
+#!/bin/sh
+# git ls-remote --tags <url>: lightweight, annotated (the peeled commit is pinned) and unstable tags, unsorted
+printf '1111111111111111111111111111111111111111\trefs/tags/v0.1.9\n'
+printf '2222222222222222222222222222222222222222\trefs/tags/v0.1.16-rc1\n'
+printf '3333333333333333333333333333333333333333\trefs/tags/v0.1.100\n'
+printf '4444444444444444444444444444444444444444\trefs/tags/v0.1.101\n'
+printf '5555555555555555555555555555555555555555\trefs/tags/v0.1.101^{}\n'
+printf '6666666666666666666666666666666666666666\trefs/tags/v0.2.0-beta\n'
+printf '7777777777777777777777777777777777777777\trefs/tags/nightly\n'
+EOF
+chmod 755 "$UW/bin/gh" "$UW/bin/git"
+{
+    printf 'herdr-gui\tarchive\t0.1.13+adf94cb.9\t*\tbinaries:herdr-gui@bins-1\t-\t-\t-\tTools\t-\n'
+    printf 'herdr-core\tarchive\t0.1.18+9ce385d.3\t*\tbinaries:herdr-core@bins-1\t-\t-\t-\tTools\t-\n'
+} > "$UW/scripts/items.tsv"
+uw --check --tsv
+if [ "$(uw_col herdr-gui 4)" = v0.1.101 ] && [ "$(uw_col herdr-gui 5)" = behind ]; then pass; else fail "herdr-gui's theirs is the highest stable tag, numerically, ignoring pre-releases and peels" "$(uw_col herdr-gui 0)"; fi
+if [ "$(uw_col herdr-gui 2)" = 0.1.13 ] && [ "$(uw_col herdr-core 5)" = behind ]; then pass; else fail "ours is the recipe's version, row suffix aside" "$(uw_col herdr-core 0)"; fi
+uw --bump herdr-gui
+expect_status "--bump herdr-gui from tags" 0
+if grep -qx 'APP_COMMIT="5555555555555555555555555555555555555555"   # v0.1.101' "$UW/recipes/cross/build-herdr-gui.sh" &&
+    grep -qx 'APP_VERSION="0.1.101"' "$UW/recipes/cross/build-herdr-gui.sh"; then pass; else fail "the commit and version pins move to the tag's commit"; fi
+if [ "$(uw_ver herdr-gui)" = "0.1.101+5555555.0" ]; then pass; else fail "a +<commit>.N row goes to <ver>+<commit7>.0" "$(uw_ver herdr-gui)"; fi
+if [ "$(uw_ver herdr-core)" = "0.1.18+9ce385d.3" ]; then pass; else fail "the other row is untouched" "$(uw_ver herdr-core)"; fi
 rm -rf "$UW"
 
 echo
