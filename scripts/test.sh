@@ -5137,6 +5137,11 @@ UW="$(mktemp -d)"
 mkdir -p "$UW/scripts" "$UW/recipes/cross" "$UW/dist" "$UW/bin" "$UW/fx"
 sed "/^\(herdr\|btop\|fastfetch\|kitten\|tuios\|sigye\|fisher\) /d" "$repo/scripts/upstream-watch.sh" > "$UW/scripts/upstream-watch.sh"
 cp "$repo/recipes/cross/build-herdr-gui.sh" "$repo/recipes/cross/build-herdr-core.sh" "$UW/recipes/cross/"
+# Fixed pins, so these cases do not follow the real recipes as they move.
+sed -i -e 's/^APP_COMMIT="[0-9a-f]*".*/APP_COMMIT="adf94cb2c9b6f1cadbb31c51f84114b1aa332f0a"   # v0.1.13/' \
+    -e 's/^APP_VERSION="[^"]*"/APP_VERSION="0.1.13"/' "$UW/recipes/cross/build-herdr-gui.sh"
+sed -i -e 's/^CORE_COMMIT="[0-9a-f]*".*/CORE_COMMIT="9ce385d9c8abb041dd4437476d770365b3fb5282"   # v0.1.18/' \
+    -e 's/^CORE_VERSION="[^"]*"/CORE_VERSION="0.1.18"/' "$UW/recipes/cross/build-herdr-core.sh"
 cat > "$UW/bin/gh" <<'EOF'
 #!/bin/sh
 exit 1
