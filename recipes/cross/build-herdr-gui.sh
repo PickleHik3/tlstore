@@ -25,8 +25,8 @@
 # same on every edition; only their .pc files name a prefix).
 #
 # What it takes, all of it in this script and its patches:
-#   - upstream's Rust from the pinned commit below (upstream tags no releases in git), with the
-#     cargo target <arch>-linux-android linked by the NDK's clang at API 29 (libghostty-vt's
+#   - upstream's Rust from the pinned commit below (upstream's lightweight version tag, v0.1.14
+#     onward; it publishes no GitHub releases), with the cargo target <arch>-linux-android linked by the NDK's clang at API 29 (libghostty-vt's
 #     Zig TLS; see build-herdr-core.sh and build-herdr.sh);
 #   - libghostty-vt from vendor/ghostty, built by crates/ghostty-sys/build.rs with Zig 0.16.0
 #     for <arch>-linux-android, SIMD off; bindgen for its header and for quickjs-jit-sys, pointed
@@ -48,8 +48,8 @@
 set -euo pipefail
 
 APP_URL="https://github.com/herdrdev/herdr-app.git"
-APP_COMMIT="adf94cb2c9b6f1cadbb31c51f84114b1aa332f0a"   # 0.1.13 on master
-APP_VERSION="0.1.13"
+APP_COMMIT="034f8b85f7e6bb71f8ff55cb4a80c548b2578c0f"   # v0.1.16
+APP_VERSION="0.1.16"
 ZIG_VERSION="0.16.0"
 ZIG_SHA256=70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00
 # name version sha256 — crates.io crates patched by 0002-herdr-app-<name>.patch
