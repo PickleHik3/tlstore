@@ -34,6 +34,8 @@
 #     stubs out of it (see build-herdr-core.sh);
 #   - a Termux sysroot ($TL_SYSROOT, from termux-sysroot.sh via build-asset.sh) for libxcb and
 #     libxkbcommon, found through pkg-config;
+#   - zig-prefetch.sh seeds Zig's package cache with curl (retries, time limits) before the build,
+#     since Zig 0.16's own downloads fail at random and have no timeout;
 #   - 0001-herdr-app-android.patch: the Linux cfgs also true on Android across the app and its
 #     vendored gpui, X11 reached through the socket under $TMPDIR/$PREFIX (Termux's libxcb only
 #     knows its build-time prefix), no libgcc_s, and no upstream core installer (the store
@@ -180,6 +182,10 @@ if [ "$(cat "$source_dir/.tl-prepared" 2>/dev/null || true)" != "$prepared" ]; t
     done
     printf '%s\n' "$prepared" > "$source_dir/.tl-prepared"
 fi
+
+# Zig's own HTTP fetch is fragile and has no timeout: seed its cache with curl so the build
+# downloads nothing.
+bash "$SCRIPT_DIR/zig-prefetch.sh" "$source_dir/vendor/ghostty"
 
 echo "Building..."
 (
