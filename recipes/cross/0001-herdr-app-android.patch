@@ -1,5 +1,5 @@
 diff --git a/Cargo.lock b/Cargo.lock
-index 56ec781..709174f 100644
+index 2d14877..55516c9 100644
 --- a/Cargo.lock
 +++ b/Cargo.lock
 @@ -3265,8 +3265,6 @@ dependencies = [
@@ -19,7 +19,7 @@ index 56ec781..709174f 100644
   "unicode-segmentation",
   "web-sys",
   "wgpu",
-@@ -6512,6 +6511,7 @@ name = "quickjs-jit-sys"
+@@ -6516,6 +6515,7 @@ name = "quickjs-jit-sys"
  version = "0.12.11"
  source = "git+https://github.com/longbridge/quickjs-jit?rev=96593cd7a54440ac060a391b8baea7e9a3cf1393#96593cd7a54440ac060a391b8baea7e9a3cf1393"
  dependencies = [
@@ -27,7 +27,7 @@ index 56ec781..709174f 100644
   "cc",
  ]
  
-@@ -8958,8 +8958,6 @@ dependencies = [
+@@ -8962,8 +8962,6 @@ dependencies = [
  [[package]]
  name = "wayland-cursor"
  version = "0.31.14"
@@ -36,7 +36,7 @@ index 56ec781..709174f 100644
  dependencies = [
   "rustix",
   "wayland-client",
-@@ -9973,8 +9971,6 @@ dependencies = [
+@@ -9977,8 +9975,6 @@ dependencies = [
  [[package]]
  name = "x11rb-protocol"
  version = "0.13.2"
@@ -45,7 +45,7 @@ index 56ec781..709174f 100644
  
  [[package]]
  name = "x25519-dalek"
-@@ -10242,8 +10238,6 @@ dependencies = [
+@@ -10245,8 +10241,6 @@ dependencies = [
  [[package]]
  name = "zed-scap"
  version = "0.0.8-zed"
@@ -55,7 +55,7 @@ index 56ec781..709174f 100644
   "anyhow",
   "cocoa 0.25.0",
 diff --git a/Cargo.toml b/Cargo.toml
-index 0606654..2025493 100644
+index 2094e45..2a3cd51 100644
 --- a/Cargo.toml
 +++ b/Cargo.toml
 @@ -1,6 +1,6 @@
@@ -66,7 +66,7 @@ index 0606654..2025493 100644
  resolver = "2"
  
  [workspace.package]
-@@ -46,13 +46,13 @@ gpui_platform = { package = "gpui-pre-platform", version = "=0.3.8", features =
+@@ -47,13 +47,13 @@ gpui_platform = { package = "gpui-pre-platform", version = "=0.3.8", features =
  gpui = { package = "gpui-pre", version = "=0.3.8", features = ["test-support"] }
  gpui-shell = { path = "vendor/gpui-kit/crates/shell", features = ["render-test-support"] }
  
@@ -81,8 +81,8 @@ index 0606654..2025493 100644
 +[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
  gpui_linux = { package = "gpui-pre-linux", version = "=0.3.8", features = ["render-to-image"] }
  
- [target.'cfg(target_os = "macos")'.dependencies]
-@@ -70,6 +70,11 @@ winresource = "0.1"
+ [target.'cfg(unix)'.dependencies]
+@@ -76,6 +76,11 @@ winresource = "0.1"
  
  # gpui-shell's LLRT modules must share its quickjs-jit VM; gpui-kit's own workspace does the same.
  [patch.crates-io]
@@ -152,13 +152,13 @@ index 63e6a1b..20cbcba 100644
          // With a clang installed, bindgen asks it for its own builtin headers,
          // which match its libclang; Zig's newer ones break older ones (Ubuntu
 diff --git a/defaults/AGENTS.md b/defaults/AGENTS.md
-index cfaa93a..46d0b3d 100644
+index 893849b..b2b68dd 100644
 --- a/defaults/AGENTS.md
 +++ b/defaults/AGENTS.md
-@@ -266,6 +266,23 @@ Properties any node can have:
-   right-clicks (including Shift+right-click). Omit it for the shipped `menu`;
-   an unknown mod logs a warning and falls back to `menu`. Clone a shipped
-   layout before changing this field. Other menus are unchanged.
+@@ -279,6 +279,16 @@ Properties any node can have:
+ - Root only: `"link_handlers": ["my-browser", "my-viewer"]` chooses which mods
+   handle Ctrl-clicks (Cmd-clicks on macOS) in terminals, in order. Clone a
+   shipped layout before adding link handlers.
 +- Root only: `"toasts": {...}` places the toast notifications; every field is
 +  optional and sizes are px at zoom 1. `anchor`: `"bottom-right"` (default),
 +  `"bottom-center"`, `"top-center"` or `"top-right"`; `offset` (16): distance
@@ -169,31 +169,14 @@ index cfaa93a..46d0b3d 100644
 +  below its top edge and the rest stacking downward; hidden or unknown, `anchor`
 +  applies. Width never exceeds the window (or node) width minus 16.
 +  Example: `"toasts": {"over": "term", "anchor": "top-center", "width": 300, "max": 3}`.
-+- Root only: `"toast": "my-toast"` chooses the mod that shows notifications
-+  (Herdr's own and every `notify()`), in place of the shipped `toast`; an
-+  unknown mod logs a warning and falls back to `toast`. It gets the same
-+  `props()`: `{title, body, level, icon, action, timeout, overlay}` (`timeout`
-+  is optional). A mod that hands them to the system instead
-+  (`exec("notify-send", ...)`) closes itself at once
-+  with `closeOverlay(props().overlay)`.
- - Colors are theme names (`border`, `accent`, `surface`, ...) or `#rrggbb[aa]`.
- 
- A personal terminal menu replaces the whole menu; it doesn't merge items.
-@@ -973,7 +990,8 @@ All of it is in `herdr.d.ts`. In short:
-   returns an id; the mod gets `props().overlay` and closes itself with
-   `closeOverlay(id)`; Esc closes the top dialog or popup. `frame: "none"`
-   drops Herdr's border, corners and shadow so the mod draws its own.
--  `notify({ title, body, level, icon, timeout })` posts a notification, drawn by the `toast` mod.
-+  `notify({ title, body, level, icon, timeout })` posts a notification, drawn
-+  by the layout-chosen mod (default: `toast`).
- - Windows (`kind: "window"`): stay open until closed, over the layout and
-   under dialogs; a press the mod doesn't stop drags it (stop it on your
-   controls, like a title bar's buttons), it stays where dropped, and the one
+ - Root only: `"toast": "my-toast"` chooses the mod that shows notifications
+   (Herdr's own and every `notify()`), in place of the shipped `toast`; an
+   unknown mod logs a warning and falls back to `toast`. It gets the same
 diff --git a/defaults/herdr.d.ts b/defaults/herdr.d.ts
-index 454f4f4..044c8fc 100644
+index a01ddea..e1741ba 100644
 --- a/defaults/herdr.d.ts
 +++ b/defaults/herdr.d.ts
-@@ -234,6 +234,14 @@ export function focused(): { space: string; tab: string; pane: string | null; te
+@@ -276,6 +276,14 @@ export function focused(): ({ space: string; tab: string; pane: string | null; t
  /** The shown layout (layouts/<name>.json). Its name is shared("layout").
   *  Root `terminal_menu?: string` chooses a terminal right-click menu mod (default: "menu").
   *  Unknown names warn and fall back to "menu". This replaces the menu, not its items.
@@ -205,14 +188,14 @@ index 454f4f4..044c8fc 100644
 + *  Root `toast?: string` chooses the mod that draws every notification (default: "toast"); it gets
 + *  the same props() and may close itself with closeOverlay(props().overlay). Unknown names warn
 + *  and fall back to "toast".
-  *  Opens a pointer popup with mod.json overlay width/height (default 220×260). */
+  *  Opens a pointer popup with mod.json overlay width/height (default 220×260).
+  *  Root `link_handlers?: string[]` selects terminal link mods in order. */
  export function layout(): unknown;
- 
 diff --git a/src/commands.rs b/src/commands.rs
-index 5350999..a2c760f 100644
+index 1819542..12c30c2 100644
 --- a/src/commands.rs
 +++ b/src/commands.rs
-@@ -96,6 +96,9 @@ pub const COMMANDS: &[Command] = &[
+@@ -102,6 +102,9 @@ pub const COMMANDS: &[Command] = &[
      cmd("app.zoom_in", &[], "Make everything bigger."),
      cmd("app.zoom_out", &[], "Make everything smaller."),
      cmd("app.zoom_reset", &[], "Back to normal size."),
@@ -223,10 +206,10 @@ index 5350999..a2c760f 100644
      cmd("app.quit", &[], "Quit (macOS)."),
      cmd("app.hide", &[], "Hide the app (macOS)."),
 diff --git a/src/core_bin.rs b/src/core_bin.rs
-index 8ed2ace..f659583 100644
+index 13d9321..7593dc9 100644
 --- a/src/core_bin.rs
 +++ b/src/core_bin.rs
-@@ -170,6 +170,10 @@ fn login_shell_path() -> Option<std::ffi::OsString> {
+@@ -209,6 +209,10 @@ fn login_path_answer(out: &str) -> Option<std::ffi::OsString> {
  /// Installs the core's latest release with its own installer (into
  /// ~/.local/bin, or HC_INSTALL_DIR), then finds it. Err: what went wrong.
  pub fn install() -> Result<PathBuf, String> {
@@ -238,10 +221,10 @@ index 8ed2ace..f659583 100644
      let mut cmd = if cfg!(windows) {
          let mut c = crate::spawn::command("powershell");
 diff --git a/src/files.rs b/src/files.rs
-index 82ccf29..b1b2b4f 100644
+index c2a22ac..bed322b 100644
 --- a/src/files.rs
 +++ b/src/files.rs
-@@ -93,7 +93,7 @@ const BATCH: std::time::Duration = std::time::Duration::from_millis(150);
+@@ -156,7 +156,7 @@ const BATCH: std::time::Duration = std::time::Duration::from_millis(150);
  /// At most this many folders watched for mods at once.
  const MAX_FOLDERS: usize = 64;
  const MAX_PENDING: usize = 1024;
@@ -250,8 +233,8 @@ index 82ccf29..b1b2b4f 100644
  const MAX_DIRECTORIES: usize = 4096;
  
  fn folders() -> std::sync::MutexGuard<'static, std::collections::HashMap<PathBuf, Folder>> {
-@@ -129,7 +129,7 @@ pub async fn next_change(path: String) -> Result<Vec<String>, String> {
-     rx.recv().await.map_err(|_| "stopped watching".to_owned())
+@@ -226,7 +226,7 @@ fn reclaim_idle(all: &mut std::collections::HashMap<PathBuf, Folder>) {
+     });
  }
  
 -#[cfg(target_os = "linux")]
@@ -259,7 +242,7 @@ index 82ccf29..b1b2b4f 100644
  mod linux {
      use super::*;
  
-@@ -192,11 +192,11 @@ mod linux {
+@@ -289,11 +289,11 @@ mod linux {
  }
  
  fn watch_directories(root: &Path) -> Result<HashSet<PathBuf>, String> {
@@ -273,7 +256,7 @@ index 82ccf29..b1b2b4f 100644
      {
          Ok(HashSet::from([root.to_path_buf()]))
      }
-@@ -204,7 +204,7 @@ fn watch_directories(root: &Path) -> Result<HashSet<PathBuf>, String> {
+@@ -301,7 +301,7 @@ fn watch_directories(root: &Path) -> Result<HashSet<PathBuf>, String> {
  
  fn folder_watch_mode() -> RecursiveMode {
      // Inotify consumes a watch per directory; FSEvents and Windows recurse natively.
@@ -282,7 +265,7 @@ index 82ccf29..b1b2b4f 100644
  }
  
  fn add_pending(pending: &mut HashSet<String>, root: &Path, paths: impl IntoIterator<Item = PathBuf>) {
-@@ -291,7 +291,7 @@ fn start_folder(root: &Path) -> Result<std::sync::mpsc::Sender<()>, String> {
+@@ -388,7 +388,7 @@ fn start_folder(root: &Path, generation: Arc<()>) -> Result<std::sync::mpsc::Sen
                  pending.clear();
                  pending.insert(root.to_string_lossy().into_owned());
              }
@@ -291,7 +274,7 @@ index 82ccf29..b1b2b4f 100644
                  // Rescan off the notify callback thread: adding watches blocks on it.
                  match watch_directories(&root) {
                      Ok(next) => {
-@@ -444,7 +444,7 @@ mod tests {
+@@ -695,7 +695,7 @@ mod tests {
          }
      }
  
@@ -300,7 +283,7 @@ index 82ccf29..b1b2b4f 100644
      #[test]
      fn git_ignored_directories_are_pruned_but_tracked_files_and_refs_stay_watched() {
          let root = test_repo("ignore");
-@@ -466,7 +466,7 @@ mod tests {
+@@ -717,7 +717,7 @@ mod tests {
          std::fs::remove_dir_all(root).unwrap();
      }
  
@@ -309,7 +292,7 @@ index 82ccf29..b1b2b4f 100644
      #[test]
      fn new_directories_and_changed_ignore_rules_update_live_watches() {
          use std::time::{Duration, Instant};
-@@ -527,7 +527,7 @@ mod tests {
+@@ -870,7 +870,7 @@ mod tests {
          std::fs::remove_dir_all(root).unwrap();
      }
  
@@ -318,7 +301,7 @@ index 82ccf29..b1b2b4f 100644
      #[test]
      fn separate_git_metadata_is_watched_without_its_object_tree() {
          let root = test_repo("separate");
-@@ -542,7 +542,7 @@ mod tests {
+@@ -885,7 +885,7 @@ mod tests {
          std::fs::remove_dir_all(git).unwrap();
      }
  
@@ -327,7 +310,7 @@ index 82ccf29..b1b2b4f 100644
      #[test]
      fn oversized_trees_reject_instead_of_silently_missing_nested_changes() {
          let root = std::env::temp_dir().join(format!("herdr-watch-limit-{}", std::process::id()));
-@@ -554,7 +554,7 @@ mod tests {
+@@ -897,7 +897,7 @@ mod tests {
          std::fs::remove_dir_all(root).unwrap();
      }
  
@@ -336,7 +319,7 @@ index 82ccf29..b1b2b4f 100644
      #[test]
      fn native_recursive_backends_register_only_the_root() {
          let root = test_repo("native-recursive");
-@@ -577,7 +577,7 @@ mod tests {
+@@ -920,7 +920,7 @@ mod tests {
          assert_eq!(removed, directories);
      }
  
@@ -346,19 +329,19 @@ index 82ccf29..b1b2b4f 100644
      fn exact_cap_counts_each_git_directory_once() {
          let root = test_repo("exact-cap");
 diff --git a/src/keys.rs b/src/keys.rs
-index e28a011..b095169 100644
+index ff6b2f4..ab546c9 100644
 --- a/src/keys.rs
 +++ b/src/keys.rs
-@@ -268,6 +268,8 @@ pub fn install(bindings: Vec<KeyBinding>, cx: &mut App) {
+@@ -263,6 +263,8 @@ pub fn install(bindings: Vec<KeyBinding>, cx: &mut App) {
      cx.bind_keys([
          KeyBinding::new(ESCAPE_HATCH, ShellAction::new("app.reset"), None),
          KeyBinding::new("escape", ShellAction::new("overlay.close"), Some("Overlay")),
 +        // Android's Back reaches the launcher's X display as XF86Back, which gpui names "back".
 +        KeyBinding::new("back", ShellAction::new("overlay.close"), Some("Overlay")),
      ]);
- }
- 
-@@ -338,7 +340,7 @@ mod tests {
+     // The menu bar shows the keys it finds when it's built.
+     #[cfg(target_os = "macos")]
+@@ -336,7 +338,7 @@ mod tests {
          assert!(Keystroke::default().unshifted_key.is_none());
      }
  
@@ -368,19 +351,13 @@ index e28a011..b095169 100644
      fn linux_help_binding_matches_shifted_slash() {
          // Linux reports Ctrl+Shift+/ as Ctrl+? without the Shift modifier.
 diff --git a/src/layout.rs b/src/layout.rs
-index 6206ce8..3ceee75 100644
+index 81de48d..7af8dd4 100644
 --- a/src/layout.rs
 +++ b/src/layout.rs
-@@ -375,9 +375,43 @@ pub struct Node {
-     /// Root only: the terminal right-click menu's mod (default: `menu`).
-     #[serde(default, skip_serializing_if = "Option::is_none")]
-     pub terminal_menu: Option<String>,
-+    /// Root only: the mod that shows notifications (default: `toast`).
-+    #[serde(default, skip_serializing_if = "Option::is_none")]
-+    pub toast: Option<String>,
-     /// Dragging this node moves the window; a double-click maximizes it.
+@@ -400,6 +400,37 @@ pub struct Node {
+     /// colors with alpha show the desktop through frosted glass.
      #[serde(default, skip_serializing_if = "is_false")]
-     pub window_drag: bool,
+     pub window_blur: bool,
 +    /// Root only: where toast notifications sit, how big they are and how many show.
 +    #[serde(default, skip_serializing_if = "Option::is_none")]
 +    pub toasts: Option<Toasts>,
@@ -415,35 +392,46 @@ index 6206ce8..3ceee75 100644
  }
  
  #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-@@ -414,7 +448,9 @@ impl Node {
-             traffic_lights: None,
-             preview: None,
-             terminal_menu: None,
-+            toast: None,
+@@ -440,6 +471,7 @@ impl Node {
+             toast: None,
              window_drag: false,
+             window_blur: false,
 +            toasts: None,
          }
      }
  
+diff --git a/src/links.rs b/src/links.rs
+index 5de7719..ec7154c 100644
+--- a/src/links.rs
++++ b/src/links.rs
+@@ -585,7 +585,7 @@ mod tests {
+         std::fs::remove_dir_all(dir).unwrap();
+     }
+ 
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     #[test]
+     fn a_non_utf8_path_is_null_in_the_payload_and_exact_for_a_pass() {
+         use std::os::unix::ffi::OsStringExt;
 diff --git a/src/mods.rs b/src/mods.rs
-index 927d289..5db246a 100644
+index 1b8d269..d09b4a9 100644
 --- a/src/mods.rs
 +++ b/src/mods.rs
-@@ -1326,7 +1326,7 @@ mod tests {
+@@ -1682,7 +1682,7 @@ mod tests {
  
      #[test]
      fn shared_bursts_persist_only_complete_snapshots_and_finish_at_final_state() {
--        let root = if cfg!(target_os = "linux") { PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
-+        let root = if cfg!(any(target_os = "linux", target_os = "android")) { PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
+-        let root = if cfg!(target_os = "linux") { crate::test_tmp() } else { std::env::temp_dir() };
++        let root = if cfg!(any(target_os = "linux", target_os = "android")) { crate::test_tmp() } else { std::env::temp_dir() };
          let dir = root.join(format!("herdr-shared-stress-{}", std::process::id()));
          std::fs::create_dir_all(&dir).unwrap();
          let path = dir.join("shared.json");
-@@ -1367,7 +1367,7 @@ mod tests {
+@@ -1723,7 +1723,7 @@ mod tests {
  
      #[test]
      fn corrupt_shared_file_is_kept_before_starting_empty() {
--        let root = if cfg!(target_os = "linux") { PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
-+        let root = if cfg!(any(target_os = "linux", target_os = "android")) { PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
+-        let root = if cfg!(target_os = "linux") { crate::test_tmp() } else { std::env::temp_dir() };
++        let root = if cfg!(any(target_os = "linux", target_os = "android")) { crate::test_tmp() } else { std::env::temp_dir() };
          let dir = root.join(format!("herdr-shared-corrupt-{}", std::process::id()));
          std::fs::create_dir_all(&dir).unwrap();
          let path = dir.join("shared.json");
@@ -487,8 +475,21 @@ index e4e3b23..f7d0100 100644
  mod tests {
      use super::read;
      use std::io::{BufRead, BufReader, Write};
+diff --git a/src/programs.rs b/src/programs.rs
+index cc506be..6280cd2 100644
+--- a/src/programs.rs
++++ b/src/programs.rs
+@@ -475,7 +475,7 @@ mod tests {
+     #[test]
+     fn the_check_runs_in_the_persons_shell_and_falls_back_to_sh_only_when_it_cannot() {
+         use std::os::unix::fs::PermissionsExt;
+-        let temp = if cfg!(target_os = "linux") { std::path::PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
++        let temp = if cfg!(any(target_os = "linux", target_os = "android")) { std::path::PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
+         let dir = temp.join(format!("herdr-other-shell-check-{}", std::process::id()));
+         std::fs::create_dir_all(dir.join("rc")).unwrap();
+         let script = |name: &str, body: &str| {
 diff --git a/src/settings.rs b/src/settings.rs
-index 05fe16a..064d004 100644
+index 7e7ac80..3cc51db 100644
 --- a/src/settings.rs
 +++ b/src/settings.rs
 @@ -369,6 +369,10 @@ fn resolve(p: &Palette, overrides: &BTreeMap<String, String>) -> Theme {
@@ -502,7 +503,7 @@ index 05fe16a..064d004 100644
      pub sounds: Sounds,
      /// The herdr-core to use, when it isn't where Herdr looks (core_bin.rs).
      #[serde(skip_serializing_if = "Option::is_none")]
-@@ -442,10 +446,15 @@ fn is_true(b: &bool) -> bool {
+@@ -454,10 +458,15 @@ fn is_true(b: &bool) -> bool {
      *b
  }
  
@@ -518,7 +519,7 @@ index 05fe16a..064d004 100644
              sounds: Sounds::default(),
              core: None,
              font: None,
-@@ -476,6 +485,8 @@ pub struct Settings {
+@@ -501,6 +510,8 @@ pub struct Settings {
      pub ui_font_size: f32,
      /// How big the whole app is drawn (1 = as designed). The zoom keys change it.
      pub zoom: f32,
@@ -527,7 +528,7 @@ index 05fe16a..064d004 100644
      /// The theme showing: a preset or a file in themes/.
      pub theme: String,
      /// The layout's theme for each appearance (the same one twice when it names one).
-@@ -525,6 +536,7 @@ impl Default for Settings {
+@@ -555,6 +566,7 @@ impl Default for Settings {
              ui_font_family: "Geist".into(),
              ui_font_size: 13.0,
              zoom: 1.0,
@@ -535,7 +536,7 @@ index 05fe16a..064d004 100644
              theme: DEFAULT_DARK.into(),
              theme_light: DEFAULT_LIGHT.into(),
              theme_dark: DEFAULT_DARK.into(),
-@@ -563,6 +575,7 @@ impl Settings {
+@@ -598,6 +610,7 @@ impl Settings {
              ui_font_family: look.ui_font.clone().or(person.ui_font.clone()).unwrap_or(d.ui_font_family),
              ui_font_size: d.ui_font_size,
              zoom: person.zoom,
@@ -543,7 +544,7 @@ index 05fe16a..064d004 100644
              theme: if dark { theme_dark.clone() } else { theme_light.clone() },
              theme_light,
              theme_dark,
-@@ -640,6 +653,8 @@ thread_local! {
+@@ -679,6 +692,8 @@ thread_local! {
  
  const ZOOM_MIN: f32 = 0.5;
  const ZOOM_MAX: f32 = 3.0;
@@ -552,7 +553,7 @@ index 05fe16a..064d004 100644
  
  pub fn get() -> Rc<Settings> {
      CURRENT.with(|c| c.borrow().0.clone())
-@@ -671,6 +686,9 @@ pub fn load_person() -> Result<Person, String> {
+@@ -710,6 +725,9 @@ pub fn load_person() -> Result<Person, String> {
      if !(ZOOM_MIN..=ZOOM_MAX).contains(&person.zoom) {
          return Err(format!("zoom {} is outside {ZOOM_MIN}..{ZOOM_MAX}", person.zoom));
      }
@@ -562,7 +563,7 @@ index 05fe16a..064d004 100644
      Ok(person)
  }
  
-@@ -735,7 +753,7 @@ fn system_text_scale() -> f32 {
+@@ -795,7 +813,7 @@ fn system_text_scale() -> f32 {
              .and_then(|o| o.split_whitespace().last().and_then(|h| u32::from_str_radix(h.trim_start_matches("0x"), 16).ok()))
              .map_or(1.0, |p| p as f32 / 100.0);
      }
@@ -571,7 +572,7 @@ index 05fe16a..064d004 100644
          return run("gsettings", &["get", "org.gnome.desktop.interface", "text-scaling-factor"]).and_then(|o| o.trim().parse().ok()).unwrap_or(1.0);
      }
      1.0
-@@ -758,8 +776,20 @@ pub fn z(v: f32) -> Pixels {
+@@ -818,8 +836,20 @@ pub fn z(v: f32) -> Pixels {
      px(v * zoom())
  }
  
@@ -616,21 +617,21 @@ index b3e2373..5b8fe94 100644
      fn rendered_rounded_corners_join_straight_lines() {
          use gpui::{prelude::*, *};
 diff --git a/src/terminal.rs b/src/terminal.rs
-index 4d67c89..4d712d3 100644
+index 7375fb4..9b17ca1 100644
 --- a/src/terminal.rs
 +++ b/src/terminal.rs
-@@ -49,6 +49,10 @@ pub enum TerminalEvent {
-     Ended,
-     /// Right-click where the program doesn't take the mouse: the pane menu.
+@@ -80,6 +80,10 @@ pub enum TerminalEvent {
      ContextMenu(Point<Pixels>),
+     /// Something the person asked for failed: an error toast.
+     Notice { title: String, body: String },
 +    /// A pinch over the terminal: the terminal zoom it asks for (`done` at the gesture's end).
 +    Zoom { zoom: f32, done: bool },
 +    /// Ctrl+wheel: this many px bigger (negative: smaller).
 +    ZoomSteps(i32),
  }
  
- /// What the canvas closures need, shared outside the entity so prepaint can resize.
-@@ -118,6 +122,10 @@ pub struct TerminalView {
+ /// Rows of scrollback history as Ghostty's scrollbar reports them. `from_bottom`
+@@ -179,6 +183,10 @@ pub struct TerminalView {
      typed_at: Cell<Option<Instant>>,
      /// Scrolled this gesture, in lines, toward the next whole one.
      scrolled: Point<f32>,
@@ -641,7 +642,7 @@ index 4d67c89..4d712d3 100644
      /// Search UI and query belong to this terminal view, not the window. Each
      /// terminal in a tab therefore keeps its own query and match position.
      search_open: bool,
-@@ -273,6 +281,8 @@ impl TerminalView {
+@@ -346,6 +354,8 @@ impl TerminalView {
              shown_in: Cell::new(0),
              typed_at: Cell::new(None),
              scrolled: point(0.0, 0.0),
@@ -650,7 +651,7 @@ index 4d67c89..4d712d3 100644
              search_open: false,
              search_keys: false,
              search_query: String::new(),
-@@ -482,11 +492,11 @@ impl TerminalView {
+@@ -571,11 +581,11 @@ impl TerminalView {
                          if let Some(text) = clipboard {
                              cx.write_to_clipboard(ClipboardItem::new_string(text));
                          }
@@ -664,7 +665,7 @@ index 4d67c89..4d712d3 100644
                          let _ = primary;
                          if let Some(ch) = g.channel {
                              g.core.credit(ch, bytes.len());
-@@ -667,7 +677,7 @@ impl TerminalView {
+@@ -836,13 +846,13 @@ impl TerminalView {
              return false;
          };
          cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
@@ -673,7 +674,14 @@ index 4d67c89..4d712d3 100644
          cx.write_to_primary(ClipboardItem::new_string(text));
          true
      }
-@@ -807,8 +817,33 @@ impl TerminalView {
+ 
+     fn copy_primary(&self, _cx: &mut Context<Self>) {
+-        #[cfg(target_os = "linux")]
++        #[cfg(any(target_os = "linux", target_os = "android"))]
+         if let Some(text) = self.grid.borrow().vt.selection_text() {
+             _cx.write_to_primary(ClipboardItem::new_string(text));
+         }
+@@ -1036,8 +1046,33 @@ impl TerminalView {
          }
      }
  
@@ -706,11 +714,11 @@ index 4d67c89..4d712d3 100644
 +            return;
 +        }
          let mut g = self.grid.borrow_mut();
-         let steps = scroll_delta_steps(&mut self.scrolled, ev.delta, ev.touch_phase, g.cell, g.vt.cols, g.vt.rows);
+         let steps = scroll_delta_steps(&mut self.scrolled, ev.delta, ev.touch_phase, g.cell, g.vt.cols, g.vt.rows, crate::settings::get().terminal_scroll_speed);
          let n = steps.y.unsigned_abs() as usize;
-@@ -1934,7 +1969,9 @@ impl Render for TerminalView {
-             .on_key_down(cx.listener(Self::key_down))
+@@ -2516,7 +2551,9 @@ impl Render for TerminalView {
              .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.dropped(paths.paths().to_vec(), cx)))
+             .on_drop(cx.listener(Self::dropped_from_mod))
              .on_scroll_wheel(cx.listener(Self::scroll))
 +            .on_pinch(cx.listener(|this, ev: &PinchEvent, _, cx| this.pinch(ev, cx)))
              .when(self.link.is_some(), |d| d.cursor_pointer())
@@ -718,7 +726,25 @@ index 4d67c89..4d712d3 100644
              .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
                  if !hovered {
                      this.grid.borrow_mut().hover = None;
-@@ -2788,7 +2825,7 @@ mod tests {
+@@ -2586,7 +2623,7 @@ impl Render for TerminalView {
+             .on_mouse_down(MouseButton::Middle, cx.listener(|this, ev: &MouseDownEvent, _, _cx| {
+                 if !this.mouse(GHOSTTY_MOUSE_ACTION_PRESS, Some(ev.button), ev.position, ev.modifiers) {
+                     // macOS has no PRIMARY selection, so an unclaimed middle-click does nothing.
+-                    #[cfg(target_os = "linux")]
++                    #[cfg(any(target_os = "linux", target_os = "android"))]
+                     if let Some(text) = _cx.read_from_primary().and_then(|item| item.text()).filter(|text| !text.is_empty()) {
+                         let bytes = this.grid.borrow().vt.paste_bytes(&text);
+                         this.send(&bytes);
+@@ -3152,7 +3189,7 @@ mod tests {
+             cx.write_to_clipboard(ClipboardItem::new_string("untouched".into()));
+             terminal.selection_command("terminal.select", &serde_json::json!({"at": {"row": 0, "col": 1}, "mode": "line"}), cx).unwrap();
+             assert_eq!(cx.read_from_clipboard().unwrap().text().as_deref(), Some("untouched"));
+-            #[cfg(target_os = "linux")]
++            #[cfg(any(target_os = "linux", target_os = "android"))]
+             assert_eq!(cx.read_from_primary().unwrap().text().as_deref(), Some("hello world"));
+             assert!(terminal.copy(cx));
+             assert_eq!(cx.read_from_clipboard().unwrap().text().as_deref(), Some("hello world"));
+@@ -3686,7 +3723,7 @@ mod tests {
  
      // The native macOS text system is private to GPUI; creating MacPlatform here
      // requires the main thread. Exercise real shaping directly on Linux instead.
@@ -727,8 +753,17 @@ index 4d67c89..4d712d3 100644
      #[test]
      fn ligatures_change_glyphs_without_moving_terminal_cells() {
          use super::*;
-@@ -2826,7 +2863,7 @@ mod tests {
+@@ -3730,7 +3767,7 @@ mod tests {
          crate::settings::set((*original).clone());
+     }
+ 
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     #[test]
+     fn ghostty_cells_and_clusters_at_fractional_scales() {
+         use super::*;
+@@ -3845,7 +3882,7 @@ mod tests {
+         }
      }
  
 -    #[cfg(target_os = "linux")]
@@ -736,11 +771,53 @@ index 4d67c89..4d712d3 100644
      #[test]
      fn fallback_symbols_fit_their_terminal_cells_pixels() {
          use super::*;
+@@ -4070,11 +4107,11 @@ mod tests {
+         let drag = |root: &Entity<Root>, cx: &mut VisualTestContext| {
+             root.update(cx, |root, cx| {
+                 root.0.update(cx, |terminal, cx| {
+-                    #[cfg(target_os = "linux")]
++                    #[cfg(any(target_os = "linux", target_os = "android"))]
+                     let primary = cx.read_from_primary().and_then(|item| item.text());
+                     terminal.select(super::Select::Press, point(px(1.), px(1.)), cx);
+                     terminal.select(super::Select::Drag, point(px(16.), px(1.)), cx);
+-                    #[cfg(target_os = "linux")]
++                    #[cfg(any(target_os = "linux", target_os = "android"))]
+                     assert_eq!(cx.read_from_primary().and_then(|item| item.text()), primary);
+                     terminal.select(super::Select::Release, point(px(31.), px(1.)), cx);
+                 });
+@@ -4090,15 +4127,15 @@ mod tests {
+         crate::settings::set(settings);
+         cx.update(|_, app| {
+             app.write_to_clipboard(ClipboardItem::new_string("unchanged".into()));
+-            #[cfg(target_os = "linux")]
++            #[cfg(any(target_os = "linux", target_os = "android"))]
+             app.write_to_primary(ClipboardItem::new_string("primary unchanged".into()));
+         });
+         drag(&root, cx);
+-        #[cfg(target_os = "linux")]
++        #[cfg(any(target_os = "linux", target_os = "android"))]
+         let selected = root.read_with(cx, |root, cx| root.0.read_with(cx, |terminal, _| terminal.grid.borrow().vt.selection_text().unwrap()));
+         cx.update(|_, app| {
+             assert_eq!(app.read_from_clipboard().unwrap().text().as_deref(), Some("unchanged"));
+-            #[cfg(target_os = "linux")]
++            #[cfg(any(target_os = "linux", target_os = "android"))]
+             assert_eq!(app.read_from_primary().unwrap().text().as_deref(), Some(selected.as_str()));
+         });
+         let selected = root.update(cx, |root, cx| {
+@@ -4111,7 +4148,7 @@ mod tests {
+         });
+         cx.update(|_, app| {
+             assert_eq!(app.read_from_clipboard().unwrap().text().as_deref(), Some(selected.as_str()));
+-            #[cfg(target_os = "linux")]
++            #[cfg(any(target_os = "linux", target_os = "android"))]
+             assert_eq!(app.read_from_primary().unwrap().text().as_deref(), Some(selected.as_str()));
+             app.write_to_clipboard(ClipboardItem::new_string("unchanged".into()));
+         });
 diff --git a/src/vt.rs b/src/vt.rs
-index c348d59..71080be 100644
+index f86d38f..9ca5dc0 100644
 --- a/src/vt.rs
 +++ b/src/vt.rs
-@@ -399,7 +399,7 @@ unsafe extern "C" fn on_clipboard_write(_t: GhosttyTerminal, userdata: *mut c_vo
+@@ -423,7 +423,7 @@ unsafe extern "C" fn on_clipboard_write(_t: GhosttyTerminal, userdata: *mut c_vo
      }
      let slot = match request.location {
          GHOSTTY_CLIPBOARD_LOCATION_STANDARD => 0,
@@ -749,7 +826,16 @@ index c348d59..71080be 100644
          _ => return,
      };
      let text = if request.contents_len == 0 {
-@@ -2466,7 +2466,7 @@ mod tests {
+@@ -2460,7 +2460,7 @@ mod tests {
+         assert_eq!(vt.selection_text(), None, "a plain click clears select-all too");
+     }
+ 
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     #[test]
+     #[ignore = "manual 64 MiB scrollback performance check"]
+     fn select_all_large_scrollback() {
+@@ -2887,7 +2887,7 @@ mod tests {
              assert_eq!(vt.take_clipboard(), [Some("hi".into()), None]);
          }
          vt.write(b"\x1b]52;p;aGk=\x07");
@@ -758,7 +844,7 @@ index c348d59..71080be 100644
          assert_eq!(vt.take_clipboard(), [None, expected]);
          for sequence in [b"\x1b]52;c;?\x07".as_slice(), b"\x1b]52;c;%%%\x07", b"\x1b]52;c;/w==\x07", b"\x1b]52;s;aGk=\x07"] {
              vt.write(sequence);
-@@ -2490,7 +2490,7 @@ mod tests {
+@@ -2911,7 +2911,7 @@ mod tests {
          vt.write(b"\x1b]52;c;YQ==\x07\x1b]52;c;\x07");
          assert_eq!(vt.take_clipboard(), [Some(String::new()), None]);
          vt.write(b"\x1b]52;p;\x1b\\");
@@ -768,12 +854,12 @@ index c348d59..71080be 100644
      }
  
 diff --git a/src/window.rs b/src/window.rs
-index b4562f4..57bab42 100644
+index c7e896b..e3e5918 100644
 --- a/src/window.rs
 +++ b/src/window.rs
-@@ -1412,6 +1412,20 @@ impl AppWindow {
-                 TerminalEvent::Peek(address) => this.peek_terminal(address, window, cx),
-                 TerminalEvent::TitleChanged => this.publish(cx),
+@@ -1584,6 +1584,20 @@ impl AppWindow {
+                 }
+                 TerminalEvent::SelectionChanged => this.publish_selection(&addr, window, cx),
                  TerminalEvent::Ended => this.terminal_ended(&block, window, cx),
 +                // A pinch applies as it goes (kept in memory) and is written when it ends.
 +                TerminalEvent::Zoom { zoom, done } => {
@@ -792,7 +878,7 @@ index b4562f4..57bab42 100644
                  TerminalEvent::ContextMenu(at) => {
                      this.open_menu("pane", json!({ "pane": block.trim_end_matches(SWAP), "terminal": addr }), Some(*at), window, cx)
                  }
-@@ -3399,6 +3413,14 @@ impl AppWindow {
+@@ -3746,6 +3760,14 @@ impl AppWindow {
                  });
                  self.write_person(|p| p.zoom = zoom, window, cx);
              }
@@ -806,35 +892,8 @@ index b4562f4..57bab42 100644
 +            }
              "app.quit" => cx.quit(),
              "app.update" => {
-                 if !crate::update::apply() {
-@@ -3516,6 +3538,17 @@ impl AppWindow {
-         self.open_overlay(mods::new_overlay_id(), spec, window, cx);
-     }
- 
-+    /// The layout's notification mod (`"toast"` on the root), else the shipped `toast`.
-+    fn toast_mod(&self) -> &str {
-+        let requested = self.chrome.toast.as_deref().unwrap_or("toast");
-+        if self.folders.contains_key(requested) {
-+            requested
-+        } else {
-+            tracing::warn!(mod_name = requested, "toast mod not found; using toast");
-+            "toast"
-+        }
-+    }
-+
-     fn open_overlay(&mut self, id: String, spec: Value, window: &mut Window, cx: &mut Context<Self>) {
-         let kind = match spec.get("kind").and_then(Value::as_str) {
-             Some("popup") => OverlayKind::Popup,
-@@ -3540,7 +3573,7 @@ impl AppWindow {
-             }
-         });
-         let (name, mut props) = if kind == OverlayKind::Toast {
--            ("toast".to_owned(), spec.get("notification").cloned().unwrap_or(Value::Null))
-+            (self.toast_mod().to_owned(), spec.get("notification").cloned().unwrap_or(Value::Null))
-         } else {
-             (spec.get("mod").and_then(Value::as_str).unwrap_or_default().to_owned(), spec.get("props").cloned().unwrap_or(json!({})))
-         };
-@@ -3621,6 +3654,15 @@ impl AppWindow {
+                 match crate::update::apply() {
+@@ -4061,6 +4083,15 @@ impl AppWindow {
          } else {
              self.publish_shown_copies();
          }
@@ -850,7 +909,7 @@ index b4562f4..57bab42 100644
          cx.notify();
      }
  
-@@ -3749,6 +3791,7 @@ impl AppWindow {
+@@ -4192,6 +4223,7 @@ impl AppWindow {
              return json!({
                  "zoom": round(settings::zoom()),
                  "font_size": round(settings::font_size()),
@@ -858,43 +917,39 @@ index b4562f4..57bab42 100644
                  "ui_font_size": round(settings::ui_font_size()),
                  "space": self.model.active,
                  "tab": self.model.active_tab().map(|c| c.id.clone()),
-@@ -4284,7 +4327,28 @@ impl AppWindow {
- 
-     fn render_overlays(&self, viewport: Size<Pixels>, cx: &mut Context<Self>) -> Vec<AnyElement> {
-         let mut out = Vec::new();
--        let mut toast_y = 16.0;
+@@ -4860,11 +4892,43 @@ impl AppWindow {
+         let mut toasts = Vec::new();
+         let inset = settings::z(16.0);
+         let gap = settings::z(8.0);
 +        // The layout's `toasts` (root): where they sit, how big, how far apart.
-+        let toasts = self.chrome.toasts.clone();
-+        let styled = toasts.is_some();
-+        let toasts = toasts.unwrap_or_default();
-+        let (t_w, t_h) = (toasts.width.unwrap_or(340.0).max(1.0), toasts.height.unwrap_or(72.0).max(1.0));
-+        let (t_gap, t_off) = (toasts.gap.unwrap_or(8.0).max(0.0), toasts.offset.unwrap_or(16.0));
++        let toasts_cfg = self.chrome.toasts.clone();
++        let styled = toasts_cfg.is_some();
++        let toasts_cfg = toasts_cfg.unwrap_or_default();
++        let (t_w, t_h) = (toasts_cfg.width.unwrap_or(340.0).max(1.0), toasts_cfg.height.unwrap_or(72.0).max(1.0));
++        let (t_gap, t_off) = (toasts_cfg.gap.unwrap_or(8.0).max(0.0), toasts_cfg.offset.unwrap_or(16.0));
 +        // `over`: the node's bounds from its last paint, only while it is visible in the layout.
-+        let region = toasts
++        let region = toasts_cfg
 +            .over
 +            .as_deref()
 +            .filter(|id| visible_nodes(&self.chrome).iter().any(|n| n.id == *id))
 +            .and_then(|id| self.bounds.borrow().get(id).copied())
 +            .filter(|b| b.size.width > px(0.0) && b.size.height > px(0.0));
 +        let toast_w = settings::z(t_w).min(region.map_or(viewport.width, |b| b.size.width) - settings::z(16.0)).max(px(1.0));
-+        let (bottom, centered) = match toasts.anchor.as_deref() {
++        let (bottom, centered) = match toasts_cfg.anchor.as_deref() {
 +            Some("bottom-center") => (true, true),
 +            Some("top-center") => (false, true),
 +            Some("top-right") => (false, false),
 +            _ => (true, false),
 +        };
-+        let mut toast_y = t_off;
-+        let mut top_y = t_off;
-         // Drawn last, so it stays clickable over an open dialog.
-         let pill = self.render_update_pill(cx);
-         if pill.is_some() {
-@@ -4297,7 +4361,17 @@ impl AppWindow {
+         for o in &self.overlays {
              let id = o.id.clone();
              // Up to 1: a share of the window (terminals in overlays want room, not px).
              let span = |v: f32, full: Pixels| if v <= 1.0 { full * v } else { settings::z(v) };
 -            let (w, h) = (span(o.size.width, viewport.width), span(o.size.height, viewport.height));
 +            let (w, h) = if styled && o.kind == OverlayKind::Toast {
-+                (toast_w, settings::z(t_h))
++                // A toast that fits its message (the shipped one) grows from `height` up to the
++                // usual share of the window (or the `over` node); any other is `height` tall.
++                (toast_w, if o.fit { span(o.size.height, region.map_or(viewport.height, |b| b.size.height)).max(settings::z(t_h)) } else { settings::z(t_h) })
 +            } else {
 +                let (w, h) = (span(o.size.width, viewport.width), span(o.size.height, viewport.height));
 +                // A popup or dialog never outgrows the window: 8 designed px of margin each side.
@@ -907,7 +962,16 @@ index b4562f4..57bab42 100644
              let sized = |v: f32| v > 0.0 || o.kind != OverlayKind::Window;
              let content = match &o.layout {
                  Some(l) => self.render_node(l, &HashSet::new(), None, cx),
-@@ -4342,18 +4416,42 @@ impl AppWindow {
+@@ -4882,7 +4946,7 @@ impl AppWindow {
+                 .overflow_hidden()
+                 .when(o.kind == OverlayKind::Toast && !fit_toast, |d| d.flex_none())
+                 .when(fit_toast, |d| {
+-                    d.min_h(settings::z(72.0).min(h))
++                    d.min_h(settings::z(if styled { t_h } else { 72.0 }).min(h))
+                         .max_w((viewport.width - inset * 2.0).max(px(1.0)))
+                         .overflow_y_scroll()
+                 })
+@@ -4928,10 +4992,17 @@ impl AppWindow {
                          div()
                              .absolute()
                              .inset_0()
@@ -927,80 +991,92 @@ index b4562f4..57bab42 100644
                              }))
                              .child(position_popup(at, body))
                              .into_any_element(),
-                     );
-                 }
-                 OverlayKind::Toast => {
--                    out.push(div().absolute().right(settings::z(16.0)).bottom(settings::z(toast_y)).child(body).into_any_element());
--                    toast_y += o.size.height + 8.0;
-+                    let slot_h = if styled { t_h } else { o.size.height };
-+                    let el = div().absolute();
-+                    let el = if let Some(r) = region {
-+                        let y = top_y;
-+                        top_y += slot_h + t_gap;
-+                        el.left(r.origin.x + (r.size.width - w) / 2.0).top(r.origin.y + settings::z(y))
-+                    } else {
-+                        let across = |el: gpui::Div| if centered { el.left((viewport.width - w) / 2.0) } else { el.right(settings::z(16.0)) };
-+                        if bottom {
-+                            let y = toast_y;
-+                            toast_y += slot_h + t_gap;
-+                            across(el).bottom(settings::z(y))
-+                        } else {
-+                            let y = top_y;
-+                            top_y += slot_h + t_gap;
-+                            across(el).top(settings::z(y))
-+                        }
-+                    };
-+                    out.push(el.child(body).into_any_element());
-                 }
-             }
-         }
-@@ -4723,9 +4821,13 @@ fn dock(root: &mut Node, block: Node, place: &str, wrapper_id: String) {
-         if first { c.insert(0, block) } else { c.push(block) }
-         return;
-     }
--    let old = std::mem::replace(root, Node::new("", Kind::Row { children: vec![] }));
-+    let mut old = std::mem::replace(root, Node::new("", Kind::Row { children: vec![] }));
-+    let toast = old.toast.take();
-+    let terminal_menu = old.terminal_menu.take();
-     let children = if first { vec![block, old] } else { vec![old, block] };
-     let mut wrapper = Node::container(wrapper_id, axis, children);
-+    wrapper.toast = toast;
-+    wrapper.terminal_menu = terminal_menu;
-     wrapper.divider = Some(Line { width: 1.0, color: "border".into() });
-     *root = wrapper;
- }
-@@ -5086,7 +5188,7 @@ mod tests {
+@@ -4962,6 +5033,36 @@ impl AppWindow {
+         let (update_pill_slot, update_pill) = self.render_update_pill(cx).map(|body| OverlaySlot::new(body, None)).unzip();
+         // The padding gives the cards' shadows room while keeping their positions.
+         let shadow = px(16.0);
++        // The layout's `toasts` set where the stack sits: measured in a layer of its own, drawn
++        // with the other overlays as the shipped stack is.
++        let styled_toasts = (styled && !toasts.is_empty()).then(|| std::mem::take(&mut toasts));
++        let pill_shown = update_pill_slot.is_some();
++        if let Some(cards) = styled_toasts {
++            let off = settings::z(t_off);
++            // Bottom anchors stack upward (the newest on top); top anchors and `over` downward.
++            let cards: Vec<OverlaySlot> = if bottom && region.is_none() { cards.into_iter().rev().collect() } else { cards };
++            let center = centered || region.is_some();
++            let stack = div().id(TOAST_STACK_ID).p(shadow).m(-shadow)
++                .min_h_0().overflow_y_scroll().track_scroll(&self.toast_scroll)
++                .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
++                .flex().flex_col().when(center, |d| d.items_center()).when(!center, |d| d.items_end())
++                .gap(settings::z(t_gap))
++                .children(cards);
++            let layer = div().absolute().w(toast_w).flex().flex_col();
++            let layer = if let Some(r) = region {
++                layer.left(r.origin.x + (r.size.width - toast_w) / 2.0).top(r.origin.y + off).max_h((r.size.height - off).max(px(0.0)))
++            } else {
++                let layer = if centered { layer.left((viewport.width - toast_w) / 2.0) } else { layer.right(inset) };
++                if bottom {
++                    // Above the update pill, which keeps the bottom-right corner.
++                    let lift = if pill_shown { settings::z(UPDATE_PILL_HEIGHT + 8.0) } else { px(0.0) };
++                    layer.bottom(off + lift).max_h((viewport.height - off - lift - inset).max(px(0.0)))
++                } else {
++                    layer.top(off).max_h((viewport.height - off - inset).max(px(0.0)))
++                }
++            };
++            windows.push(layer.child(stack).into_any_element());
++        }
+         windows.push(
+             div().absolute().right(inset).bottom(inset)
+                 .max_h((viewport.height - inset * 2.0).max(px(0.0)))
+@@ -5823,7 +5924,7 @@ mod tests {
      #[gpui::test]
      fn image_invalidation_drops_cached_atlas_tiles_without_loading_missing_assets(cx: &mut TestAppContext) {
          use gpui::{ImgResourceLoader, Resource};
--        let temp = if cfg!(target_os = "linux") { std::path::PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
-+        let temp = if cfg!(any(target_os = "linux", target_os = "android")) { std::path::PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
+-        let temp = if cfg!(target_os = "linux") { crate::test_tmp() } else { std::env::temp_dir() };
++        let temp = if cfg!(any(target_os = "linux", target_os = "android")) { crate::test_tmp() } else { std::env::temp_dir() };
          let home = temp.join(format!("herdr-image-atlas-test-{}", std::process::id()));
          std::fs::create_dir_all(&home).unwrap();
          let file = home.join("image.gif");
-@@ -5123,7 +5225,7 @@ mod tests {
+@@ -5911,7 +6012,7 @@ mod tests {
+                 encoder.encode_frame(image::Frame::new(image::RgbaImage::from_pixel(2, 2, image::Rgba(color)))).unwrap();
+             }
+         }
+-        let temp = if cfg!(target_os = "linux") { crate::test_tmp() } else { std::env::temp_dir() };
++        let temp = if cfg!(any(target_os = "linux", target_os = "android")) { crate::test_tmp() } else { std::env::temp_dir() };
+         let dir = temp.join(format!("herdr-many-images-{}", std::process::id()));
+         std::fs::create_dir_all(&dir).unwrap();
+         let sources: Vec<_> = (0..24).map(|id| {
+@@ -6004,7 +6105,7 @@ mod tests {
+                 element
+             }
+         }
+-        let temp = if cfg!(target_os = "linux") { crate::test_tmp() } else { std::env::temp_dir() };
++        let temp = if cfg!(any(target_os = "linux", target_os = "android")) { crate::test_tmp() } else { std::env::temp_dir() };
+         let home = temp.join(format!("herdr-image-release-test-{}", std::process::id()));
+         std::fs::create_dir_all(&home).unwrap();
+         let gif = home.join("animated.gif");
+@@ -6071,7 +6172,7 @@ mod tests {
  
      #[test]
      fn directory_changes_include_nested_assets() {
--        let temp = if cfg!(target_os = "linux") { std::path::PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
-+        let temp = if cfg!(any(target_os = "linux", target_os = "android")) { std::path::PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
+-        let temp = if cfg!(target_os = "linux") { crate::test_tmp() } else { std::env::temp_dir() };
++        let temp = if cfg!(any(target_os = "linux", target_os = "android")) { crate::test_tmp() } else { std::env::temp_dir() };
          let home = temp.join(format!("herdr-image-directory-test-{}", std::process::id()));
          std::fs::create_dir_all(home.join("mods/probe/nested")).unwrap();
          std::fs::write(home.join("mods/probe/nested/icon.svg"), "svg").unwrap();
-@@ -5303,6 +5405,37 @@ mod tests {
+@@ -6151,7 +6252,7 @@ mod tests {
+     #[test]
+     fn other_shells_run_the_command_on_the_app_path_then_return_to_the_shell() {
+         use std::os::unix::fs::PermissionsExt;
+-        let temp = if cfg!(target_os = "linux") { std::path::PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
++        let temp = if cfg!(any(target_os = "linux", target_os = "android")) { std::path::PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
+         let dir = temp.join(format!("herdr-other-shell-test-{}", std::process::id()));
+         std::fs::create_dir_all(&dir).unwrap();
+         // Stands in for nushell: it would fail on sh syntax, so it only records how it was started.
+@@ -6276,6 +6377,27 @@ mod tests {
          assert_eq!(restored.terminal_menu.as_deref(), Some("personal-menu"));
      }
  
-+    #[test]
-+    fn toast_is_a_root_layout_choice_that_roundtrips() {
-+        let mut root = super::default_layout("main");
-+        assert_eq!(root.toast, None);
-+        assert!(serde_json::to_value(&root).unwrap().get("toast").is_none());
-+        root.toast = Some("system-toast".into());
-+        let restored: super::Node = serde_json::from_value(serde_json::to_value(&root).unwrap()).unwrap();
-+        assert_eq!(restored.toast.as_deref(), Some("system-toast"));
-+    }
-+
 +    /// A layout root names its toast mod beside its `toasts` placement, as
 +    /// Nightglass's phone layout does; both parse and survive a save.
 +    #[test]
@@ -1025,119 +1101,6 @@ index b4562f4..57bab42 100644
      /// Runs `window::tests::<name>` alone in a test process of its own, on a
      /// fresh app home: a window takes process-wide things (the app home, the
      /// mods' request channel) that tests beside it would otherwise share.
-@@ -5616,6 +5749,112 @@ export default class Probe extends View {
- 
-     include!("window/pane_size_tests.rs");
- 
-+    /// The whole path, in a real window: a layout names the toast mod, a
-+    /// notification opens it with its props, and it can close itself (as one
-+    /// that hands notifications to the system does). Unknown: the shipped toast.
-+    #[test]
-+    fn a_layout_s_toast_mod_gets_every_notification() {
-+        in_own_process("toast_window");
-+    }
-+
-+    #[gpui::test]
-+    fn toast_window(cx: &mut gpui::TestAppContext) {
-+        use serde_json::json;
-+        if !running_alone("toast_window") {
-+            return;
-+        }
-+        let forward = r#"import { View, div } from "gpui-kit";
-+import { props, closeOverlay, shared, setShared } from "herdr";
-+
-+export default class SystemToast extends View {
-+  render() {
-+    const p = props();
-+    // A real one would exec("notify-send", [p.title, p.body]) here.
-+    setShared("toast-test.seen", [...(shared("toast-test.seen") ?? []), `${p.title}: ${p.body}`]);
-+    closeOverlay(p.overlay);
-+    return div();
-+  }
-+}
-+"#;
-+        let layout = json!({ "id": "root", "type": "row", "toast": "system-toast", "children": [] });
-+        let (view, cx) = open_window(cx, "system-toast", forward, layout);
-+        let notify = |cx: &mut gpui::VisualTestContext| {
-+            view.update_in(cx, |this, window, cx| {
-+                this.sync_folders(window, cx);
-+                let note = json!({ "kind": "toast", "notification": { "title": "Build finished", "body": "All green", "level": "success" } });
-+                let id = crate::mods::new_overlay_id();
-+                this.open_overlay(id.clone(), note, window, cx);
-+                (id.clone(), this.copies[&format!("overlay:{id}")].inst.name.clone())
-+            })
-+        };
-+        // Herdr's own notes ("Your edits are in …") may show up too.
-+        let shown = |id: &str, cx: &mut gpui::VisualTestContext| {
-+            cx.run_until_parked();
-+            view.update(cx, |this, _| this.overlays.iter().any(|o| o.id == id))
-+        };
-+
-+        let (id, name) = notify(cx);
-+        assert_eq!(name, "system-toast");
-+        assert!(!shown(&id, cx), "the layout's mod closed the notification");
-+        let seen = crate::mods::shared("toast-test.seen").unwrap_or_default();
-+        assert!(seen.as_array().unwrap().contains(&json!("Build finished: All green")), "the mod got the notification's props: {seen}");
-+
-+        view.update(cx, |this, _| this.chrome.toast = Some("no-such-mod".into()));
-+        let (id, name) = notify(cx);
-+        assert_eq!(name, "toast");
-+        assert!(shown(&id, cx), "an unknown mod falls back to the shipped toast, which stays");
-+    }
-+
-+    #[test]
-+    fn docking_keeps_the_layouts_notification_and_menu_mods() {
-+        in_own_process("dock_root_choices");
-+    }
-+
-+    #[gpui::test]
-+    fn dock_root_choices(cx: &mut gpui::TestAppContext) {
-+        use serde_json::json;
-+        if !running_alone("dock_root_choices") {
-+            return;
-+        }
-+        let layout = json!({
-+            "id": "root", "type": "row", "toast": "chosen", "terminal_menu": "chosen", "children": []
-+        });
-+        let (view, cx) = open_window(cx, "chosen", "", layout);
-+        let check_handlers = |cx: &mut gpui::VisualTestContext| {
-+            view.update_in(cx, |this, window, cx| {
-+                let id = crate::mods::new_overlay_id();
-+                this.open_overlay(id.clone(), json!({
-+                    "kind": "toast", "notification": { "title": "After docking", "body": "Still chosen" }
-+                }), window, cx);
-+                assert_eq!(this.copies[&format!("overlay:{id}")].inst.name, "chosen");
-+                this.close_overlay(&id, window, cx);
-+                this.open_menu("tab", json!({}), None, window, cx);
-+                let id = this.overlays.last().unwrap().id.clone();
-+                assert_eq!(this.copies[&format!("overlay:{id}")].inst.name, "chosen");
-+                this.close_overlay(&id, window, cx);
-+            });
-+        };
-+        check_handlers(cx);
-+        let folder = crate::mods::app_dir().join("mods/new-top");
-+        std::fs::create_dir_all(&folder).unwrap();
-+        std::fs::write(folder.join("mod.json"), r#"{"place":"top"}"#).unwrap();
-+        std::fs::write(folder.join("main.js"), "").unwrap();
-+        view.update_in(cx, |this, window, cx| {
-+            this.sync_folders(window, cx);
-+            assert_eq!(this.chrome.axis(), Some(crate::layout::Axis::Column));
-+            assert!(this.chrome.walk().iter().any(|n| matches!(
-+                n.content(), Some(crate::layout::Content::Mod { name, .. }) if name == "new-top"
-+            )));
-+            this.save();
-+        });
-+        check_handlers(cx);
-+        view.update_in(cx, |this, window, cx| {
-+            this.load_layout("test");
-+            this.sync(window, cx);
-+        });
-+        check_handlers(cx);
-+    }
-+
-     #[test]
-     fn terminal_menu_preserves_clicked_target_and_uses_mod_dimensions() {
-         use serde_json::json;
 diff --git a/vendor/gpui-kit/crates/base/Cargo.toml b/vendor/gpui-kit/crates/base/Cargo.toml
 index 3507dea..0701121 100644
 --- a/vendor/gpui-kit/crates/base/Cargo.toml
@@ -1379,7 +1342,7 @@ index 2380810..367342d 100644
      use super::*;
  
 diff --git a/vendor/gpui-kit/crates/shell/Cargo.toml b/vendor/gpui-kit/crates/shell/Cargo.toml
-index 060d1eb..6d9d7ac 100644
+index 247b164..4ae8af0 100644
 --- a/vendor/gpui-kit/crates/shell/Cargo.toml
 +++ b/vendor/gpui-kit/crates/shell/Cargo.toml
 @@ -46,6 +46,8 @@ rquickjs = { package = "quickjs-jit", version = "0.12.11", git = "https://github
@@ -1391,8 +1354,24 @@ index 060d1eb..6d9d7ac 100644
  ], optional = true }
  rquickjs-jit = { package = "quickjs-jit-runtime", version = "0.12.11", git = "https://github.com/longbridge/quickjs-jit", rev = "96593cd7a54440ac060a391b8baea7e9a3cf1393", features = ["compiler"], optional = true }
  # The stdlib facade pins LLRT modules and shares our VM through rquickjs-compat.
+diff --git a/vendor/gpui-kit/crates/shell/src/engine/quickjs/code_cache.rs b/vendor/gpui-kit/crates/shell/src/engine/quickjs/code_cache.rs
+index 9624fce..407ef26 100644
+--- a/vendor/gpui-kit/crates/shell/src/engine/quickjs/code_cache.rs
++++ b/vendor/gpui-kit/crates/shell/src/engine/quickjs/code_cache.rs
+@@ -75,9 +75,9 @@ mod tests {
+     }
+     impl Tree {
+         fn new() -> Self {
+-            #[cfg(target_os = "linux")]
++            #[cfg(any(target_os = "linux", target_os = "android"))]
+             let scratch = std::path::PathBuf::from("/var/tmp");
+-            #[cfg(not(target_os = "linux"))]
++            #[cfg(not(any(target_os = "linux", target_os = "android")))]
+             let scratch = std::env::temp_dir();
+             let directory = tempfile::Builder::new()
+                 .prefix("shell-code-cache-")
 diff --git a/vendor/gpui-pre-linux/Cargo.toml b/vendor/gpui-pre-linux/Cargo.toml
-index 4ef5905..788238d 100644
+index edb2939..f6e2686 100644
 --- a/vendor/gpui-pre-linux/Cargo.toml
 +++ b/vendor/gpui-pre-linux/Cargo.toml
 @@ -82,21 +82,21 @@ name = "gpui_linux"
@@ -1665,10 +1644,10 @@ index ca2574c..bfbb397 100644
      power_sender: Sender<SystemPowerEvent>,
  ) -> anyhow::Result<()> {
 diff --git a/vendor/gpui-pre-linux/src/linux/x11/client.rs b/vendor/gpui-pre-linux/src/linux/x11/client.rs
-index 76939e1..56452d3 100644
+index 0604143..238153a 100644
 --- a/vendor/gpui-pre-linux/src/linux/x11/client.rs
 +++ b/vendor/gpui-pre-linux/src/linux/x11/client.rs
-@@ -379,8 +379,15 @@ impl X11Connection {
+@@ -381,8 +381,15 @@ impl X11Connection {
              .context("DISPLAY is not valid UTF-8")?;
          let display_name =
              std::ffi::CString::new(display).context("X display name contains a NUL byte")?;
@@ -1686,7 +1665,7 @@ index 76939e1..56452d3 100644
          xcb_connection.prefetch_extension_information(xkb::X11_EXTENSION_NAME)?;
          xcb_connection.prefetch_extension_information(randr::X11_EXTENSION_NAME)?;
          xcb_connection.prefetch_extension_information(render::X11_EXTENSION_NAME)?;
-@@ -1528,6 +1535,62 @@ impl X11Client {
+@@ -1520,6 +1527,62 @@ impl X11Client {
                      phase: gpui::TouchPhase::Ended,
                  }));
              }
@@ -1749,7 +1728,7 @@ index 76939e1..56452d3 100644
              _ => {}
          };
  
-@@ -2136,6 +2199,11 @@ impl X11ClientState {
+@@ -2128,6 +2191,11 @@ impl X11ClientState {
                      }
                  }
              }
@@ -1761,7 +1740,7 @@ index 76939e1..56452d3 100644
              if errors.is_empty() {
                  Err(anyhow!(
                      "errors while loading cursor icons {:?}:\n{}",
-@@ -2617,6 +2685,49 @@ fn make_scroll_wheel_event(
+@@ -2609,6 +2677,49 @@ fn make_scroll_wheel_event(
      }
  }
  
@@ -1811,7 +1790,7 @@ index 76939e1..56452d3 100644
  fn create_invisible_cursor(
      connection: &XCBConnection,
  ) -> anyhow::Result<crate::linux::x11::client::xproto::Cursor> {
-@@ -3237,3 +3348,50 @@ mod tests {
+@@ -3229,3 +3340,50 @@ mod tests {
          assert_eq!(key_event_state.key_get_utf8(space), " ");
      }
  }
@@ -1899,7 +1878,7 @@ index fb74314..5e9dec6 100644
  version = "0.2"
  
 diff --git a/vendor/gpui-pre-wgpu/src/cosmic_text_system.rs b/vendor/gpui-pre-wgpu/src/cosmic_text_system.rs
-index 6f787f2..981a96f 100644
+index db6851a..393cfa0 100644
 --- a/vendor/gpui-pre-wgpu/src/cosmic_text_system.rs
 +++ b/vendor/gpui-pre-wgpu/src/cosmic_text_system.rs
 @@ -144,6 +144,9 @@ impl CosmicTextSystem {
@@ -1912,7 +1891,7 @@ index 6f787f2..981a96f 100644
          let font_system = FontSystem::new();
  
          Self(RwLock::new(CosmicTextSystemState {
-@@ -2200,3 +2203,133 @@ mod tests {
+@@ -2208,3 +2211,133 @@ mod tests {
          assert!(spans.is_empty());
      }
  }
@@ -2221,10 +2200,10 @@ index 136e31f..dcd5743 100644
      application
          .with_windowing(WindowingRequest::Headless)
 diff --git a/vendor/gpui-pre/src/app.rs b/vendor/gpui-pre/src/app.rs
-index 7a157e7..3d62831 100644
+index 3731c7f..db643ea 100644
 --- a/vendor/gpui-pre/src/app.rs
 +++ b/vendor/gpui-pre/src/app.rs
-@@ -1640,14 +1640,14 @@ impl App {
+@@ -1644,14 +1644,14 @@ impl App {
  
      /// Reads data from the primary selection buffer.
      /// Only available on Linux.
@@ -2284,7 +2263,7 @@ index 27f361b..b5ce849 100644
              target_os = "windows"
          )))]
 diff --git a/vendor/gpui-pre/src/platform.rs b/vendor/gpui-pre/src/platform.rs
-index dad7a36..10fffef 100644
+index fdafbcf..0587ae7 100644
 --- a/vendor/gpui-pre/src/platform.rs
 +++ b/vendor/gpui-pre/src/platform.rs
 @@ -2,7 +2,7 @@ mod app_menu;
@@ -2409,7 +2388,7 @@ index dad7a36..10fffef 100644
      fn set_exclusive_edge(&self, _edge: layer_shell::Anchor) {}
      fn set_input_region(&self, _region: Option<&[Bounds<Pixels>]>) {}
      fn window_decorations(&self) -> Decorations {
-@@ -1921,7 +1921,7 @@ pub struct AtlasTextureId {
+@@ -1923,7 +1923,7 @@ pub struct AtlasTextureId {
  #[repr(C)]
  #[cfg_attr(
      all(
@@ -2418,7 +2397,7 @@ index dad7a36..10fffef 100644
          not(any(feature = "x11", feature = "wayland"))
      ),
      allow(dead_code)
-@@ -1959,7 +1959,7 @@ pub struct PlatformInputHandler {
+@@ -1961,7 +1961,7 @@ pub struct PlatformInputHandler {
  #[expect(missing_docs)]
  #[cfg_attr(
      all(
@@ -2427,7 +2406,7 @@ index dad7a36..10fffef 100644
          not(any(feature = "x11", feature = "wayland"))
      ),
      allow(dead_code)
-@@ -1988,7 +1988,7 @@ impl PlatformInputHandler {
+@@ -1990,7 +1990,7 @@ impl PlatformInputHandler {
      }
  
      #[cfg_attr(
@@ -2436,7 +2415,7 @@ index dad7a36..10fffef 100644
          allow(dead_code)
      )]
      pub fn text_for_range(
-@@ -2534,7 +2534,7 @@ pub struct WindowOptions {
+@@ -2536,7 +2536,7 @@ pub struct WindowOptions {
  #[derive(Debug)]
  #[cfg_attr(
      all(
@@ -2445,7 +2424,7 @@ index dad7a36..10fffef 100644
          not(any(feature = "x11", feature = "wayland"))
      ),
      allow(dead_code)
-@@ -2548,35 +2548,35 @@ pub struct WindowParams {
+@@ -2550,35 +2550,35 @@ pub struct WindowParams {
      pub titlebar: Option<TitlebarOptions>,
  
      /// The kind of window to create
@@ -2488,7 +2467,7 @@ index dad7a36..10fffef 100644
      pub show: bool,
  
      /// An image to set as the window icon (x11 only)
-@@ -2695,7 +2695,7 @@ pub enum WindowKind {
+@@ -2697,7 +2697,7 @@ pub enum WindowKind {
  
      /// A Wayland LayerShell window, used to draw overlays or backgrounds for applications such as
      /// docks, notifications or wallpapers.
@@ -2497,7 +2476,7 @@ index dad7a36..10fffef 100644
      LayerShell(layer_shell::LayerShellOptions),
  
      /// A window that appears on top of its parent window and blocks interaction with it
-@@ -3386,7 +3386,7 @@ impl ClipboardString {
+@@ -3388,7 +3388,7 @@ impl ClipboardString {
              .and_then(|m| serde_json::from_str(m).ok())
      }
  
@@ -2506,7 +2485,7 @@ index dad7a36..10fffef 100644
      /// Compute a hash of the given text for clipboard change detection.
      pub fn text_hash(text: &str) -> u64 {
          let mut hasher = SeaHasher::new();
-@@ -3607,7 +3607,7 @@ mod frame_signal_tests {
+@@ -3609,7 +3609,7 @@ mod frame_signal_tests {
      }
  }
  
@@ -2668,10 +2647,10 @@ index 798fb2a..8c6aed3 100644
  )))]
  const EMOJI_FONT_FAMILIES: &[&str] = &[];
 diff --git a/vendor/gpui-pre/src/text_system.rs b/vendor/gpui-pre/src/text_system.rs
-index 333202a..e6606d1 100644
+index 3dbc743..62541ff 100644
 --- a/vendor/gpui-pre/src/text_system.rs
 +++ b/vendor/gpui-pre/src/text_system.rs
-@@ -254,6 +254,10 @@ impl TextSystem {
+@@ -256,6 +256,10 @@ impl TextSystem {
              font_runs_pool: Mutex::default(),
              fallback_font_stack: smallvec![
                  // TODO: Remove this when Linux have implemented setting fallbacks.
@@ -2683,10 +2662,10 @@ index 333202a..e6606d1 100644
                  font(".ZedSans"),
                  font("Helvetica"),
 diff --git a/vendor/gpui-pre/src/window.rs b/vendor/gpui-pre/src/window.rs
-index 0dcdd2e..6c16bc1 100644
+index d8df5df..9f4418e 100644
 --- a/vendor/gpui-pre/src/window.rs
 +++ b/vendor/gpui-pre/src/window.rs
-@@ -1545,7 +1545,7 @@ impl Window {
+@@ -1548,7 +1548,7 @@ impl Window {
              window_min_size,
              window_decorations,
              #[cfg_attr(
@@ -2695,7 +2674,7 @@ index 0dcdd2e..6c16bc1 100644
                  allow(unused_variables)
              )]
              icon,
-@@ -2442,7 +2442,7 @@ impl Window {
+@@ -2448,7 +2448,7 @@ impl Window {
      /// This is only needed to disambiguate a corner-anchored surface; otherwise the
      /// edge is deduced from the anchor. The edge must be a single edge the surface
      /// is anchored to, or it is ignored. (Wayland layer-shell windows only)
@@ -2704,7 +2683,7 @@ index 0dcdd2e..6c16bc1 100644
      pub fn set_exclusive_edge(&self, edge: crate::layer_shell::Anchor) {
          self.platform_window.set_exclusive_edge(edge);
      }
-@@ -2874,7 +2874,7 @@ impl Window {
+@@ -2880,7 +2880,7 @@ impl Window {
      pub fn is_window_hovered(&self) -> bool {
          if cfg!(any(
              target_os = "windows",

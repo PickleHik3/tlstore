@@ -25,8 +25,8 @@
 # same on every edition; only their .pc files name a prefix).
 #
 # What it takes, all of it in this script and its patches:
-#   - upstream's Rust from the pinned commit below (upstream tags no releases in git), with the
-#     cargo target <arch>-linux-android linked by the NDK's clang at API 29 (libghostty-vt's
+#   - upstream's Rust from the pinned commit below (upstream's lightweight version tag, v0.1.14
+#     onward; it publishes no GitHub releases), with the cargo target <arch>-linux-android linked by the NDK's clang at API 29 (libghostty-vt's
 #     Zig TLS; see build-herdr-core.sh and build-herdr.sh);
 #   - libghostty-vt from vendor/ghostty, built by crates/ghostty-sys/build.rs with Zig 0.16.0
 #     for <arch>-linux-android, SIMD off; bindgen for its header and for quickjs-jit-sys, pointed
@@ -34,6 +34,8 @@
 #     stubs out of it (see build-herdr-core.sh);
 #   - a Termux sysroot ($TL_SYSROOT, from termux-sysroot.sh via build-asset.sh) for libxcb and
 #     libxkbcommon, found through pkg-config;
+#   - zig-prefetch.sh seeds Zig's package cache with curl (retries, time limits) before the build,
+#     since Zig 0.16's own downloads fail at random and have no timeout;
 #   - 0001-herdr-app-android.patch: the Linux cfgs also true on Android across the app and its
 #     vendored gpui, X11 reached through the socket under $TMPDIR/$PREFIX (Termux's libxcb only
 #     knows its build-time prefix), no libgcc_s, and no upstream core installer (the store
@@ -48,8 +50,8 @@
 set -euo pipefail
 
 APP_URL="https://github.com/herdrdev/herdr-app.git"
-APP_COMMIT="adf94cb2c9b6f1cadbb31c51f84114b1aa332f0a"   # 0.1.13 on master
-APP_VERSION="0.1.13"
+APP_COMMIT="a751b75b0418bf13950f7627d122bb934ac2c46c"   # v0.1.17
+APP_VERSION="0.1.17"
 ZIG_VERSION="0.16.0"
 ZIG_SHA256=70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00
 # name version sha256 — crates.io crates patched by 0002-herdr-app-<name>.patch
@@ -180,6 +182,10 @@ if [ "$(cat "$source_dir/.tl-prepared" 2>/dev/null || true)" != "$prepared" ]; t
     done
     printf '%s\n' "$prepared" > "$source_dir/.tl-prepared"
 fi
+
+# Zig's own HTTP fetch is fragile and has no timeout: seed its cache with curl so the build
+# downloads nothing.
+bash "$SCRIPT_DIR/zig-prefetch.sh" "$source_dir/vendor/ghostty"
 
 echo "Building..."
 (
