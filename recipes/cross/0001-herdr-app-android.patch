@@ -1,5 +1,5 @@
 diff --git a/Cargo.lock b/Cargo.lock
-index 6108bf8..a54db00 100644
+index 2d14877..55516c9 100644
 --- a/Cargo.lock
 +++ b/Cargo.lock
 @@ -3265,8 +3265,6 @@ dependencies = [
@@ -19,7 +19,7 @@ index 6108bf8..a54db00 100644
   "unicode-segmentation",
   "web-sys",
   "wgpu",
-@@ -6515,6 +6514,7 @@ name = "quickjs-jit-sys"
+@@ -6516,6 +6515,7 @@ name = "quickjs-jit-sys"
  version = "0.12.11"
  source = "git+https://github.com/longbridge/quickjs-jit?rev=96593cd7a54440ac060a391b8baea7e9a3cf1393#96593cd7a54440ac060a391b8baea7e9a3cf1393"
  dependencies = [
@@ -27,7 +27,7 @@ index 6108bf8..a54db00 100644
   "cc",
  ]
  
-@@ -8961,8 +8961,6 @@ dependencies = [
+@@ -8962,8 +8962,6 @@ dependencies = [
  [[package]]
  name = "wayland-cursor"
  version = "0.31.14"
@@ -36,7 +36,7 @@ index 6108bf8..a54db00 100644
  dependencies = [
   "rustix",
   "wayland-client",
-@@ -9976,8 +9974,6 @@ dependencies = [
+@@ -9977,8 +9975,6 @@ dependencies = [
  [[package]]
  name = "x11rb-protocol"
  version = "0.13.2"
@@ -45,7 +45,7 @@ index 6108bf8..a54db00 100644
  
  [[package]]
  name = "x25519-dalek"
-@@ -10244,8 +10240,6 @@ dependencies = [
+@@ -10245,8 +10241,6 @@ dependencies = [
  [[package]]
  name = "zed-scap"
  version = "0.0.8-zed"
@@ -55,7 +55,7 @@ index 6108bf8..a54db00 100644
   "anyhow",
   "cocoa 0.25.0",
 diff --git a/Cargo.toml b/Cargo.toml
-index ae5281a..5a4ae6c 100644
+index 2094e45..2a3cd51 100644
 --- a/Cargo.toml
 +++ b/Cargo.toml
 @@ -1,6 +1,6 @@
@@ -66,7 +66,7 @@ index ae5281a..5a4ae6c 100644
  resolver = "2"
  
  [workspace.package]
-@@ -46,13 +46,13 @@ gpui_platform = { package = "gpui-pre-platform", version = "=0.3.8", features =
+@@ -47,13 +47,13 @@ gpui_platform = { package = "gpui-pre-platform", version = "=0.3.8", features =
  gpui = { package = "gpui-pre", version = "=0.3.8", features = ["test-support"] }
  gpui-shell = { path = "vendor/gpui-kit/crates/shell", features = ["render-test-support"] }
  
@@ -81,8 +81,8 @@ index ae5281a..5a4ae6c 100644
 +[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
  gpui_linux = { package = "gpui-pre-linux", version = "=0.3.8", features = ["render-to-image"] }
  
- [target.'cfg(target_os = "macos")'.dependencies]
-@@ -73,6 +73,11 @@ winresource = "0.1"
+ [target.'cfg(unix)'.dependencies]
+@@ -76,6 +76,11 @@ winresource = "0.1"
  
  # gpui-shell's LLRT modules must share its quickjs-jit VM; gpui-kit's own workspace does the same.
  [patch.crates-io]
@@ -152,13 +152,13 @@ index 63e6a1b..20cbcba 100644
          // With a clang installed, bindgen asks it for its own builtin headers,
          // which match its libclang; Zig's newer ones break older ones (Ubuntu
 diff --git a/defaults/AGENTS.md b/defaults/AGENTS.md
-index b8cb4c2..a65f605 100644
+index 893849b..b2b68dd 100644
 --- a/defaults/AGENTS.md
 +++ b/defaults/AGENTS.md
-@@ -273,6 +273,16 @@ Properties any node can have:
-   right-clicks (including Shift+right-click). Omit it for the shipped `menu`;
-   an unknown mod logs a warning and falls back to `menu`. Clone a shipped
-   layout before changing this field. Other menus are unchanged.
+@@ -279,6 +279,16 @@ Properties any node can have:
+ - Root only: `"link_handlers": ["my-browser", "my-viewer"]` chooses which mods
+   handle Ctrl-clicks (Cmd-clicks on macOS) in terminals, in order. Clone a
+   shipped layout before adding link handlers.
 +- Root only: `"toasts": {...}` places the toast notifications; every field is
 +  optional and sizes are px at zoom 1. `anchor`: `"bottom-right"` (default),
 +  `"bottom-center"`, `"top-center"` or `"top-right"`; `offset` (16): distance
@@ -173,10 +173,10 @@ index b8cb4c2..a65f605 100644
    (Herdr's own and every `notify()`), in place of the shipped `toast`; an
    unknown mod logs a warning and falls back to `toast`. It gets the same
 diff --git a/defaults/herdr.d.ts b/defaults/herdr.d.ts
-index 1921bb7..84e4370 100644
+index a01ddea..e1741ba 100644
 --- a/defaults/herdr.d.ts
 +++ b/defaults/herdr.d.ts
-@@ -271,6 +271,14 @@ export function focused(): ({ space: string; tab: string; pane: string | null; t
+@@ -276,6 +276,14 @@ export function focused(): ({ space: string; tab: string; pane: string | null; t
  /** The shown layout (layouts/<name>.json). Its name is shared("layout").
   *  Root `terminal_menu?: string` chooses a terminal right-click menu mod (default: "menu").
   *  Unknown names warn and fall back to "menu". This replaces the menu, not its items.
@@ -188,14 +188,14 @@ index 1921bb7..84e4370 100644
 + *  Root `toast?: string` chooses the mod that draws every notification (default: "toast"); it gets
 + *  the same props() and may close itself with closeOverlay(props().overlay). Unknown names warn
 + *  and fall back to "toast".
-  *  Opens a pointer popup with mod.json overlay width/height (default 220×260). */
+  *  Opens a pointer popup with mod.json overlay width/height (default 220×260).
+  *  Root `link_handlers?: string[]` selects terminal link mods in order. */
  export function layout(): unknown;
- 
 diff --git a/src/commands.rs b/src/commands.rs
-index 612b882..5ed4658 100644
+index 1819542..12c30c2 100644
 --- a/src/commands.rs
 +++ b/src/commands.rs
-@@ -100,6 +100,9 @@ pub const COMMANDS: &[Command] = &[
+@@ -102,6 +102,9 @@ pub const COMMANDS: &[Command] = &[
      cmd("app.zoom_in", &[], "Make everything bigger."),
      cmd("app.zoom_out", &[], "Make everything smaller."),
      cmd("app.zoom_reset", &[], "Back to normal size."),
@@ -206,10 +206,10 @@ index 612b882..5ed4658 100644
      cmd("app.quit", &[], "Quit (macOS)."),
      cmd("app.hide", &[], "Hide the app (macOS)."),
 diff --git a/src/core_bin.rs b/src/core_bin.rs
-index caaa121..de75531 100644
+index 13d9321..7593dc9 100644
 --- a/src/core_bin.rs
 +++ b/src/core_bin.rs
-@@ -170,6 +170,10 @@ fn login_shell_path() -> Option<std::ffi::OsString> {
+@@ -209,6 +209,10 @@ fn login_path_answer(out: &str) -> Option<std::ffi::OsString> {
  /// Installs the core's latest release with its own installer (into
  /// ~/.local/bin, or HC_INSTALL_DIR), then finds it. Err: what went wrong.
  pub fn install() -> Result<PathBuf, String> {
@@ -329,10 +329,10 @@ index c2a22ac..bed322b 100644
      fn exact_cap_counts_each_git_directory_once() {
          let root = test_repo("exact-cap");
 diff --git a/src/keys.rs b/src/keys.rs
-index a6a19f7..9bca84e 100644
+index ff6b2f4..ab546c9 100644
 --- a/src/keys.rs
 +++ b/src/keys.rs
-@@ -269,6 +269,8 @@ pub fn install(bindings: Vec<KeyBinding>, cx: &mut App) {
+@@ -263,6 +263,8 @@ pub fn install(bindings: Vec<KeyBinding>, cx: &mut App) {
      cx.bind_keys([
          KeyBinding::new(ESCAPE_HATCH, ShellAction::new("app.reset"), None),
          KeyBinding::new("escape", ShellAction::new("overlay.close"), Some("Overlay")),
@@ -341,7 +341,7 @@ index a6a19f7..9bca84e 100644
      ]);
      // The menu bar shows the keys it finds when it's built.
      #[cfg(target_os = "macos")]
-@@ -342,7 +344,7 @@ mod tests {
+@@ -336,7 +338,7 @@ mod tests {
          assert!(Keystroke::default().unshifted_key.is_none());
      }
  
@@ -351,10 +351,10 @@ index a6a19f7..9bca84e 100644
      fn linux_help_binding_matches_shifted_slash() {
          // Linux reports Ctrl+Shift+/ as Ctrl+? without the Shift modifier.
 diff --git a/src/layout.rs b/src/layout.rs
-index ebe141a..782e450 100644
+index 81de48d..7af8dd4 100644
 --- a/src/layout.rs
 +++ b/src/layout.rs
-@@ -397,6 +397,37 @@ pub struct Node {
+@@ -400,6 +400,37 @@ pub struct Node {
      /// colors with alpha show the desktop through frosted glass.
      #[serde(default, skip_serializing_if = "is_false")]
      pub window_blur: bool,
@@ -392,7 +392,7 @@ index ebe141a..782e450 100644
  }
  
  #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-@@ -436,6 +467,7 @@ impl Node {
+@@ -440,6 +471,7 @@ impl Node {
              toast: None,
              window_drag: false,
              window_blur: false,
@@ -400,11 +400,24 @@ index ebe141a..782e450 100644
          }
      }
  
+diff --git a/src/links.rs b/src/links.rs
+index 5de7719..ec7154c 100644
+--- a/src/links.rs
++++ b/src/links.rs
+@@ -585,7 +585,7 @@ mod tests {
+         std::fs::remove_dir_all(dir).unwrap();
+     }
+ 
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     #[test]
+     fn a_non_utf8_path_is_null_in_the_payload_and_exact_for_a_pass() {
+         use std::os::unix::ffi::OsStringExt;
 diff --git a/src/mods.rs b/src/mods.rs
-index 03a518c..4b0a146 100644
+index 1b8d269..d09b4a9 100644
 --- a/src/mods.rs
 +++ b/src/mods.rs
-@@ -1511,7 +1511,7 @@ mod tests {
+@@ -1682,7 +1682,7 @@ mod tests {
  
      #[test]
      fn shared_bursts_persist_only_complete_snapshots_and_finish_at_final_state() {
@@ -413,7 +426,7 @@ index 03a518c..4b0a146 100644
          let dir = root.join(format!("herdr-shared-stress-{}", std::process::id()));
          std::fs::create_dir_all(&dir).unwrap();
          let path = dir.join("shared.json");
-@@ -1552,7 +1552,7 @@ mod tests {
+@@ -1723,7 +1723,7 @@ mod tests {
  
      #[test]
      fn corrupt_shared_file_is_kept_before_starting_empty() {
@@ -462,6 +475,19 @@ index e4e3b23..f7d0100 100644
  mod tests {
      use super::read;
      use std::io::{BufRead, BufReader, Write};
+diff --git a/src/programs.rs b/src/programs.rs
+index cc506be..6280cd2 100644
+--- a/src/programs.rs
++++ b/src/programs.rs
+@@ -475,7 +475,7 @@ mod tests {
+     #[test]
+     fn the_check_runs_in_the_persons_shell_and_falls_back_to_sh_only_when_it_cannot() {
+         use std::os::unix::fs::PermissionsExt;
+-        let temp = if cfg!(target_os = "linux") { std::path::PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
++        let temp = if cfg!(any(target_os = "linux", target_os = "android")) { std::path::PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
+         let dir = temp.join(format!("herdr-other-shell-check-{}", std::process::id()));
+         std::fs::create_dir_all(dir.join("rc")).unwrap();
+         let script = |name: &str, body: &str| {
 diff --git a/src/settings.rs b/src/settings.rs
 index 7e7ac80..3cc51db 100644
 --- a/src/settings.rs
@@ -591,10 +617,10 @@ index b3e2373..5b8fe94 100644
      fn rendered_rounded_corners_join_straight_lines() {
          use gpui::{prelude::*, *};
 diff --git a/src/terminal.rs b/src/terminal.rs
-index d480e5d..1abfa9e 100644
+index 7375fb4..9b17ca1 100644
 --- a/src/terminal.rs
 +++ b/src/terminal.rs
-@@ -79,6 +79,10 @@ pub enum TerminalEvent {
+@@ -80,6 +80,10 @@ pub enum TerminalEvent {
      ContextMenu(Point<Pixels>),
      /// Something the person asked for failed: an error toast.
      Notice { title: String, body: String },
@@ -605,7 +631,7 @@ index d480e5d..1abfa9e 100644
  }
  
  /// Rows of scrollback history as Ghostty's scrollbar reports them. `from_bottom`
-@@ -174,6 +178,10 @@ pub struct TerminalView {
+@@ -179,6 +183,10 @@ pub struct TerminalView {
      typed_at: Cell<Option<Instant>>,
      /// Scrolled this gesture, in lines, toward the next whole one.
      scrolled: Point<f32>,
@@ -616,7 +642,7 @@ index d480e5d..1abfa9e 100644
      /// Search UI and query belong to this terminal view, not the window. Each
      /// terminal in a tab therefore keeps its own query and match position.
      search_open: bool,
-@@ -339,6 +347,8 @@ impl TerminalView {
+@@ -346,6 +354,8 @@ impl TerminalView {
              shown_in: Cell::new(0),
              typed_at: Cell::new(None),
              scrolled: point(0.0, 0.0),
@@ -625,7 +651,7 @@ index d480e5d..1abfa9e 100644
              search_open: false,
              search_keys: false,
              search_query: String::new(),
-@@ -564,11 +574,11 @@ impl TerminalView {
+@@ -571,11 +581,11 @@ impl TerminalView {
                          if let Some(text) = clipboard {
                              cx.write_to_clipboard(ClipboardItem::new_string(text));
                          }
@@ -639,7 +665,7 @@ index d480e5d..1abfa9e 100644
                          let _ = primary;
                          if let Some(ch) = g.channel {
                              g.core.credit(ch, bytes.len());
-@@ -806,13 +816,13 @@ impl TerminalView {
+@@ -836,13 +846,13 @@ impl TerminalView {
              return false;
          };
          cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
@@ -655,7 +681,7 @@ index d480e5d..1abfa9e 100644
          if let Some(text) = self.grid.borrow().vt.selection_text() {
              _cx.write_to_primary(ClipboardItem::new_string(text));
          }
-@@ -1006,8 +1016,33 @@ impl TerminalView {
+@@ -1036,8 +1046,33 @@ impl TerminalView {
          }
      }
  
@@ -690,7 +716,7 @@ index d480e5d..1abfa9e 100644
          let mut g = self.grid.borrow_mut();
          let steps = scroll_delta_steps(&mut self.scrolled, ev.delta, ev.touch_phase, g.cell, g.vt.cols, g.vt.rows, crate::settings::get().terminal_scroll_speed);
          let n = steps.y.unsigned_abs() as usize;
-@@ -2475,7 +2510,9 @@ impl Render for TerminalView {
+@@ -2516,7 +2551,9 @@ impl Render for TerminalView {
              .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.dropped(paths.paths().to_vec(), cx)))
              .on_drop(cx.listener(Self::dropped_from_mod))
              .on_scroll_wheel(cx.listener(Self::scroll))
@@ -700,7 +726,7 @@ index d480e5d..1abfa9e 100644
              .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
                  if !hovered {
                      this.grid.borrow_mut().hover = None;
-@@ -2540,7 +2577,7 @@ impl Render for TerminalView {
+@@ -2586,7 +2623,7 @@ impl Render for TerminalView {
              .on_mouse_down(MouseButton::Middle, cx.listener(|this, ev: &MouseDownEvent, _, _cx| {
                  if !this.mouse(GHOSTTY_MOUSE_ACTION_PRESS, Some(ev.button), ev.position, ev.modifiers) {
                      // macOS has no PRIMARY selection, so an unclaimed middle-click does nothing.
@@ -709,7 +735,7 @@ index d480e5d..1abfa9e 100644
                      if let Some(text) = _cx.read_from_primary().and_then(|item| item.text()).filter(|text| !text.is_empty()) {
                          let bytes = this.grid.borrow().vt.paste_bytes(&text);
                          this.send(&bytes);
-@@ -3055,7 +3092,7 @@ mod tests {
+@@ -3152,7 +3189,7 @@ mod tests {
              cx.write_to_clipboard(ClipboardItem::new_string("untouched".into()));
              terminal.selection_command("terminal.select", &serde_json::json!({"at": {"row": 0, "col": 1}, "mode": "line"}), cx).unwrap();
              assert_eq!(cx.read_from_clipboard().unwrap().text().as_deref(), Some("untouched"));
@@ -718,7 +744,7 @@ index d480e5d..1abfa9e 100644
              assert_eq!(cx.read_from_primary().unwrap().text().as_deref(), Some("hello world"));
              assert!(terminal.copy(cx));
              assert_eq!(cx.read_from_clipboard().unwrap().text().as_deref(), Some("hello world"));
-@@ -3589,7 +3626,7 @@ mod tests {
+@@ -3686,7 +3723,7 @@ mod tests {
  
      // The native macOS text system is private to GPUI; creating MacPlatform here
      // requires the main thread. Exercise real shaping directly on Linux instead.
@@ -727,7 +753,7 @@ index d480e5d..1abfa9e 100644
      #[test]
      fn ligatures_change_glyphs_without_moving_terminal_cells() {
          use super::*;
-@@ -3633,7 +3670,7 @@ mod tests {
+@@ -3730,7 +3767,7 @@ mod tests {
          crate::settings::set((*original).clone());
      }
  
@@ -736,7 +762,7 @@ index d480e5d..1abfa9e 100644
      #[test]
      fn ghostty_cells_and_clusters_at_fractional_scales() {
          use super::*;
-@@ -3748,7 +3785,7 @@ mod tests {
+@@ -3845,7 +3882,7 @@ mod tests {
          }
      }
  
@@ -745,7 +771,7 @@ index d480e5d..1abfa9e 100644
      #[test]
      fn fallback_symbols_fit_their_terminal_cells_pixels() {
          use super::*;
-@@ -3973,11 +4010,11 @@ mod tests {
+@@ -4070,11 +4107,11 @@ mod tests {
          let drag = |root: &Entity<Root>, cx: &mut VisualTestContext| {
              root.update(cx, |root, cx| {
                  root.0.update(cx, |terminal, cx| {
@@ -759,7 +785,7 @@ index d480e5d..1abfa9e 100644
                      assert_eq!(cx.read_from_primary().and_then(|item| item.text()), primary);
                      terminal.select(super::Select::Release, point(px(31.), px(1.)), cx);
                  });
-@@ -3993,15 +4030,15 @@ mod tests {
+@@ -4090,15 +4127,15 @@ mod tests {
          crate::settings::set(settings);
          cx.update(|_, app| {
              app.write_to_clipboard(ClipboardItem::new_string("unchanged".into()));
@@ -778,7 +804,7 @@ index d480e5d..1abfa9e 100644
              assert_eq!(app.read_from_primary().unwrap().text().as_deref(), Some(selected.as_str()));
          });
          let selected = root.update(cx, |root, cx| {
-@@ -4014,7 +4051,7 @@ mod tests {
+@@ -4111,7 +4148,7 @@ mod tests {
          });
          cx.update(|_, app| {
              assert_eq!(app.read_from_clipboard().unwrap().text().as_deref(), Some(selected.as_str()));
@@ -788,7 +814,7 @@ index d480e5d..1abfa9e 100644
              app.write_to_clipboard(ClipboardItem::new_string("unchanged".into()));
          });
 diff --git a/src/vt.rs b/src/vt.rs
-index 4c63bf6..d256873 100644
+index f86d38f..9ca5dc0 100644
 --- a/src/vt.rs
 +++ b/src/vt.rs
 @@ -423,7 +423,7 @@ unsafe extern "C" fn on_clipboard_write(_t: GhosttyTerminal, userdata: *mut c_vo
@@ -800,7 +826,7 @@ index 4c63bf6..d256873 100644
          _ => return,
      };
      let text = if request.contents_len == 0 {
-@@ -2452,7 +2452,7 @@ mod tests {
+@@ -2460,7 +2460,7 @@ mod tests {
          assert_eq!(vt.selection_text(), None, "a plain click clears select-all too");
      }
  
@@ -809,7 +835,7 @@ index 4c63bf6..d256873 100644
      #[test]
      #[ignore = "manual 64 MiB scrollback performance check"]
      fn select_all_large_scrollback() {
-@@ -2868,7 +2868,7 @@ mod tests {
+@@ -2887,7 +2887,7 @@ mod tests {
              assert_eq!(vt.take_clipboard(), [Some("hi".into()), None]);
          }
          vt.write(b"\x1b]52;p;aGk=\x07");
@@ -818,7 +844,7 @@ index 4c63bf6..d256873 100644
          assert_eq!(vt.take_clipboard(), [None, expected]);
          for sequence in [b"\x1b]52;c;?\x07".as_slice(), b"\x1b]52;c;%%%\x07", b"\x1b]52;c;/w==\x07", b"\x1b]52;s;aGk=\x07"] {
              vt.write(sequence);
-@@ -2892,7 +2892,7 @@ mod tests {
+@@ -2911,7 +2911,7 @@ mod tests {
          vt.write(b"\x1b]52;c;YQ==\x07\x1b]52;c;\x07");
          assert_eq!(vt.take_clipboard(), [Some(String::new()), None]);
          vt.write(b"\x1b]52;p;\x1b\\");
@@ -828,10 +854,10 @@ index 4c63bf6..d256873 100644
      }
  
 diff --git a/src/window.rs b/src/window.rs
-index 41c07e8..1ffa116 100644
+index c7e896b..e3e5918 100644
 --- a/src/window.rs
 +++ b/src/window.rs
-@@ -1506,6 +1506,20 @@ impl AppWindow {
+@@ -1584,6 +1584,20 @@ impl AppWindow {
                  }
                  TerminalEvent::SelectionChanged => this.publish_selection(&addr, window, cx),
                  TerminalEvent::Ended => this.terminal_ended(&block, window, cx),
@@ -852,7 +878,7 @@ index 41c07e8..1ffa116 100644
                  TerminalEvent::ContextMenu(at) => {
                      this.open_menu("pane", json!({ "pane": block.trim_end_matches(SWAP), "terminal": addr }), Some(*at), window, cx)
                  }
-@@ -3577,6 +3591,14 @@ impl AppWindow {
+@@ -3746,6 +3760,14 @@ impl AppWindow {
                  });
                  self.write_person(|p| p.zoom = zoom, window, cx);
              }
@@ -867,7 +893,7 @@ index 41c07e8..1ffa116 100644
              "app.quit" => cx.quit(),
              "app.update" => {
                  match crate::update::apply() {
-@@ -3818,6 +3840,15 @@ impl AppWindow {
+@@ -4061,6 +4083,15 @@ impl AppWindow {
          } else {
              self.publish_shown_copies();
          }
@@ -883,7 +909,7 @@ index 41c07e8..1ffa116 100644
          cx.notify();
      }
  
-@@ -3947,6 +3978,7 @@ impl AppWindow {
+@@ -4192,6 +4223,7 @@ impl AppWindow {
              return json!({
                  "zoom": round(settings::zoom()),
                  "font_size": round(settings::font_size()),
@@ -891,43 +917,39 @@ index 41c07e8..1ffa116 100644
                  "ui_font_size": round(settings::ui_font_size()),
                  "space": self.model.active,
                  "tab": self.model.active_tab().map(|c| c.id.clone()),
-@@ -4599,7 +4631,28 @@ impl AppWindow {
- 
-     fn render_overlays(&self, viewport: Size<Pixels>, cx: &mut Context<Self>) -> Vec<AnyElement> {
-         let mut out = Vec::new();
--        let mut toast_y = 16.0;
+@@ -4860,11 +4892,43 @@ impl AppWindow {
+         let mut toasts = Vec::new();
+         let inset = settings::z(16.0);
+         let gap = settings::z(8.0);
 +        // The layout's `toasts` (root): where they sit, how big, how far apart.
-+        let toasts = self.chrome.toasts.clone();
-+        let styled = toasts.is_some();
-+        let toasts = toasts.unwrap_or_default();
-+        let (t_w, t_h) = (toasts.width.unwrap_or(340.0).max(1.0), toasts.height.unwrap_or(72.0).max(1.0));
-+        let (t_gap, t_off) = (toasts.gap.unwrap_or(8.0).max(0.0), toasts.offset.unwrap_or(16.0));
++        let toasts_cfg = self.chrome.toasts.clone();
++        let styled = toasts_cfg.is_some();
++        let toasts_cfg = toasts_cfg.unwrap_or_default();
++        let (t_w, t_h) = (toasts_cfg.width.unwrap_or(340.0).max(1.0), toasts_cfg.height.unwrap_or(72.0).max(1.0));
++        let (t_gap, t_off) = (toasts_cfg.gap.unwrap_or(8.0).max(0.0), toasts_cfg.offset.unwrap_or(16.0));
 +        // `over`: the node's bounds from its last paint, only while it is visible in the layout.
-+        let region = toasts
++        let region = toasts_cfg
 +            .over
 +            .as_deref()
 +            .filter(|id| visible_nodes(&self.chrome).iter().any(|n| n.id == *id))
 +            .and_then(|id| self.bounds.borrow().get(id).copied())
 +            .filter(|b| b.size.width > px(0.0) && b.size.height > px(0.0));
 +        let toast_w = settings::z(t_w).min(region.map_or(viewport.width, |b| b.size.width) - settings::z(16.0)).max(px(1.0));
-+        let (bottom, centered) = match toasts.anchor.as_deref() {
++        let (bottom, centered) = match toasts_cfg.anchor.as_deref() {
 +            Some("bottom-center") => (true, true),
 +            Some("top-center") => (false, true),
 +            Some("top-right") => (false, false),
 +            _ => (true, false),
 +        };
-+        let mut toast_y = t_off;
-+        let mut top_y = t_off;
-         // Drawn last, so it stays clickable over an open dialog.
-         let pill = self.render_update_pill(cx);
-         if pill.is_some() {
-@@ -4612,7 +4665,17 @@ impl AppWindow {
+         for o in &self.overlays {
              let id = o.id.clone();
              // Up to 1: a share of the window (terminals in overlays want room, not px).
              let span = |v: f32, full: Pixels| if v <= 1.0 { full * v } else { settings::z(v) };
 -            let (w, h) = (span(o.size.width, viewport.width), span(o.size.height, viewport.height));
 +            let (w, h) = if styled && o.kind == OverlayKind::Toast {
-+                (toast_w, settings::z(t_h))
++                // A toast that fits its message (the shipped one) grows from `height` up to the
++                // usual share of the window (or the `over` node); any other is `height` tall.
++                (toast_w, if o.fit { span(o.size.height, region.map_or(viewport.height, |b| b.size.height)).max(settings::z(t_h)) } else { settings::z(t_h) })
 +            } else {
 +                let (w, h) = (span(o.size.width, viewport.width), span(o.size.height, viewport.height));
 +                // A popup or dialog never outgrows the window: 8 designed px of margin each side.
@@ -940,7 +962,16 @@ index 41c07e8..1ffa116 100644
              let sized = |v: f32| v > 0.0 || o.kind != OverlayKind::Window;
              let content = match &o.layout {
                  Some(l) => self.render_node(l, &HashSet::new(), None, cx),
-@@ -4657,18 +4720,42 @@ impl AppWindow {
+@@ -4882,7 +4946,7 @@ impl AppWindow {
+                 .overflow_hidden()
+                 .when(o.kind == OverlayKind::Toast && !fit_toast, |d| d.flex_none())
+                 .when(fit_toast, |d| {
+-                    d.min_h(settings::z(72.0).min(h))
++                    d.min_h(settings::z(if styled { t_h } else { 72.0 }).min(h))
+                         .max_w((viewport.width - inset * 2.0).max(px(1.0)))
+                         .overflow_y_scroll()
+                 })
+@@ -4928,10 +4992,17 @@ impl AppWindow {
                          div()
                              .absolute()
                              .inset_0()
@@ -960,34 +991,44 @@ index 41c07e8..1ffa116 100644
                              }))
                              .child(position_popup(at, body))
                              .into_any_element(),
-                     );
-                 }
-                 OverlayKind::Toast => {
--                    out.push(div().absolute().right(settings::z(16.0)).bottom(settings::z(toast_y)).child(body).into_any_element());
--                    toast_y += o.size.height + 8.0;
-+                    let slot_h = if styled { t_h } else { o.size.height };
-+                    let el = div().absolute();
-+                    let el = if let Some(r) = region {
-+                        let y = top_y;
-+                        top_y += slot_h + t_gap;
-+                        el.left(r.origin.x + (r.size.width - w) / 2.0).top(r.origin.y + settings::z(y))
-+                    } else {
-+                        let across = |el: gpui::Div| if centered { el.left((viewport.width - w) / 2.0) } else { el.right(settings::z(16.0)) };
-+                        if bottom {
-+                            let y = toast_y;
-+                            toast_y += slot_h + t_gap;
-+                            across(el).bottom(settings::z(y))
-+                        } else {
-+                            let y = top_y;
-+                            top_y += slot_h + t_gap;
-+                            across(el).top(settings::z(y))
-+                        }
-+                    };
-+                    out.push(el.child(body).into_any_element());
-                 }
-             }
-         }
-@@ -5451,7 +5538,7 @@ mod tests {
+@@ -4962,6 +5033,36 @@ impl AppWindow {
+         let (update_pill_slot, update_pill) = self.render_update_pill(cx).map(|body| OverlaySlot::new(body, None)).unzip();
+         // The padding gives the cards' shadows room while keeping their positions.
+         let shadow = px(16.0);
++        // The layout's `toasts` set where the stack sits: measured in a layer of its own, drawn
++        // with the other overlays as the shipped stack is.
++        let styled_toasts = (styled && !toasts.is_empty()).then(|| std::mem::take(&mut toasts));
++        let pill_shown = update_pill_slot.is_some();
++        if let Some(cards) = styled_toasts {
++            let off = settings::z(t_off);
++            // Bottom anchors stack upward (the newest on top); top anchors and `over` downward.
++            let cards: Vec<OverlaySlot> = if bottom && region.is_none() { cards.into_iter().rev().collect() } else { cards };
++            let center = centered || region.is_some();
++            let stack = div().id(TOAST_STACK_ID).p(shadow).m(-shadow)
++                .min_h_0().overflow_y_scroll().track_scroll(&self.toast_scroll)
++                .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
++                .flex().flex_col().when(center, |d| d.items_center()).when(!center, |d| d.items_end())
++                .gap(settings::z(t_gap))
++                .children(cards);
++            let layer = div().absolute().w(toast_w).flex().flex_col();
++            let layer = if let Some(r) = region {
++                layer.left(r.origin.x + (r.size.width - toast_w) / 2.0).top(r.origin.y + off).max_h((r.size.height - off).max(px(0.0)))
++            } else {
++                let layer = if centered { layer.left((viewport.width - toast_w) / 2.0) } else { layer.right(inset) };
++                if bottom {
++                    // Above the update pill, which keeps the bottom-right corner.
++                    let lift = if pill_shown { settings::z(UPDATE_PILL_HEIGHT + 8.0) } else { px(0.0) };
++                    layer.bottom(off + lift).max_h((viewport.height - off - lift - inset).max(px(0.0)))
++                } else {
++                    layer.top(off).max_h((viewport.height - off - inset).max(px(0.0)))
++                }
++            };
++            windows.push(layer.child(stack).into_any_element());
++        }
+         windows.push(
+             div().absolute().right(inset).bottom(inset)
+                 .max_h((viewport.height - inset * 2.0).max(px(0.0)))
+@@ -5823,7 +5924,7 @@ mod tests {
      #[gpui::test]
      fn image_invalidation_drops_cached_atlas_tiles_without_loading_missing_assets(cx: &mut TestAppContext) {
          use gpui::{ImgResourceLoader, Resource};
@@ -996,7 +1037,7 @@ index 41c07e8..1ffa116 100644
          let home = temp.join(format!("herdr-image-atlas-test-{}", std::process::id()));
          std::fs::create_dir_all(&home).unwrap();
          let file = home.join("image.gif");
-@@ -5539,7 +5626,7 @@ mod tests {
+@@ -5911,7 +6012,7 @@ mod tests {
                  encoder.encode_frame(image::Frame::new(image::RgbaImage::from_pixel(2, 2, image::Rgba(color)))).unwrap();
              }
          }
@@ -1005,7 +1046,7 @@ index 41c07e8..1ffa116 100644
          let dir = temp.join(format!("herdr-many-images-{}", std::process::id()));
          std::fs::create_dir_all(&dir).unwrap();
          let sources: Vec<_> = (0..24).map(|id| {
-@@ -5632,7 +5719,7 @@ mod tests {
+@@ -6004,7 +6105,7 @@ mod tests {
                  element
              }
          }
@@ -1014,7 +1055,7 @@ index 41c07e8..1ffa116 100644
          let home = temp.join(format!("herdr-image-release-test-{}", std::process::id()));
          std::fs::create_dir_all(&home).unwrap();
          let gif = home.join("animated.gif");
-@@ -5699,7 +5786,7 @@ mod tests {
+@@ -6071,7 +6172,7 @@ mod tests {
  
      #[test]
      fn directory_changes_include_nested_assets() {
@@ -1023,16 +1064,16 @@ index 41c07e8..1ffa116 100644
          let home = temp.join(format!("herdr-image-directory-test-{}", std::process::id()));
          std::fs::create_dir_all(home.join("mods/probe/nested")).unwrap();
          std::fs::write(home.join("mods/probe/nested/icon.svg"), "svg").unwrap();
-@@ -5779,7 +5866,7 @@ mod tests {
+@@ -6151,7 +6252,7 @@ mod tests {
      #[test]
-     fn other_shells_run_the_command_then_return_to_the_shell() {
+     fn other_shells_run_the_command_on_the_app_path_then_return_to_the_shell() {
          use std::os::unix::fs::PermissionsExt;
 -        let temp = if cfg!(target_os = "linux") { std::path::PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
 +        let temp = if cfg!(any(target_os = "linux", target_os = "android")) { std::path::PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
          let dir = temp.join(format!("herdr-other-shell-test-{}", std::process::id()));
          std::fs::create_dir_all(&dir).unwrap();
          // Stands in for nushell: it would fail on sh syntax, so it only records how it was started.
-@@ -5903,6 +5990,27 @@ mod tests {
+@@ -6276,6 +6377,27 @@ mod tests {
          assert_eq!(restored.terminal_menu.as_deref(), Some("personal-menu"));
      }
  
