@@ -38,7 +38,8 @@
 #     since Zig 0.16's own downloads fail at random and have no timeout;
 #   - 0001-herdr-app-android.patch: the Linux cfgs also true on Android across the app and its
 #     vendored gpui, X11 reached through the socket under $TMPDIR/$PREFIX (Termux's libxcb only
-#     knows its build-time prefix), no libgcc_s, and no upstream core installer (the store
+#     knows its build-time prefix), libxkbcommon-x11 dlopen()ed by Termux's unversioned name
+#     when libxkbcommon-x11.so.0 is absent, no libgcc_s, and no upstream core installer (the store
 #     installs herdr-core). The app's own updater is off already: only upstream's release
 #     packaging sets HERDR_APP_RELEASE;
 #   - four crates.io crates the port patches (0002-herdr-app-<crate>.patch), fetched and checked

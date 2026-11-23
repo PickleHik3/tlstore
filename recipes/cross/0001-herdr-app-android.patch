@@ -3063,3 +3063,21 @@ index 7f44289..a282318 100644
  mod mmap_result_tests {
      use super::{nonnull_mmap_address_or_cleanup, CodeMemoryError};
      use std::ffi::c_void;
+diff --git a/vendor/gpui-pre-linux/src/linux/x11/xkb.rs b/vendor/gpui-pre-linux/src/linux/x11/xkb.rs
+index dfaa04d..a184501 100644
+--- a/vendor/gpui-pre-linux/src/linux/x11/xkb.rs
++++ b/vendor/gpui-pre-linux/src/linux/x11/xkb.rs
+@@ -22,7 +22,12 @@ pub(super) struct XkbX11 {
+ impl XkbX11 {
+     pub(super) fn load() -> Result<Self> {
+         unsafe {
+-            let library = NonNull::new(libc::dlopen(c"libxkbcommon-x11.so.0".as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL))
++            // Termux ships its libraries without the soname's version suffix.
++            let mut library = libc::dlopen(c"libxkbcommon-x11.so.0".as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL);
++            if library.is_null() {
++                library = libc::dlopen(c"libxkbcommon-x11.so".as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL);
++            }
++            let library = NonNull::new(library)
+                 .context("X11 needs libxkbcommon-x11.so.0; install libxkbcommon-x11-0 (Ubuntu/Debian) or libxkbcommon-x11 (Fedora/Arch)")?;
+             let symbols = (|| {
+                 Ok(Self {
