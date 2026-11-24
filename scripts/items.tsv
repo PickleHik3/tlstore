@@ -113,10 +113,10 @@
 #               digest for `readme` and for `demo`) alongside it the same way
 #               it already computes picture-digest for `picture`.
 #
-# Fifteen items are visible, in the order they appear here: btop, claude-code,
+# Sixteen items are visible, in the order they appear here: btop, claude-code,
 # codex, dawn, fastfetch, fish-shell, kitten, opencode, herdr, herdr-gui,
 # herdr-nightglass, tuios, sigye,
-# terminal-browser, termux-api-shims.
+# terminal-browser, termux-api-shims, mesa-wayland-egl.
 # Everything else is
 # hidden=1 — a part another item pulls in, never listed and never installed by
 # name.
@@ -201,4 +201,4 @@ termux-api-shim-torch	file	98bac296	*	binaries:shims/termux-api/termux-torch@98b
 termux-api-shim-vibrate	file	98bac296	*	binaries:shims/termux-api/termux-vibrate@98bac2968cba00166609dee25d4e2665b21a38db	~/.local/bin/termux-vibrate	-	hidden=1;mode=755;host=launcher;conflicts=termux-api	The termux-vibrate command.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
 termux-api-shim-volume	file	98bac296	*	binaries:shims/termux-api/termux-volume@98bac2968cba00166609dee25d4e2665b21a38db	~/.local/bin/termux-volume	-	hidden=1;mode=755;host=launcher;conflicts=termux-api	The termux-volume command.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
 termux-api-shim-wallpaper	file	98bac296	*	binaries:shims/termux-api/termux-wallpaper@98bac2968cba00166609dee25d4e2665b21a38db	~/.local/bin/termux-wallpaper	-	hidden=1;mode=755;host=launcher;conflicts=termux-api	The termux-wallpaper command.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
-mesa-wayland-egl	archive	26.3.1+tl.1	com.termux	binaries:mesa-wayland-egl@bins-2026.11.24	/data/data/com.termux/files/usr/opt/tl-mesa-wayland	-	exe=bin/tl-mesa-wayland;command=tl-mesa-wayland;hidden=1;host=launcher	Lets Linux apps draw with the graphics chip under Wayland Display.	-	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
+mesa-wayland-egl	archive	26.3.1+tl.1	com.termux	binaries:mesa-wayland-egl@bins-2026.11.24	/data/data/com.termux/files/usr/opt/tl-mesa-wayland	-	exe=bin/tl-mesa-wayland;command=tl-mesa-wayland;host=launcher	Lets Linux apps use the graphics chip under Wayland Display.	Tools	-	0	-	-	-	-	-	-	-	-	-	-	-	0	-	-
