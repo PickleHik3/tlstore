@@ -46,10 +46,10 @@
 # NDK, Node 22 or later, pnpm 10.13.1 (the fork's packageManager), git, curl, GNU tar, gzip.
 set -euo pipefail
 
-TB_UPSTREAM=v0.13.4                 # the upstream release the fork's tl branch is built on
-TB_VERSION=$TB_UPSTREAM+c140fc1     # ... plus the fork's commit
+TB_UPSTREAM=v0.16.1                 # the upstream release the fork's tl branch is built on
+TB_VERSION=$TB_UPSTREAM+7278a15     # ... plus the fork's commit
 TB_URL="https://github.com/PickleHik3/terminal-browser.git"
-TB_COMMIT="c140fc182ee6bfecf8a02547aa61f563decd4daf"   # tl: v0.13.4 (fd5f179) + Android, the launcher as a terminal, site mode, touch
+TB_COMMIT="7278a156155eec39839d258bec04fadbbb58abd1"   # tl: v0.16.1 (a47886a) + Android, the launcher as a terminal, site mode, touch
 TB_PNPM=10.13.1
 AB_VERSION=v0.38.1
 AB_URL="https://github.com/vercel-labs/agent-browser.git"
@@ -221,7 +221,7 @@ cp -a "$rel/browser/dist" "$stage/browser/dist"
 cp -p "$tb_src/scripts/apparmor.sh" "$stage/scripts/apparmor.sh"
 cp -R "$tb_src/skill/build" "$stage/skills"
 cp "$tb_src/assets/fonts/JetBrainsMono-Regular.ttf" "$stage/assets/fonts/"
-for dir in react-grab search chromium; do
+for dir in react-grab search; do
     mkdir -p "$stage/assets/$dir"
     cp "$tb_src/assets/$dir/"* "$stage/assets/$dir/"
 done

@@ -249,7 +249,7 @@ Device-verified 2026-08-16 on Pong (A065, Android 16), running inside the launch
   `generate-skill.sh`, `copy-react-grab.sh` — and stages the tree as release.sh does, without
   electron or agent-browser. Needs Node 22+ and pnpm 10.13.1. At v0.13.4 the result matches
   upstream's Linux tarball byte for byte, but for the pieces replaced below. `VERSION` stays
-  upstream's (`v0.13.4`): the browser compares it with upstream's latest release.
+  upstream's (`v0.16.1`): the browser compares it with upstream's latest release.
 - Runs on Termux's `electron42` (42.x, x11 repository), not upstream's patched Electron 44, which is
   glibc. `electron/pixel` is a two-line script that execs `$PREFIX/lib/electron42/electron`.
 - `pixel.node` is the fork's, built for Android: no clipboard image paste (arboard
