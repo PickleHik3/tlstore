@@ -5175,6 +5175,205 @@ if [ "$(uw_ver herdr-gui)" = "0.1.101+5555555.0" ]; then pass; else fail "a +<co
 if [ "$(uw_ver herdr-core)" = "0.1.18+9ce385d.3" ]; then pass; else fail "the other row is untouched" "$(uw_ver herdr-core)"; fi
 rm -rf "$UW"
 
+# --- upstream-notes.sh: which items, which releases are new, the rating, Discord, the dedupe ---
+# The script runs from a copy of the tree with a fixture items.tsv and an upstream-watch.sh that
+# only knows --list. gh and curl are stubs that answer from files: releases, tags and compare
+# results per repository, the issue "Upstream notes" as one file, NanoGPT's replies in sequence,
+# and a record of every Discord post. Nothing reaches the network.
+echo
+echo "== upstream-notes.sh"
+SHELL_LABEL=upstream-notes
+UN="$(mktemp -d)"
+mkdir -p "$UN/scripts" "$UN/bin" "$UN/fx"
+cp "$repo/scripts/upstream-notes.sh" "$UN/scripts/"
+printf '#!/bin/sh\n[ "$1" = --list ] && printf "watched\\nother-watched\\n"\n' > "$UN/scripts/upstream-watch.sh"
+un_row() { printf '%s\t%s\t%s\t*\t%s\t-\t-\t-\t%s\tTools\t%s\n' "$1" "$2" "$3" "$4" "$5" "$6"; }
+{
+    printf '# a comment line\n'
+    un_row alpha binary 1.2.0+abc1234.1 binaries:alpha@bins-1 "Alpha, a thing." org/alpha
+    un_row alpha binary 1.2.0+abc1234.1 binaries:alpha-ed@bins-1 "Alpha, a thing." org/alpha
+    un_row beta archive v0.5.0 binaries:beta@bins-1 "Beta." org/beta
+    un_row gamma binary 1.0 binaries:gamma@bins-1 "No upstream." -
+    un_row delta pkg - delta "A pkg." org/delta
+    un_row eps npm-musl latest npm:eps#eps "Follows npm." org/eps
+    un_row watched binary 1.0 binaries:watched@bins-1 "Auto-bumped." org/watched
+    un_row zeta archive 1.0 binaries:zeta@bins-1 "Nothing published." org/zeta
+} > "$UN/scripts/items.tsv"
+cat > "$UN/bin/gh" <<'GHEOF'
+#!/bin/sh
+echo "gh $*" >> "$UN_FX/gh.log"
+case "$1 $2" in
+    "api --paginate")
+        r="${3#repos/}"; r="${r%\?per_page=100}"
+        case "$r" in
+            */releases) f="$UN_FX/$(echo "${r%/releases}" | tr / _).releases" ;;
+            */tags) f="$UN_FX/$(echo "${r%/tags}" | tr / _).tags" ;;
+        esac
+        case "$r" in
+            */releases) [ -f "$f" ] || f="$UN_FX/empty.json"; jq -c "$5" "$f" ;;
+            *) [ -f "$f" ] || exit 0; jq -r "$5" "$f" ;;
+        esac ;;
+    "api repos/"*)
+        c="${2#repos/}"; c="${c#*/compare/}"
+        f="$UN_FX/compare.$(echo "$c" | tr / _)"
+        [ -f "$f" ] || exit 1
+        jq -r "$4" "$f" ;;
+    "issue list") [ -f "$UN_FX/issue" ] && echo 7 ;;
+    "issue view") cat "$UN_FX/issue" ;;
+    "issue create"|"issue edit")
+        while [ $# -gt 0 ]; do [ "$1" = --body-file ] && cp "$2" "$UN_FX/issue"; shift; done
+        echo "https://github.com/x/y/issues/7" ;;
+    *) exit 1 ;;
+esac
+exit 0
+GHEOF
+cat > "$UN/bin/curl" <<'CURLEOF'
+#!/bin/sh
+out=""; cfg=""; data=""; url=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -o) out="$2"; shift ;;
+        --config) cfg="$(cat "$2")"; shift ;;
+        --data-binary) data="${2#@}"; shift ;;
+        -w|-X|-H|--max-time) shift ;;
+        -*) ;;
+        *) url="$1" ;;
+    esac
+    shift
+done
+if [ "$url" = "https://nano.test/v1" ]; then
+    n=$(( $(cat "$UN_FX/nano.n" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$UN_FX/nano.n"
+    cp "$data" "$UN_FX/nano.req.$n"
+    printf '%s\n' "$cfg" > "$UN_FX/nano.cfg.$n"
+    f="$UN_FX/nano.resp.$n"; [ -f "$f" ] || f="$UN_FX/nano.resp"
+    cp "$f" "$out"; echo 200
+else
+    n=$(( $(cat "$UN_FX/hook.n" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$UN_FX/hook.n"
+    cp "$data" "$UN_FX/hook.$n"
+    printf '%s' "$cfg" | grep -q 'hooks.test/secret' || { echo 000; exit 0; }
+    : > "$out"; cat "$UN_FX/hook.code" 2>/dev/null || echo 204
+fi
+CURLEOF
+chmod 755 "$UN/bin/gh" "$UN/bin/curl"
+echo '[]' > "$UN/fx/empty.json"
+cat > "$UN/fx/org_alpha.releases" <<'EOF'
+[
+ {"tag_name":"v1.3.0","html_url":"https://github.com/org/alpha/releases/tag/v1.3.0","body":"Fixes a crash on startup.\r\n","draft":false,"prerelease":false},
+ {"tag_name":"v1.10.0","html_url":"https://github.com/org/alpha/releases/tag/v1.10.0","body":"","draft":false,"prerelease":false},
+ {"tag_name":"v2.0.0-rc1","html_url":"https://github.com/org/alpha/releases/tag/v2.0.0-rc1","body":"rc","draft":false,"prerelease":true},
+ {"tag_name":"v1.9.0","html_url":"https://github.com/org/alpha/releases/tag/v1.9.0","body":"a draft","draft":true,"prerelease":false},
+ {"tag_name":"v1.11.0-beta","html_url":"https://github.com/org/alpha/releases/tag/v1.11.0-beta","body":"beta","draft":false,"prerelease":false},
+ {"tag_name":"nightly","html_url":"https://github.com/org/alpha/releases/tag/nightly","body":"n","draft":false,"prerelease":false},
+ {"tag_name":"v1.2.0","html_url":"https://github.com/org/alpha/releases/tag/v1.2.0","body":"ours","draft":false,"prerelease":false},
+ {"tag_name":"v1.1.0","html_url":"https://github.com/org/alpha/releases/tag/v1.1.0","body":"older","draft":false,"prerelease":false}
+]
+EOF
+printf '%s\n' '{"total_commits":3,"commits":[{"commit":{"message":"Speed up the parser\n\nlong body"}},{"commit":{"message":"Fix @everyone leak"}}]}' > "$UN/fx/compare.v1.3.0...v1.10.0"
+printf 'v0.6.0\n0.7.0\nv0.5.0\n0.8.0-rc1\njunk\n' | jq -R . | jq -s 'map({name: .})' > "$UN/fx/org_beta.tags"
+printf '%s\n' '{"total_commits":1,"commits":[{"commit":{"message":"Tag six"}}]}' > "$UN/fx/compare.v0.5.0...v0.6.0"
+printf '%s\n' '{"total_commits":1,"commits":[{"commit":{"message":"Tag seven"}}]}' > "$UN/fx/compare.v0.6.0...0.7.0"
+# un_src <code>: run <code> in a shell that has sourced the script, with the stubs and a work dir.
+un_src() {
+    OUT="$(UN_FX="$UN/fx" PATH="$UN/bin:$PATH" bash -c 'source "$1/scripts/upstream-notes.sh"; W="$(mktemp -d)"; '"$1" _ "$UN" 2>&1)"; ST=$?
+}
+
+un_src 'candidates | cut -f1,3,5'
+expect_status "candidates runs" 0
+if [ "$OUT" = "$(printf 'alpha\torg/alpha\tbinaries:alpha@bins-1\nbeta\torg/beta\tbinaries:beta@bins-1\nzeta\torg/zeta\tbinaries:zeta@bins-1')" ]; then pass
+else fail "candidates: upstream set, not pkg, not latest, not watched, one line per item"; fi
+un_src 'ours_of v1.2.0+abc.1; ours_of 0.13.4+c140fc1.1; ours_of 2.0'
+if [ "$OUT" = "$(printf '1.2.0\n0.13.4\n2.0')" ]; then pass; else fail "ours is the version before the +suffix, without a v"; fi
+
+un_src 'lookup org/alpha 1.2.0; echo "$LK_STATUS $LK_LATEST $LK_COUNT"; cat "$W/links"; cat "$W/notes"'
+if printf '%s\n' "$OUT" | head -1 | grep -qx 'new 1.10.0 2'; then pass; else fail "semver: 1.10.0 is latest, rc, draft, suffixed and non-version tags skipped" "$(printf '%s' "$OUT" | head -1)"; fi
+expect_out "the links are ascending, with their urls" "^v1.3.0	https://github.com/org/alpha/releases/tag/v1.3.0"
+expect_no_out "no prerelease or draft is listed" "v2.0.0-rc1\|v1.9.0\|v1.11.0-beta\|nightly\|v1.1.0"
+if printf '%s\n' "$OUT" | grep '^## v1.10.0$\|^## v1.3.0$' | tr '\n' ' ' | grep -qx '## v1.10.0 ## v1.3.0 '; then pass; else fail "notes are newest first"; fi
+expect_out "a body is kept" "Fixes a crash on startup"
+expect_out "an empty body becomes commit subjects since the previous release" "commit subjects since v1.3.0"
+expect_out "the first line of each message" "^- Speed up the parser$"
+expect_out "and a note when the compare API listed fewer commits" "1 more commits not listed"
+un_src 'lookup org/alpha 1.10.0; echo "$LK_STATUS"; lookup org/alpha v1.11.0; echo "$LK_STATUS"'
+if [ "$OUT" = "$(printf 'current\ncurrent')" ]; then pass; else fail "at or past the latest stable release is current"; fi
+un_src 'lookup org/beta 0.5.0; echo "$LK_STATUS $LK_LATEST $LK_COUNT"; cat "$W/links"; cat "$W/notes"'
+if printf '%s\n' "$OUT" | head -1 | grep -qx 'new 0.7.0 2'; then pass; else fail "a repo with no releases is read by its tags: v and bare, no suffix" "$(printf '%s' "$OUT" | head -1)"; fi
+expect_out "a tag's notes are its commit subjects" "^- Tag seven$"
+expect_out "from the previous tag" "commit subjects since v0.6.0"
+un_src 'lookup org/zeta 1.0; echo "$LK_STATUS"'
+if [ "$OUT" = none ]; then pass; else fail "no releases and no tags is none, not an error"; fi
+un_src 'NOTES_CAP=20; printf "%s" "0123456789012345678901234567890123456789" | cap_text; NOTES_CAP=100; printf abc | cap_text'
+if [ "$OUT" = "$(printf '01234567890123456789\n[... 20 more chars omitted]\nabc')" ]; then pass; else fail "the cap says how much it dropped, and leaves short text alone"; fi
+
+un_src 'is_marked alpha 1.3.0 "alpha 1.3.0 2026-01-01
+beta 0.7.0 2026-01-01" && echo y; is_marked alpha 1.4.0 "alpha 1.3.0 d" || echo n; is_marked al 1.3.0 "alpha 1.3.0 d" || echo n2'
+if [ "$OUT" = "$(printf 'y\nn\nn2')" ]; then pass; else fail "dedupe: a mark matches the item and the version exactly"; fi
+
+# The whole run, against the stubs.
+UN_NANO_GOOD='{"choices":[{"message":{"content":"```json\n{\"verdict\":\"rebuild-now\",\"summary\":\"Fixes a crash. @everyone <@999> see [x](http://evil) **bold**\",\"key_changes\":[\"a\",\"b\",\"c\",\"d\",\"e\",\"f\"]}\n```"}}]}'
+un_reset() { rm -f "$UN"/fx/nano.* "$UN"/fx/hook.* "$UN/fx/issue" "$UN/fx/gh.log"; : > "$UN/fx/summary"; }
+# un_run <args...>; the environment comes from UNENV, a list of VAR=value words.
+un_run() {
+    # shellcheck disable=SC2086
+    OUT="$(env -u NANOGPT_API_KEY -u DISCORD_WEBHOOK_URL -u DISCORD_USER_ID -u DRY_RUN $UNENV UN_FX="$UN/fx" GITHUB_STEP_SUMMARY="$UN/fx/summary" \
+        NANOGPT_URL=https://nano.test/v1 GITHUB_REPOSITORY=x/y PATH="$UN/bin:$PATH" bash "$UN/scripts/upstream-notes.sh" "$@" 2>&1)"; ST=$?
+}
+un_reset
+printf 'not json at all' > "$UN/fx/nano.resp.1"
+printf '%s' "$UN_NANO_GOOD" > "$UN/fx/nano.resp"
+UNENV="NANOGPT_API_KEY=sk-secret-key-123 DISCORD_WEBHOOK_URL=https://hooks.test/secret DISCORD_USER_ID=424242424242 NANOGPT_MODEL=m/x"
+un_run
+expect_status "a full run" 0
+if [ "$(cat "$UN/fx/nano.n")" = 3 ]; then pass; else fail "invalid JSON is asked for again once (alpha 2 tries, beta 1, none for current items)" "$(cat "$UN/fx/nano.n")"; fi
+if jq -e '.response_format and .model == "m/x"' "$UN/fx/nano.req.1" >/dev/null && jq -e 'has("response_format") | not' "$UN/fx/nano.req.2" >/dev/null; then pass
+else fail "the first try asks for a JSON object, the retry does not rely on it; the model is the variable"; fi
+if jq -e '.messages[1].content | contains("<release_notes>") and contains("Fixes a crash on startup") and contains("Alpha, a thing.") and contains("Termux") and contains("our own patches")' "$UN/fx/nano.req.1" >/dev/null; then pass
+else fail "the prompt: description, platform, fork, notes in a delimited block"; fi
+if grep -q 'sk-secret-key-123' "$UN/fx/nano.cfg.1" && ! grep -q 'sk-secret-key-123' "$UN/fx/nano.req.1" && ! printf '%s' "$OUT" | grep -q 'sk-secret-key-123' && ! grep -q 'sk-secret-key-123' "$UN/fx/summary"; then pass
+else fail "the key goes to curl in its config only, never into the body, the output or the summary"; fi
+if [ "$(cat "$UN/fx/hook.n")" = 2 ]; then pass; else fail "one Discord post per item with news" "$(cat "$UN/fx/hook.n" 2>/dev/null)"; fi
+if jq -e '.allowed_mentions == {"parse":[],"users":["424242424242"]} and (.content | startswith("<@424242424242>"))' "$UN/fx/hook.1" >/dev/null; then pass
+else fail "rebuild-now with DISCORD_USER_ID mentions only that user"; fi
+if jq -e '.embeds[0].description | (contains("<@") or contains("[x](") or contains("**bold**") or contains("@everyone")) | not' "$UN/fx/hook.1" >/dev/null &&
+    jq -e '.embeds[0].description | contains("Verdict: rebuild-now") and contains("Releases") and contains("v1.10.0") and (contains("- f") | not)' "$UN/fx/hook.1" >/dev/null; then pass
+else fail "the model's text cannot mention, link or format, at most 5 key changes, and links to the releases"; fi
+if jq -e '.embeds[0].title == "alpha: 1.2.0 → 1.10.0" and (.embeds[0].description | length) < 4096' "$UN/fx/hook.1" >/dev/null; then pass; else fail "the title says ours → theirs"; fi
+if grep -q '^<!-- notified alpha 1.10.0 ' "$UN/fx/issue" && grep -q '^<!-- notified beta 0.7.0 ' "$UN/fx/issue"; then pass; else fail "the issue records what Discord accepted"; fi
+if grep -q '| alpha | 1.2.0 | 1.10.0 | 2 new | rebuild-now | yes |' "$UN/fx/summary" && grep -q 'zeta.*skipped' "$UN/fx/summary"; then pass; else fail "the step summary has the table, with the skipped item's note"; fi
+un_run
+if [ "$(cat "$UN/fx/hook.n")" = 2 ] && [ "$(cat "$UN/fx/nano.n")" = 3 ]; then pass; else fail "a second run posts and rates nothing again"; fi
+if grep -q 'already notified' "$UN/fx/summary"; then pass; else fail "and says so"; fi
+
+# No key: unrated, with a warning. No webhook: summary only, nothing recorded.
+un_reset
+UNENV="DISCORD_WEBHOOK_URL=https://hooks.test/secret"
+un_run
+expect_out "no key warns" "NANOGPT_API_KEY is not set"
+if [ ! -e "$UN/fx/nano.n" ] && jq -e '.allowed_mentions == {"parse":[]} and (.embeds[0].description | contains("unrated"))' "$UN/fx/hook.1" >/dev/null; then pass
+else fail "no key: no model call, posted unrated, no mention"; fi
+un_reset
+printf '%s' "$UN_NANO_GOOD" > "$UN/fx/nano.resp"
+UNENV="NANOGPT_API_KEY=k"
+un_run
+expect_out "no webhook warns" "DISCORD_WEBHOOK_URL is not set"
+if [ ! -e "$UN/fx/hook.n" ] && [ ! -e "$UN/fx/issue" ] && grep -q '| alpha | 1.2.0 | 1.10.0 | 2 new | rebuild-now | no: no webhook |' "$UN/fx/summary"; then pass
+else fail "no webhook: summary only, and nothing recorded as notified"; fi
+# A failed POST leaves the item un-notified and turns the run red.
+un_reset
+printf '%s' "$UN_NANO_GOOD" > "$UN/fx/nano.resp"; echo 400 > "$UN/fx/hook.code"
+UNENV="NANOGPT_API_KEY=k DISCORD_WEBHOOK_URL=https://hooks.test/secret"
+un_run
+expect_status "a failed webhook POST fails the run" 1
+if [ ! -e "$UN/fx/issue" ]; then pass; else fail "and records nothing"; fi
+# Dry run: rates and prints, posts nothing, writes nothing.
+un_reset
+printf '%s' "$UN_NANO_GOOD" > "$UN/fx/nano.resp"
+UNENV="NANOGPT_API_KEY=k DISCORD_WEBHOOK_URL=https://hooks.test/secret"
+un_run --dry-run
+expect_status "--dry-run" 0
+if [ ! -e "$UN/fx/hook.n" ] && [ ! -e "$UN/fx/issue" ] && ! grep -q 'issue create\|issue edit' "$UN/fx/gh.log"; then pass; else fail "a dry run posts nothing and writes no issue"; fi
+expect_out "but rates and prints" '"verdict": "rebuild-now"'
+rm -rf "$UN"
+
 echo
 # ---------------------------------------------------------------------------
 # The Neovim colour scheme nvim-theme installs

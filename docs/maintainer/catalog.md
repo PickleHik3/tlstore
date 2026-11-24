@@ -277,6 +277,18 @@ on-device recipes under `recipes/termux` and `recipes/nix` are not moved either.
 item, add its line to the table (one of the pin shapes the script's header lists) and give its
 recipe that shape.
 
+## Upstream notes
+
+The items upstream-watch leaves alone (forks that need a hand merge: dawn, terminal-browser) are
+watched for news instead. `.github/workflows/upstream-notes.yml` runs once a day,
+`scripts/upstream-notes.sh` finds the upstream stable releases newer than the item's version, has a
+NanoGPT model rate them for the store's Android users (`rebuild-now`, `rebuild-soon`, `can-wait`)
+and posts one Discord embed per item. Each (item, upstream version) is posted once; the issue
+"Upstream notes" keeps that in hidden lines. Repository settings it reads: secrets
+`DISCORD_WEBHOOK_URL` and `NANOGPT_API_KEY`, variables `NANOGPT_MODEL` and `DISCORD_USER_ID`
+(optional; mentioned on `rebuild-now`). `scripts/upstream-notes.sh --dry-run` rates and prints
+without posting.
+
 ## x86_64
 
 A row's own columns describe its aarch64 build. On an x86_64 device tlstore reads three options

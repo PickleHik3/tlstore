@@ -1,0 +1,71 @@
+# Tells the developer in Discord when the upstream of a catalog item that is NOT auto-bumped
+# publishes a new stable release, with a model's rating of how much it matters to tlstore's
+# Android/Termux users. These are the items upstream-watch.yml leaves alone because each one is a
+# fork that needs a hand merge and a rebuild (today dawn and terminal-browser; herdr-nightglass has
+# no releases and is skipped with a note). Which items, how a release is judged new, the prompt and
+# the Discord message all live in scripts/upstream-notes.sh, which runs the same on a laptop.
+#
+#   look     every items.tsv row with an upstream, minus pkg and `latest` items and minus the ones
+#            scripts/upstream-watch.sh watches: the stable releases newer than the store's version
+#            (the tags, when the repo has no releases), their notes, or commit subjects when a
+#            release body is empty
+#   rate     NanoGPT (OpenAI-compatible, the developer's subscription), asked for JSON: verdict
+#            rebuild-now | rebuild-soon | can-wait, a summary, key changes. The notes are handed
+#            over as untrusted data. Invalid JSON is asked for once more, then the item is posted
+#            without a rating
+#   post     one Discord embed per item; the developer is mentioned only for rebuild-now and only
+#            when DISCORD_USER_ID is set; the model's text is escaped
+#   remember the issue "Upstream notes" keeps one hidden line per (item, upstream version), so
+#            each is posted once. A version is recorded only after Discord accepted the post
+#
+# The result table is always the run's step summary. A manual run (Actions tab, or
+# `gh workflow run upstream-notes.yml`) can ask for dry_run: rate and print, post nothing, write no
+# issue.
+#
+# Needs, in Settings > Secrets and variables > Actions:
+#   secret    DISCORD_WEBHOOK_URL   the channel's webhook. Without it the run only writes the summary
+#                                   and records nothing as notified
+#   secret    NANOGPT_API_KEY       without it items are posted unrated
+#   variable  NANOGPT_MODEL         optional, default deepseek/deepseek-v4.1-flash
+#   variable  DISCORD_USER_ID       optional, the numeric id to mention on a rebuild-now verdict
+# GitHub turns a schedule off in a repository that has seen no activity for 60 days; the Actions
+# tab turns it back on.
+name: upstream-notes
+
+on:
+  schedule:
+    # An hour and a half after upstream-watch.yml (04:41), so the two never read GitHub together.
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Rate and print only: no Discord post, no issue writes"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-notes
+  cancel-in-progress: false
+
+jobs:
+  notes:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      NANOGPT_API_KEY: ${{ secrets.NANOGPT_API_KEY }}
+      NANOGPT_MODEL: ${{ vars.NANOGPT_MODEL }}
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      DISCORD_USER_ID: ${{ vars.DISCORD_USER_ID }}
+      DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+      - name: Look, rate, post
+        run: scripts/upstream-notes.sh
