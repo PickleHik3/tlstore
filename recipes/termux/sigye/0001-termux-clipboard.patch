@@ -1,5 +1,5 @@
 diff --git a/crates/sigye/Cargo.toml b/crates/sigye/Cargo.toml
-index 43920a4..bfd51aa 100644
+index 478dfdb..b8837f2 100644
 --- a/crates/sigye/Cargo.toml
 +++ b/crates/sigye/Cargo.toml
 @@ -27,6 +27,8 @@ serde.workspace = true
@@ -9,16 +9,16 @@ index 43920a4..bfd51aa 100644
 +
 +[target.'cfg(not(target_os = "android"))'.dependencies]
  arboard.workspace = true
-
- [lints]
+ 
+ [target.'cfg(unix)'.dev-dependencies]
 diff --git a/crates/sigye/src/modes/clock.rs b/crates/sigye/src/modes/clock.rs
-index 3eeb369..f73cad0 100644
+index defd972..5283822 100644
 --- a/crates/sigye/src/modes/clock.rs
 +++ b/crates/sigye/src/modes/clock.rs
 @@ -19,6 +19,39 @@ use crate::render::{self, AsciiTextParams};
  /// Duration in milliseconds for toast visibility.
  const TOAST_DURATION_MS: u128 = 2000;
-
+ 
 +#[cfg(not(target_os = "android"))]
 +fn copy_to_clipboard(text: &str) -> bool {
 +    arboard::Clipboard::new()
@@ -55,7 +55,7 @@ index 3eeb369..f73cad0 100644
  /// Clock display mode — shows the current time as big ASCII art.
  pub struct ClockMode {
      pub last_second: u32,
-@@ -404,18 +437,20 @@ impl Mode for ClockMode {
+@@ -384,18 +417,20 @@ impl Mode for ClockMode {
              }
              KeyCode::Char('u') => {
                  let ts = Local::now().timestamp().to_string();

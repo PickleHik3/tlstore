@@ -1,5 +1,5 @@
 diff --git a/Cargo.lock b/Cargo.lock
-index 2d14877..55516c9 100644
+index 39102fc..c9be02f 100644
 --- a/Cargo.lock
 +++ b/Cargo.lock
 @@ -3265,8 +3265,6 @@ dependencies = [
@@ -55,7 +55,7 @@ index 2d14877..55516c9 100644
   "anyhow",
   "cocoa 0.25.0",
 diff --git a/Cargo.toml b/Cargo.toml
-index 2094e45..2a3cd51 100644
+index f935250..7ce9ea7 100644
 --- a/Cargo.toml
 +++ b/Cargo.toml
 @@ -1,6 +1,6 @@
@@ -152,10 +152,10 @@ index 63e6a1b..20cbcba 100644
          // With a clang installed, bindgen asks it for its own builtin headers,
          // which match its libclang; Zig's newer ones break older ones (Ubuntu
 diff --git a/defaults/AGENTS.md b/defaults/AGENTS.md
-index 893849b..b2b68dd 100644
+index 75ab98a..f62119e 100644
 --- a/defaults/AGENTS.md
 +++ b/defaults/AGENTS.md
-@@ -279,6 +279,16 @@ Properties any node can have:
+@@ -290,6 +290,16 @@ Properties any node can have:
  - Root only: `"link_handlers": ["my-browser", "my-viewer"]` chooses which mods
    handle Ctrl-clicks (Cmd-clicks on macOS) in terminals, in order. Clone a
    shipped layout before adding link handlers.
@@ -173,10 +173,10 @@ index 893849b..b2b68dd 100644
    (Herdr's own and every `notify()`), in place of the shipped `toast`; an
    unknown mod logs a warning and falls back to `toast`. It gets the same
 diff --git a/defaults/herdr.d.ts b/defaults/herdr.d.ts
-index a01ddea..e1741ba 100644
+index 2a179b2..36214b9 100644
 --- a/defaults/herdr.d.ts
 +++ b/defaults/herdr.d.ts
-@@ -276,6 +276,14 @@ export function focused(): ({ space: string; tab: string; pane: string | null; t
+@@ -284,6 +284,14 @@ export function focused(): ({ space: string; tab: string; pane: string | null; t
  /** The shown layout (layouts/<name>.json). Its name is shared("layout").
   *  Root `terminal_menu?: string` chooses a terminal right-click menu mod (default: "menu").
   *  Unknown names warn and fall back to "menu". This replaces the menu, not its items.
@@ -192,10 +192,10 @@ index a01ddea..e1741ba 100644
   *  Root `link_handlers?: string[]` selects terminal link mods in order. */
  export function layout(): unknown;
 diff --git a/src/commands.rs b/src/commands.rs
-index 1819542..12c30c2 100644
+index 0538156..9744ff1 100644
 --- a/src/commands.rs
 +++ b/src/commands.rs
-@@ -102,6 +102,9 @@ pub const COMMANDS: &[Command] = &[
+@@ -103,6 +103,9 @@ pub const COMMANDS: &[Command] = &[
      cmd("app.zoom_in", &[], "Make everything bigger."),
      cmd("app.zoom_out", &[], "Make everything smaller."),
      cmd("app.zoom_reset", &[], "Back to normal size."),
@@ -206,10 +206,10 @@ index 1819542..12c30c2 100644
      cmd("app.quit", &[], "Quit (macOS)."),
      cmd("app.hide", &[], "Hide the app (macOS)."),
 diff --git a/src/core_bin.rs b/src/core_bin.rs
-index 13d9321..7593dc9 100644
+index ca8cd51..f82078b 100644
 --- a/src/core_bin.rs
 +++ b/src/core_bin.rs
-@@ -209,6 +209,10 @@ fn login_path_answer(out: &str) -> Option<std::ffi::OsString> {
+@@ -211,6 +211,10 @@ fn login_path_answer(out: &str) -> Option<std::ffi::OsString> {
  /// Installs the core's latest release with its own installer (into
  /// ~/.local/bin, or HC_INSTALL_DIR), then finds it. Err: what went wrong.
  pub fn install() -> Result<PathBuf, String> {
@@ -351,10 +351,10 @@ index ff6b2f4..ab546c9 100644
      fn linux_help_binding_matches_shifted_slash() {
          // Linux reports Ctrl+Shift+/ as Ctrl+? without the Shift modifier.
 diff --git a/src/layout.rs b/src/layout.rs
-index 81de48d..7af8dd4 100644
+index f9dd7f1..823dc52 100644
 --- a/src/layout.rs
 +++ b/src/layout.rs
-@@ -400,6 +400,37 @@ pub struct Node {
+@@ -428,6 +428,37 @@ pub struct Node {
      /// colors with alpha show the desktop through frosted glass.
      #[serde(default, skip_serializing_if = "is_false")]
      pub window_blur: bool,
@@ -392,7 +392,7 @@ index 81de48d..7af8dd4 100644
  }
  
  #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-@@ -440,6 +471,7 @@ impl Node {
+@@ -468,6 +499,7 @@ impl Node {
              toast: None,
              window_drag: false,
              window_blur: false,
@@ -401,10 +401,10 @@ index 81de48d..7af8dd4 100644
      }
  
 diff --git a/src/links.rs b/src/links.rs
-index 5de7719..ec7154c 100644
+index 31b6068..ee12d49 100644
 --- a/src/links.rs
 +++ b/src/links.rs
-@@ -585,7 +585,7 @@ mod tests {
+@@ -719,7 +719,7 @@ mod tests {
          std::fs::remove_dir_all(dir).unwrap();
      }
  
@@ -414,10 +414,10 @@ index 5de7719..ec7154c 100644
      fn a_non_utf8_path_is_null_in_the_payload_and_exact_for_a_pass() {
          use std::os::unix::ffi::OsStringExt;
 diff --git a/src/mods.rs b/src/mods.rs
-index 1b8d269..d09b4a9 100644
+index d027e43..48e89e6 100644
 --- a/src/mods.rs
 +++ b/src/mods.rs
-@@ -1682,7 +1682,7 @@ mod tests {
+@@ -1971,7 +1971,7 @@ mod tests {
  
      #[test]
      fn shared_bursts_persist_only_complete_snapshots_and_finish_at_final_state() {
@@ -426,7 +426,7 @@ index 1b8d269..d09b4a9 100644
          let dir = root.join(format!("herdr-shared-stress-{}", std::process::id()));
          std::fs::create_dir_all(&dir).unwrap();
          let path = dir.join("shared.json");
-@@ -1723,7 +1723,7 @@ mod tests {
+@@ -2012,7 +2012,7 @@ mod tests {
  
      #[test]
      fn corrupt_shared_file_is_kept_before_starting_empty() {
@@ -489,7 +489,7 @@ index cc506be..6280cd2 100644
          std::fs::create_dir_all(dir.join("rc")).unwrap();
          let script = |name: &str, body: &str| {
 diff --git a/src/settings.rs b/src/settings.rs
-index 7e7ac80..3cc51db 100644
+index 74ac67e..d925014 100644
 --- a/src/settings.rs
 +++ b/src/settings.rs
 @@ -369,6 +369,10 @@ fn resolve(p: &Palette, overrides: &BTreeMap<String, String>) -> Theme {
@@ -503,7 +503,7 @@ index 7e7ac80..3cc51db 100644
      pub sounds: Sounds,
      /// The herdr-core to use, when it isn't where Herdr looks (core_bin.rs).
      #[serde(skip_serializing_if = "Option::is_none")]
-@@ -454,10 +458,15 @@ fn is_true(b: &bool) -> bool {
+@@ -457,10 +461,15 @@ fn is_true(b: &bool) -> bool {
      *b
  }
  
@@ -519,7 +519,7 @@ index 7e7ac80..3cc51db 100644
              sounds: Sounds::default(),
              core: None,
              font: None,
-@@ -501,6 +510,8 @@ pub struct Settings {
+@@ -507,6 +516,8 @@ pub struct Settings {
      pub ui_font_size: f32,
      /// How big the whole app is drawn (1 = as designed). The zoom keys change it.
      pub zoom: f32,
@@ -528,7 +528,7 @@ index 7e7ac80..3cc51db 100644
      /// The theme showing: a preset or a file in themes/.
      pub theme: String,
      /// The layout's theme for each appearance (the same one twice when it names one).
-@@ -555,6 +566,7 @@ impl Default for Settings {
+@@ -562,6 +573,7 @@ impl Default for Settings {
              ui_font_family: "Geist".into(),
              ui_font_size: 13.0,
              zoom: 1.0,
@@ -536,7 +536,7 @@ index 7e7ac80..3cc51db 100644
              theme: DEFAULT_DARK.into(),
              theme_light: DEFAULT_LIGHT.into(),
              theme_dark: DEFAULT_DARK.into(),
-@@ -598,6 +610,7 @@ impl Settings {
+@@ -606,6 +618,7 @@ impl Settings {
              ui_font_family: look.ui_font.clone().or(person.ui_font.clone()).unwrap_or(d.ui_font_family),
              ui_font_size: d.ui_font_size,
              zoom: person.zoom,
@@ -544,7 +544,7 @@ index 7e7ac80..3cc51db 100644
              theme: if dark { theme_dark.clone() } else { theme_light.clone() },
              theme_light,
              theme_dark,
-@@ -679,6 +692,8 @@ thread_local! {
+@@ -689,6 +702,8 @@ thread_local! {
  
  const ZOOM_MIN: f32 = 0.5;
  const ZOOM_MAX: f32 = 3.0;
@@ -553,7 +553,7 @@ index 7e7ac80..3cc51db 100644
  
  pub fn get() -> Rc<Settings> {
      CURRENT.with(|c| c.borrow().0.clone())
-@@ -710,6 +725,9 @@ pub fn load_person() -> Result<Person, String> {
+@@ -720,6 +735,9 @@ pub fn load_person() -> Result<Person, String> {
      if !(ZOOM_MIN..=ZOOM_MAX).contains(&person.zoom) {
          return Err(format!("zoom {} is outside {ZOOM_MIN}..{ZOOM_MAX}", person.zoom));
      }
@@ -563,7 +563,7 @@ index 7e7ac80..3cc51db 100644
      Ok(person)
  }
  
-@@ -795,7 +813,7 @@ fn system_text_scale() -> f32 {
+@@ -805,7 +823,7 @@ fn system_text_scale() -> f32 {
              .and_then(|o| o.split_whitespace().last().and_then(|h| u32::from_str_radix(h.trim_start_matches("0x"), 16).ok()))
              .map_or(1.0, |p| p as f32 / 100.0);
      }
@@ -572,7 +572,7 @@ index 7e7ac80..3cc51db 100644
          return run("gsettings", &["get", "org.gnome.desktop.interface", "text-scaling-factor"]).and_then(|o| o.trim().parse().ok()).unwrap_or(1.0);
      }
      1.0
-@@ -818,8 +836,20 @@ pub fn z(v: f32) -> Pixels {
+@@ -828,8 +846,20 @@ pub fn z(v: f32) -> Pixels {
      px(v * zoom())
  }
  
@@ -617,7 +617,7 @@ index b3e2373..5b8fe94 100644
      fn rendered_rounded_corners_join_straight_lines() {
          use gpui::{prelude::*, *};
 diff --git a/src/terminal.rs b/src/terminal.rs
-index 7375fb4..9b17ca1 100644
+index 31446ec..663972d 100644
 --- a/src/terminal.rs
 +++ b/src/terminal.rs
 @@ -80,6 +80,10 @@ pub enum TerminalEvent {
@@ -631,7 +631,7 @@ index 7375fb4..9b17ca1 100644
  }
  
  /// Rows of scrollback history as Ghostty's scrollbar reports them. `from_bottom`
-@@ -179,6 +183,10 @@ pub struct TerminalView {
+@@ -181,6 +185,10 @@ pub struct TerminalView {
      typed_at: Cell<Option<Instant>>,
      /// Scrolled this gesture, in lines, toward the next whole one.
      scrolled: Point<f32>,
@@ -642,7 +642,7 @@ index 7375fb4..9b17ca1 100644
      /// Search UI and query belong to this terminal view, not the window. Each
      /// terminal in a tab therefore keeps its own query and match position.
      search_open: bool,
-@@ -346,6 +354,8 @@ impl TerminalView {
+@@ -349,6 +357,8 @@ impl TerminalView {
              shown_in: Cell::new(0),
              typed_at: Cell::new(None),
              scrolled: point(0.0, 0.0),
@@ -651,7 +651,7 @@ index 7375fb4..9b17ca1 100644
              search_open: false,
              search_keys: false,
              search_query: String::new(),
-@@ -571,11 +581,11 @@ impl TerminalView {
+@@ -574,11 +584,11 @@ impl TerminalView {
                          if let Some(text) = clipboard {
                              cx.write_to_clipboard(ClipboardItem::new_string(text));
                          }
@@ -665,7 +665,7 @@ index 7375fb4..9b17ca1 100644
                          let _ = primary;
                          if let Some(ch) = g.channel {
                              g.core.credit(ch, bytes.len());
-@@ -836,13 +846,13 @@ impl TerminalView {
+@@ -839,13 +849,13 @@ impl TerminalView {
              return false;
          };
          cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
@@ -681,7 +681,7 @@ index 7375fb4..9b17ca1 100644
          if let Some(text) = self.grid.borrow().vt.selection_text() {
              _cx.write_to_primary(ClipboardItem::new_string(text));
          }
-@@ -1036,8 +1046,33 @@ impl TerminalView {
+@@ -1039,8 +1049,33 @@ impl TerminalView {
          }
      }
  
@@ -716,7 +716,7 @@ index 7375fb4..9b17ca1 100644
          let mut g = self.grid.borrow_mut();
          let steps = scroll_delta_steps(&mut self.scrolled, ev.delta, ev.touch_phase, g.cell, g.vt.cols, g.vt.rows, crate::settings::get().terminal_scroll_speed);
          let n = steps.y.unsigned_abs() as usize;
-@@ -2516,7 +2551,9 @@ impl Render for TerminalView {
+@@ -2533,7 +2568,9 @@ impl Render for TerminalView {
              .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.dropped(paths.paths().to_vec(), cx)))
              .on_drop(cx.listener(Self::dropped_from_mod))
              .on_scroll_wheel(cx.listener(Self::scroll))
@@ -726,7 +726,7 @@ index 7375fb4..9b17ca1 100644
              .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
                  if !hovered {
                      this.grid.borrow_mut().hover = None;
-@@ -2586,7 +2623,7 @@ impl Render for TerminalView {
+@@ -2603,7 +2640,7 @@ impl Render for TerminalView {
              .on_mouse_down(MouseButton::Middle, cx.listener(|this, ev: &MouseDownEvent, _, _cx| {
                  if !this.mouse(GHOSTTY_MOUSE_ACTION_PRESS, Some(ev.button), ev.position, ev.modifiers) {
                      // macOS has no PRIMARY selection, so an unclaimed middle-click does nothing.
@@ -735,7 +735,7 @@ index 7375fb4..9b17ca1 100644
                      if let Some(text) = _cx.read_from_primary().and_then(|item| item.text()).filter(|text| !text.is_empty()) {
                          let bytes = this.grid.borrow().vt.paste_bytes(&text);
                          this.send(&bytes);
-@@ -3152,7 +3189,7 @@ mod tests {
+@@ -3241,7 +3278,7 @@ mod tests {
              cx.write_to_clipboard(ClipboardItem::new_string("untouched".into()));
              terminal.selection_command("terminal.select", &serde_json::json!({"at": {"row": 0, "col": 1}, "mode": "line"}), cx).unwrap();
              assert_eq!(cx.read_from_clipboard().unwrap().text().as_deref(), Some("untouched"));
@@ -744,7 +744,7 @@ index 7375fb4..9b17ca1 100644
              assert_eq!(cx.read_from_primary().unwrap().text().as_deref(), Some("hello world"));
              assert!(terminal.copy(cx));
              assert_eq!(cx.read_from_clipboard().unwrap().text().as_deref(), Some("hello world"));
-@@ -3686,7 +3723,7 @@ mod tests {
+@@ -3775,7 +3812,7 @@ mod tests {
  
      // The native macOS text system is private to GPUI; creating MacPlatform here
      // requires the main thread. Exercise real shaping directly on Linux instead.
@@ -753,7 +753,7 @@ index 7375fb4..9b17ca1 100644
      #[test]
      fn ligatures_change_glyphs_without_moving_terminal_cells() {
          use super::*;
-@@ -3730,7 +3767,7 @@ mod tests {
+@@ -3819,7 +3856,7 @@ mod tests {
          crate::settings::set((*original).clone());
      }
  
@@ -762,7 +762,7 @@ index 7375fb4..9b17ca1 100644
      #[test]
      fn ghostty_cells_and_clusters_at_fractional_scales() {
          use super::*;
-@@ -3845,7 +3882,7 @@ mod tests {
+@@ -3934,7 +3971,7 @@ mod tests {
          }
      }
  
@@ -771,7 +771,7 @@ index 7375fb4..9b17ca1 100644
      #[test]
      fn fallback_symbols_fit_their_terminal_cells_pixels() {
          use super::*;
-@@ -4070,11 +4107,11 @@ mod tests {
+@@ -4159,11 +4196,11 @@ mod tests {
          let drag = |root: &Entity<Root>, cx: &mut VisualTestContext| {
              root.update(cx, |root, cx| {
                  root.0.update(cx, |terminal, cx| {
@@ -785,7 +785,7 @@ index 7375fb4..9b17ca1 100644
                      assert_eq!(cx.read_from_primary().and_then(|item| item.text()), primary);
                      terminal.select(super::Select::Release, point(px(31.), px(1.)), cx);
                  });
-@@ -4090,15 +4127,15 @@ mod tests {
+@@ -4179,15 +4216,15 @@ mod tests {
          crate::settings::set(settings);
          cx.update(|_, app| {
              app.write_to_clipboard(ClipboardItem::new_string("unchanged".into()));
@@ -804,7 +804,7 @@ index 7375fb4..9b17ca1 100644
              assert_eq!(app.read_from_primary().unwrap().text().as_deref(), Some(selected.as_str()));
          });
          let selected = root.update(cx, |root, cx| {
-@@ -4111,7 +4148,7 @@ mod tests {
+@@ -4200,7 +4237,7 @@ mod tests {
          });
          cx.update(|_, app| {
              assert_eq!(app.read_from_clipboard().unwrap().text().as_deref(), Some(selected.as_str()));
@@ -814,7 +814,7 @@ index 7375fb4..9b17ca1 100644
              app.write_to_clipboard(ClipboardItem::new_string("unchanged".into()));
          });
 diff --git a/src/vt.rs b/src/vt.rs
-index f86d38f..9ca5dc0 100644
+index 28bf756..1bfc37a 100644
 --- a/src/vt.rs
 +++ b/src/vt.rs
 @@ -423,7 +423,7 @@ unsafe extern "C" fn on_clipboard_write(_t: GhosttyTerminal, userdata: *mut c_vo
@@ -826,7 +826,7 @@ index f86d38f..9ca5dc0 100644
          _ => return,
      };
      let text = if request.contents_len == 0 {
-@@ -2460,7 +2460,7 @@ mod tests {
+@@ -2498,7 +2498,7 @@ mod tests {
          assert_eq!(vt.selection_text(), None, "a plain click clears select-all too");
      }
  
@@ -835,7 +835,7 @@ index f86d38f..9ca5dc0 100644
      #[test]
      #[ignore = "manual 64 MiB scrollback performance check"]
      fn select_all_large_scrollback() {
-@@ -2887,7 +2887,7 @@ mod tests {
+@@ -2925,7 +2925,7 @@ mod tests {
              assert_eq!(vt.take_clipboard(), [Some("hi".into()), None]);
          }
          vt.write(b"\x1b]52;p;aGk=\x07");
@@ -844,7 +844,7 @@ index f86d38f..9ca5dc0 100644
          assert_eq!(vt.take_clipboard(), [None, expected]);
          for sequence in [b"\x1b]52;c;?\x07".as_slice(), b"\x1b]52;c;%%%\x07", b"\x1b]52;c;/w==\x07", b"\x1b]52;s;aGk=\x07"] {
              vt.write(sequence);
-@@ -2911,7 +2911,7 @@ mod tests {
+@@ -2949,7 +2949,7 @@ mod tests {
          vt.write(b"\x1b]52;c;YQ==\x07\x1b]52;c;\x07");
          assert_eq!(vt.take_clipboard(), [Some(String::new()), None]);
          vt.write(b"\x1b]52;p;\x1b\\");
@@ -854,10 +854,10 @@ index f86d38f..9ca5dc0 100644
      }
  
 diff --git a/src/window.rs b/src/window.rs
-index c7e896b..e3e5918 100644
+index 6372535..e4f6e5a 100644
 --- a/src/window.rs
 +++ b/src/window.rs
-@@ -1584,6 +1584,20 @@ impl AppWindow {
+@@ -1609,6 +1609,20 @@ impl AppWindow {
                  }
                  TerminalEvent::SelectionChanged => this.publish_selection(&addr, window, cx),
                  TerminalEvent::Ended => this.terminal_ended(&block, window, cx),
@@ -878,7 +878,7 @@ index c7e896b..e3e5918 100644
                  TerminalEvent::ContextMenu(at) => {
                      this.open_menu("pane", json!({ "pane": block.trim_end_matches(SWAP), "terminal": addr }), Some(*at), window, cx)
                  }
-@@ -3746,6 +3760,14 @@ impl AppWindow {
+@@ -3784,6 +3798,14 @@ impl AppWindow {
                  });
                  self.write_person(|p| p.zoom = zoom, window, cx);
              }
@@ -893,7 +893,7 @@ index c7e896b..e3e5918 100644
              "app.quit" => cx.quit(),
              "app.update" => {
                  match crate::update::apply() {
-@@ -4061,6 +4083,15 @@ impl AppWindow {
+@@ -4099,6 +4121,15 @@ impl AppWindow {
          } else {
              self.publish_shown_copies();
          }
@@ -909,7 +909,7 @@ index c7e896b..e3e5918 100644
          cx.notify();
      }
  
-@@ -4192,6 +4223,7 @@ impl AppWindow {
+@@ -4230,6 +4261,7 @@ impl AppWindow {
              return json!({
                  "zoom": round(settings::zoom()),
                  "font_size": round(settings::font_size()),
@@ -917,7 +917,7 @@ index c7e896b..e3e5918 100644
                  "ui_font_size": round(settings::ui_font_size()),
                  "space": self.model.active,
                  "tab": self.model.active_tab().map(|c| c.id.clone()),
-@@ -4860,11 +4892,43 @@ impl AppWindow {
+@@ -4947,11 +4979,43 @@ impl AppWindow {
          let mut toasts = Vec::new();
          let inset = settings::z(16.0);
          let gap = settings::z(8.0);
@@ -961,8 +961,8 @@ index c7e896b..e3e5918 100644
 +            };
              let sized = |v: f32| v > 0.0 || o.kind != OverlayKind::Window;
              let content = match &o.layout {
-                 Some(l) => self.render_node(l, &HashSet::new(), None, cx),
-@@ -4882,7 +4946,7 @@ impl AppWindow {
+                 Some(l) => self.render_node(l, &HashSet::new(), None, rendered_dividers, cx),
+@@ -4969,7 +5033,7 @@ impl AppWindow {
                  .overflow_hidden()
                  .when(o.kind == OverlayKind::Toast && !fit_toast, |d| d.flex_none())
                  .when(fit_toast, |d| {
@@ -971,7 +971,7 @@ index c7e896b..e3e5918 100644
                          .max_w((viewport.width - inset * 2.0).max(px(1.0)))
                          .overflow_y_scroll()
                  })
-@@ -4928,10 +4992,17 @@ impl AppWindow {
+@@ -5015,10 +5079,17 @@ impl AppWindow {
                          div()
                              .absolute()
                              .inset_0()
@@ -991,7 +991,7 @@ index c7e896b..e3e5918 100644
                              }))
                              .child(position_popup(at, body))
                              .into_any_element(),
-@@ -4962,6 +5033,36 @@ impl AppWindow {
+@@ -5049,6 +5120,36 @@ impl AppWindow {
          let (update_pill_slot, update_pill) = self.render_update_pill(cx).map(|body| OverlaySlot::new(body, None)).unzip();
          // The padding gives the cards' shadows room while keeping their positions.
          let shadow = px(16.0);
@@ -1028,7 +1028,7 @@ index c7e896b..e3e5918 100644
          windows.push(
              div().absolute().right(inset).bottom(inset)
                  .max_h((viewport.height - inset * 2.0).max(px(0.0)))
-@@ -5823,7 +5924,7 @@ mod tests {
+@@ -5973,7 +6074,7 @@ mod tests {
      #[gpui::test]
      fn image_invalidation_drops_cached_atlas_tiles_without_loading_missing_assets(cx: &mut TestAppContext) {
          use gpui::{ImgResourceLoader, Resource};
@@ -1037,7 +1037,7 @@ index c7e896b..e3e5918 100644
          let home = temp.join(format!("herdr-image-atlas-test-{}", std::process::id()));
          std::fs::create_dir_all(&home).unwrap();
          let file = home.join("image.gif");
-@@ -5911,7 +6012,7 @@ mod tests {
+@@ -6061,7 +6162,7 @@ mod tests {
                  encoder.encode_frame(image::Frame::new(image::RgbaImage::from_pixel(2, 2, image::Rgba(color)))).unwrap();
              }
          }
@@ -1046,7 +1046,7 @@ index c7e896b..e3e5918 100644
          let dir = temp.join(format!("herdr-many-images-{}", std::process::id()));
          std::fs::create_dir_all(&dir).unwrap();
          let sources: Vec<_> = (0..24).map(|id| {
-@@ -6004,7 +6105,7 @@ mod tests {
+@@ -6154,7 +6255,7 @@ mod tests {
                  element
              }
          }
@@ -1055,7 +1055,7 @@ index c7e896b..e3e5918 100644
          let home = temp.join(format!("herdr-image-release-test-{}", std::process::id()));
          std::fs::create_dir_all(&home).unwrap();
          let gif = home.join("animated.gif");
-@@ -6071,7 +6172,7 @@ mod tests {
+@@ -6221,7 +6322,7 @@ mod tests {
  
      #[test]
      fn directory_changes_include_nested_assets() {
@@ -1064,7 +1064,7 @@ index c7e896b..e3e5918 100644
          let home = temp.join(format!("herdr-image-directory-test-{}", std::process::id()));
          std::fs::create_dir_all(home.join("mods/probe/nested")).unwrap();
          std::fs::write(home.join("mods/probe/nested/icon.svg"), "svg").unwrap();
-@@ -6151,7 +6252,7 @@ mod tests {
+@@ -6301,7 +6402,7 @@ mod tests {
      #[test]
      fn other_shells_run_the_command_on_the_app_path_then_return_to_the_shell() {
          use std::os::unix::fs::PermissionsExt;
@@ -1073,7 +1073,7 @@ index c7e896b..e3e5918 100644
          let dir = temp.join(format!("herdr-other-shell-test-{}", std::process::id()));
          std::fs::create_dir_all(&dir).unwrap();
          // Stands in for nushell: it would fail on sh syntax, so it only records how it was started.
-@@ -6276,6 +6377,27 @@ mod tests {
+@@ -6426,6 +6527,27 @@ mod tests {
          assert_eq!(restored.terminal_menu.as_deref(), Some("personal-menu"));
      }
  
@@ -1115,7 +1115,7 @@ index 3507dea..0701121 100644
  # interface. The same version and features `gpui-pre-linux` already pulls in.
  ashpd = { version = "0.13", default-features = false, features = ["async-io", "settings"] }
 diff --git a/vendor/gpui-kit/crates/base/src/input/base/state.rs b/vendor/gpui-kit/crates/base/src/input/base/state.rs
-index a87d26f..7387249 100644
+index a0fd500..a63c162 100644
 --- a/vendor/gpui-kit/crates/base/src/input/base/state.rs
 +++ b/vendor/gpui-kit/crates/base/src/input/base/state.rs
 @@ -200,9 +200,9 @@ pub(crate) fn init(cx: &mut App) {
@@ -1144,7 +1144,7 @@ index a87d26f..7387249 100644
          KeyBinding::new("alt-shift-right", SelectToNextWordEnd, Some(CONTEXT)),
          #[cfg(not(target_os = "macos"))]
          KeyBinding::new("ctrl-shift-right", SelectToNextWordEnd, Some(CONTEXT)),
-@@ -2486,7 +2486,7 @@ impl<M: InputModeKind> InputBaseState<M> {
+@@ -2498,7 +2498,7 @@ impl<M: InputModeKind> InputBaseState<M> {
          // Multi-cursor placement, multi-line only.
          if self.is_multi_line() && event.button == MouseButton::Left {
              if event.modifiers.alt
@@ -1153,7 +1153,7 @@ index a87d26f..7387249 100644
              {
                  // Alt+Shift starts a block; Linux also accepts Ghostty's Ctrl+Alt.
                  // Mark selecting so the drag handler extends the block.
-@@ -8514,7 +8514,7 @@ mod tests {
+@@ -8526,7 +8526,7 @@ mod tests {
                  shift: true,
                  ..Default::default()
              },
@@ -1162,7 +1162,7 @@ index a87d26f..7387249 100644
              gpui::Modifiers {
                  alt: true,
                  control: true,
-@@ -8779,16 +8779,16 @@ mod tests {
+@@ -8791,16 +8791,16 @@ mod tests {
          cx.update(|window, cx| {
              view.input.update(cx, |state, cx| state.focus(window, cx));
          });
@@ -1183,7 +1183,7 @@ index a87d26f..7387249 100644
          cx.simulate_keystrokes("ctrl-shift-left");
          cx.simulate_keystrokes("x");
          assert_cursors(&mut cx, &view.input, "one x|\none x|");
-@@ -8807,9 +8807,9 @@ mod tests {
+@@ -8819,9 +8819,9 @@ mod tests {
          cx.simulate_keystrokes("ctrl-alt-up");
          #[cfg(not(target_os = "windows"))]
          cx.simulate_keystrokes("alt-shift-up");
@@ -1195,7 +1195,7 @@ index a87d26f..7387249 100644
          cx.simulate_keystrokes("alt-shift-right");
          view.input.read_with(&cx, |state, _| {
              assert_eq!(
-@@ -8821,9 +8821,9 @@ mod tests {
+@@ -8833,9 +8833,9 @@ mod tests {
                  vec![4..5, 1..2]
              );
          });
@@ -1863,6 +1863,24 @@ index d14e94f..fe0c490 100644
              if supports_xinput_gestures {
                  // x11rb 0.13 doesn't define XIEventMask constants for gesture
                  // events, so we construct them from the event opcodes (each
+diff --git a/vendor/gpui-pre-linux/src/linux/x11/xkb.rs b/vendor/gpui-pre-linux/src/linux/x11/xkb.rs
+index dfaa04d..a184501 100644
+--- a/vendor/gpui-pre-linux/src/linux/x11/xkb.rs
++++ b/vendor/gpui-pre-linux/src/linux/x11/xkb.rs
+@@ -22,7 +22,12 @@ pub(super) struct XkbX11 {
+ impl XkbX11 {
+     pub(super) fn load() -> Result<Self> {
+         unsafe {
+-            let library = NonNull::new(libc::dlopen(c"libxkbcommon-x11.so.0".as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL))
++            // Termux ships its libraries without the soname's version suffix.
++            let mut library = libc::dlopen(c"libxkbcommon-x11.so.0".as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL);
++            if library.is_null() {
++                library = libc::dlopen(c"libxkbcommon-x11.so".as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL);
++            }
++            let library = NonNull::new(library)
+                 .context("X11 needs libxkbcommon-x11.so.0; install libxkbcommon-x11-0 (Ubuntu/Debian) or libxkbcommon-x11 (Fedora/Arch)")?;
+             let symbols = (|| {
+                 Ok(Self {
 diff --git a/vendor/gpui-pre-wgpu/Cargo.toml b/vendor/gpui-pre-wgpu/Cargo.toml
 index fb74314..5e9dec6 100644
 --- a/vendor/gpui-pre-wgpu/Cargo.toml
@@ -2662,10 +2680,10 @@ index 3dbc743..62541ff 100644
                  font(".ZedSans"),
                  font("Helvetica"),
 diff --git a/vendor/gpui-pre/src/window.rs b/vendor/gpui-pre/src/window.rs
-index d8df5df..9f4418e 100644
+index d254bb9..679b3ff 100644
 --- a/vendor/gpui-pre/src/window.rs
 +++ b/vendor/gpui-pre/src/window.rs
-@@ -1548,7 +1548,7 @@ impl Window {
+@@ -1555,7 +1555,7 @@ impl Window {
              window_min_size,
              window_decorations,
              #[cfg_attr(
@@ -2674,7 +2692,7 @@ index d8df5df..9f4418e 100644
                  allow(unused_variables)
              )]
              icon,
-@@ -2448,7 +2448,7 @@ impl Window {
+@@ -2473,7 +2473,7 @@ impl Window {
      /// This is only needed to disambiguate a corner-anchored surface; otherwise the
      /// edge is deduced from the anchor. The edge must be a single edge the surface
      /// is anchored to, or it is ignored. (Wayland layer-shell windows only)
@@ -2683,7 +2701,7 @@ index d8df5df..9f4418e 100644
      pub fn set_exclusive_edge(&self, edge: crate::layer_shell::Anchor) {
          self.platform_window.set_exclusive_edge(edge);
      }
-@@ -2880,7 +2880,7 @@ impl Window {
+@@ -2905,7 +2905,7 @@ impl Window {
      pub fn is_window_hovered(&self) -> bool {
          if cfg!(any(
              target_os = "windows",
@@ -3063,21 +3081,3 @@ index 7f44289..a282318 100644
  mod mmap_result_tests {
      use super::{nonnull_mmap_address_or_cleanup, CodeMemoryError};
      use std::ffi::c_void;
-diff --git a/vendor/gpui-pre-linux/src/linux/x11/xkb.rs b/vendor/gpui-pre-linux/src/linux/x11/xkb.rs
-index dfaa04d..a184501 100644
---- a/vendor/gpui-pre-linux/src/linux/x11/xkb.rs
-+++ b/vendor/gpui-pre-linux/src/linux/x11/xkb.rs
-@@ -22,7 +22,12 @@ pub(super) struct XkbX11 {
- impl XkbX11 {
-     pub(super) fn load() -> Result<Self> {
-         unsafe {
--            let library = NonNull::new(libc::dlopen(c"libxkbcommon-x11.so.0".as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL))
-+            // Termux ships its libraries without the soname's version suffix.
-+            let mut library = libc::dlopen(c"libxkbcommon-x11.so.0".as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL);
-+            if library.is_null() {
-+                library = libc::dlopen(c"libxkbcommon-x11.so".as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL);
-+            }
-+            let library = NonNull::new(library)
-                 .context("X11 needs libxkbcommon-x11.so.0; install libxkbcommon-x11-0 (Ubuntu/Debian) or libxkbcommon-x11 (Fedora/Arch)")?;
-             let symbols = (|| {
-                 Ok(Self {
