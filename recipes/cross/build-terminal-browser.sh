@@ -47,9 +47,9 @@
 set -euo pipefail
 
 TB_UPSTREAM=v0.16.1                 # the upstream release the fork's tl branch is built on
-TB_VERSION=$TB_UPSTREAM+7278a15     # ... plus the fork's commit
+TB_VERSION=$TB_UPSTREAM+92e4f90     # ... plus the fork's commit
 TB_URL="https://github.com/PickleHik3/terminal-browser.git"
-TB_COMMIT="7278a156155eec39839d258bec04fadbbb58abd1"   # tl: v0.16.1 (a47886a) + Android, the launcher as a terminal, site mode, touch
+TB_COMMIT="92e4f90d90f03ddac33f0ae6eee32bc617724dc3"   # tl: v0.16.1 (a47886a) + Android, the launcher as a terminal, site mode, touch
 TB_PNPM=10.13.1
 AB_VERSION=v0.38.1
 AB_URL="https://github.com/vercel-labs/agent-browser.git"
