@@ -51,8 +51,8 @@
 set -euo pipefail
 
 APP_URL="https://github.com/herdrdev/herdr-app.git"
-APP_COMMIT="a751b75b0418bf13950f7627d122bb934ac2c46c"   # v0.1.17
-APP_VERSION="0.1.17"
+APP_COMMIT="9a9ae13d998e6ed74c76e8eb13bdeb2e1420f50c"   # v0.1.18
+APP_VERSION="0.1.18"
 ZIG_VERSION="0.16.0"
 ZIG_SHA256=70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00
 # name version sha256 — crates.io crates patched by 0002-herdr-app-<name>.patch
