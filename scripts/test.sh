@@ -5311,6 +5311,10 @@ else
     echo "== shellcheck is not installed — not run"
 fi
 
+# --- the shipped items.tsv: mesa-wayland-egl is installable by name, so never hidden ---
+MESA_ROW=$(awk -F'\t' '$1=="mesa-wayland-egl"' "$(dirname "$0")/items.tsv")
+if [ -n "$MESA_ROW" ] && ! printf '%s' "$MESA_ROW" | awk -F'\t' '{ exit ($8 ~ /(^|;)hidden=1(;|$)/) ? 0 : 1 }'; then pass; else fail "mesa-wayland-egl is a visible item, so install by name plans it"; fi
+
 echo
 echo "passed $PASS, failed $FAIL, skipped $SKIP"
 if [ "$FAIL" != 0 ]; then
