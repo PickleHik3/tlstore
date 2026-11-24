@@ -10,8 +10,8 @@ set -euo pipefail
 
 SIGYE_URL="https://github.com/am2rican5/sigye.git"
 # scripts/upstream-watch.sh moves the pins below to upstream's latest release; keep their shape.
-SIGYE_COMMIT="0f0b8caaccb4ca01ab5d1fad1237c4a01a49766f"   # v0.6.0
-SIGYE_VERSION="0.6.0"
+SIGYE_COMMIT="a7a7fc6c1143f92eae505ae04fba38ad68dd355a"   # v0.7.0
+SIGYE_VERSION="0.7.0"
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PATCH="$SCRIPT_DIR/../termux/sigye/0001-termux-clipboard.patch"
 
