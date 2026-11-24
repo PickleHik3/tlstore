@@ -6,7 +6,7 @@
 #
 #   tool      btop | tl-priv | tuios-cpu | kitten | tuios | sigye | herdr | herdr-core | herdr-gui |
 #             terminal-browser | fastfetch | dawn |
-#             musl-loader | musl-runtime | launcher-skills | herdr-nightglass
+#             musl-loader | musl-runtime | launcher-skills | herdr-nightglass | mesa-wayland-egl
 #   edition   com.termux (default) | io.vaj.tl — only for fastfetch, dawn and musl-loader, the
 #             three whose binary carries the edition's prefix (README.md, "One build per
 #             launcher edition"); the others build once for every edition
@@ -259,6 +259,12 @@ case "$tool" in
         sysroot libcurl openssl zlib libnghttp2
         "$SCRIPT_DIR/build-dawn.sh"
         cp "$TL_OUT/dawn" "$TL_ASSETS/$asset"
+        ;;
+    mesa-wayland-egl)
+        # Termux's own mesa build in its Docker package-builder image, patched; the asset is a
+        # .tar.gz overlay (an archive item) holding that one library. com.termux's prefix is in it.
+        "$SCRIPT_DIR/build-mesa-wayland-egl.sh"
+        cp "$TL_OUT/mesa-wayland-egl" "$TL_ASSETS/$asset"
         ;;
     musl-loader)
         ndk_clang_as_clang "$TL_MUSL_TARGET"

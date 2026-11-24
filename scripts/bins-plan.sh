@@ -43,6 +43,7 @@ musl-loader  com.termux,io.vaj.tl  -
 musl-runtime -                     musl-libgcc,musl-libstdcxx
 launcher-skills any                skill-termux-launcher,skill-termux-launcher-speak
 herdr-nightglass any               herdr-nightglass
+mesa-wayland-egl -                 mesa-wayland-egl
 '
 
 known() { printf '%s\n' "$TOOLS" | awk 'NF { print $1 }'; }

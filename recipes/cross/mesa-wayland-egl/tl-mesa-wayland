@@ -1,0 +1,5 @@
+#!/system/bin/sh
+# Prints the directory holding the patched libEGL_mesa.so.0, for LD_LIBRARY_PATH. This is the
+# program the item's wrapper runs (an archive item needs one); the library is what matters.
+here=$(cd "$(dirname "$0")/.." && pwd)
+printf '%s\n' "$here/lib"

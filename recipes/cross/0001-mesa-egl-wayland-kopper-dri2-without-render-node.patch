@@ -1,0 +1,77 @@
+egl/wayland: honour LIBGL_KOPPER_DRI2 to run Zink without a render node
+
+On X11, MESA_LOADER_DRIVER_OVERRIDE=zink with LIBGL_KOPPER_DRI2=1 skips the
+render node checks and presents through kopper (Vulkan WSI). Wayland had no
+equivalent: without wl_drm or dma-buf feedback from the compositor there is
+no fd_render_gpu, the DRM init fails and eglInitialize falls back to
+llvmpipe. Setting LIBGL_ALWAYS_SOFTWARE=1 does reach the kopper path, but
+Zink then insists on a CPU Vulkan device. On Termux the GPU is reachable only
+through Turnip on KGSL, and there is no /dev/dri at all.
+
+With Zink requested (on Termux that is also the default, see 0017) and
+LIBGL_KOPPER_DRI2 set, take the wl_shm/kopper init without LIBGL_ALWAYS_SOFTWARE,
+so Zink picks the hardware Vulkan device. Forced Zink has no DRM node for an
+EGLDevice, and the software EGLDevice would mark it unaccelerated, so the
+display gets none. Without LIBGL_KOPPER_DRI2, with LIBGL_ALWAYS_SOFTWARE, and on
+X11 nothing changes. If Zink cannot start, eglInitialize still falls back to
+llvmpipe.
+
+Applies on top of 0012-always-use-software-for-swrast.patch.
+Informed by Local Desktop's egl-wayland-zink-kopper-without-render-node patch
+(same idea; this one is written against Mesa 26.3.1 and Termux's patch set,
+and leaves X11 and surfaceless untouched).
+
+--- a/src/egl/drivers/dri2/platform_wayland.c	2026-11-24 01:04:58.017514199 +0300
++++ b/src/egl/drivers/dri2/platform_wayland.c	2026-11-24 01:05:25.546070975 +0300
+@@ -43,6 +43,7 @@
+ 
+ #include "util/anon_file.h"
+ #include "util/perf/cpu_trace.h"
++#include "util/u_debug.h"
+ #include "util/u_vector.h"
+ #include "util/format/u_formats.h"
+ #include "main/glconfig.h"
+@@ -3252,6 +3253,17 @@
+    .swrast = &swrast_loader_extension,
+ };
+ 
++/* LIBGL_KOPPER_DRI2 means what it means on X11: run Zink on the Vulkan device
++ * and present through kopper (Vulkan WSI) without a DRM render node, for
++ * compositors that offer neither wl_drm nor dma-buf feedback.
++ */
++static bool
++dri2_wl_force_zink(const _EGLDisplay *disp)
++{
++   return disp->Options.Zink && !disp->Options.ForceSoftware &&
++          debug_get_bool_option("LIBGL_KOPPER_DRI2", false);
++}
++
+ static EGLBoolean
+ dri2_initialize_wayland_swrast(_EGLDisplay *disp)
+ {
+@@ -3303,10 +3315,14 @@
+    if (!dri2_create_screen(disp))
+       goto cleanup;
+ 
++   /* Forced Zink has no DRM node to describe, and the software EGLDevice
++    * would mark it unaccelerated, so it gets no EGLDevice.
++    */
+ #ifdef __ANDROID__
+-   if (!dri2_setup_device(disp, true)) {
++   if (!dri2_wl_force_zink(disp) && !dri2_setup_device(disp, true)) {
+ #else
+-   if (!dri2_setup_device(disp, disp->Options.ForceSoftware)) {
++   if (!dri2_wl_force_zink(disp) &&
++       !dri2_setup_device(disp, disp->Options.ForceSoftware)) {
+ #endif
+       _eglError(EGL_NOT_INITIALIZED, "DRI2: failed to setup EGLDevice");
+       goto cleanup;
+@@ -3342,7 +3358,7 @@
+ EGLBoolean
+ dri2_initialize_wayland(_EGLDisplay *disp)
+ {
+-   if (disp->Options.ForceSoftware)
++   if (disp->Options.ForceSoftware || dri2_wl_force_zink(disp))
+       return dri2_initialize_wayland_swrast(disp);
+    else
+       return dri2_initialize_wayland_drm(disp);

@@ -91,6 +91,7 @@ only); the musl runtime's x86_64 pair comes from Alpine's x86_64 packages.
 | `sigye-aarch64` | Sigye `v0.6.0` + `recipes/termux/sigye/0001-termux-clipboard.patch` | [am2rican5/sigye `0f0b8caa`](https://github.com/am2rican5/sigye/tree/0f0b8caaccb4ca01ab5d1fad1237c4a01a49766f) |
 | `btop-aarch64` | btop `v1.4.7` + `recipes/cross/0001`–`0006-btop-*.patch`, fully static | [aristocratos/btop `6e39144a`](https://github.com/aristocratos/btop/tree/6e39144aaf5a6bc01b9f795010b0914431067183) |
 | `tl-priv-aarch64` | `recipes/cross/tl-priv/tl-priv.c`, fully static | this repository |
+| `mesa-wayland-egl-aarch64` | Termux's Mesa `26.3.1` `libEGL_mesa.so.0` + `recipes/cross/0001-mesa-egl-wayland-kopper-dri2-without-render-node.patch`, a `.tar.gz` overlay, for the `com.termux` prefix | [termux-packages `d85d18f4`](https://github.com/termux/termux-packages/tree/d85d18f456d732d26d8b87d826155c2ced0342e8/packages/mesa) |
 | `musl-loader-aarch64` | musl `1.2.5` + `recipes/cross/0001-musl-ld-preload-var.patch` + prefix paths, for the `com.termux` prefix | [musl-1.2.5.tar.gz](https://musl.libc.org/releases/musl-1.2.5.tar.gz) |
 | `musl-loader-io.vaj.tl-aarch64` | the same build, for the `io.vaj.tl` prefix | [musl-1.2.5.tar.gz](https://musl.libc.org/releases/musl-1.2.5.tar.gz) |
 | `musl-libstdcxx-aarch64` | GCC `14.2.0` `libstdc++.so.6`, musl-linked, unmodified | [Alpine `libstdc++-14.2.0-r6`](https://pkgs.alpinelinux.org/package/v3.22/main/aarch64/libstdc++) |
@@ -284,6 +285,7 @@ feature, never into a released binary.
 - musl (the loader) — MIT, `licenses/musl-MIT.txt`
 - dawn — MIT, `licenses/dawn-MIT.txt`, modified in the fork [PickleHik3/dawn](https://github.com/PickleHik3/dawn) (branch `tl`)
 - Nightglass (`herdr-nightglass`, layouts for the Herdr app) — MIT, `licenses/herdr-nightglass-MIT.txt`, unmodified; the asset carries its `LICENSE` too
+- Mesa (`mesa-wayland-egl`, Termux's `libEGL_mesa.so.0` with one patch) — MIT, `licenses/mesa-MIT.txt`, modified by `recipes/cross/0001-mesa-egl-wayland-kopper-dri2-without-render-node.patch`; built from Termux's `mesa` package source ([termux-packages](https://github.com/termux/termux-packages)) and [Mesa](https://archive.mesa3d.org/) as it fetches it
 - `libstdc++.so.6` and `libgcc_s.so.1` — GCC 14.2.0, GPL-3.0-or-later with the GCC Runtime Library
   Exception, `licenses/gcc-runtime-GPL-3.0-with-exception.txt`, unmodified. The corresponding
   source is GCC 14.2.0 as Alpine builds it:

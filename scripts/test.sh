@@ -4713,10 +4713,12 @@ expect_out "the musl runtime is one job for two assets" '"asset":"musl-libgcc-aa
 expect_out "on each processor" '"asset":"musl-libgcc-x86_64,musl-libstdcxx-x86_64"'
 expect_out "herdr-nightglass is one job for every processor, one tarball under both names" \
     '{"tool":"herdr-nightglass","edition":"-","arch":"any","asset":"herdr-nightglass-aarch64,herdr-nightglass-x86_64"}'
+expect_out "mesa-wayland-egl is one job per processor, for the com.termux build" \
+    '{"tool":"mesa-wayland-egl","edition":"-","arch":"x86_64","asset":"mesa-wayland-egl-x86_64"}'
 expect_out "the launcher skills are one job for every processor, each tarball under both names" \
     '{"tool":"launcher-skills","edition":"-","arch":"any","asset":"skill-termux-launcher-aarch64,skill-termux-launcher-x86_64,skill-termux-launcher-speak-aarch64,skill-termux-launcher-speak-x86_64"}'
 if command -v python3 >/dev/null 2>&1; then
-    if printf '%s' "$OUT" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if len(d["include"]) == 33 else 1)'; then pass; else fail "the matrix is JSON with thirty-three entries" "$OUT"; fi
+    if printf '%s' "$OUT" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if len(d["include"]) == 35 else 1)'; then pass; else fail "the matrix is JSON with thirty-five entries" "$OUT"; fi
 fi
 OUT="$(bash "$BN_ROOT/scripts/bins-plan.sh" dawn,btop 2>&1)"; ST=$?
 expect_status "bins-plan.sh with a comma list" 0

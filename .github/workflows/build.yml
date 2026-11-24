@@ -39,7 +39,7 @@ on:
   workflow_dispatch:
     inputs:
       tools:
-        description: "Tools to build: all, or a comma list of btop, tl-priv, tuios-cpu, kitten, tuios, sigye, herdr, herdr-core, herdr-gui, terminal-browser, fastfetch, dawn, musl-loader, musl-runtime, launcher-skills, herdr-nightglass"
+        description: "Tools to build: all, or a comma list of btop, tl-priv, tuios-cpu, kitten, tuios, sigye, herdr, herdr-core, herdr-gui, terminal-browser, fastfetch, dawn, musl-loader, musl-runtime, launcher-skills, herdr-nightglass, mesa-wayland-egl"
         required: false
         default: "all"
       trial:
@@ -120,8 +120,9 @@ jobs:
 
       # kitten and tuios need the NDK only on x86_64, where its link goes through the NDK's clang.
       # musl-runtime, launcher-skills and herdr-nightglass are fetched or packed, not built.
+      # mesa-wayland-egl is built inside Termux's Docker package-builder image, so it needs no NDK.
       - name: NDK
-        if: matrix.tool != 'musl-runtime' && matrix.tool != 'launcher-skills' && matrix.tool != 'herdr-nightglass' && ((matrix.tool != 'kitten' && matrix.tool != 'tuios') || matrix.arch == 'x86_64')
+        if: matrix.tool != 'musl-runtime' && matrix.tool != 'launcher-skills' && matrix.tool != 'herdr-nightglass' && matrix.tool != 'mesa-wayland-egl' && ((matrix.tool != 'kitten' && matrix.tool != 'tuios') || matrix.arch == 'x86_64')
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" >/dev/null
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
@@ -154,6 +155,13 @@ jobs:
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
           version: 10.13.1
+
+      # Termux's package-builder image is about 10 GB and the mesa build needs room beside it.
+      - name: Free disk for the mesa build
+        if: matrix.tool == 'mesa-wayland-egl'
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL
+          df -h /
 
       - name: Month
         id: month
