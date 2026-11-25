@@ -43,11 +43,42 @@ index 87a9e7b..754d9fe 100644
              // Only when asked: hc never checks for updates on its own.
              let scratch = crate::releases::Scratch::new()?;
              let requested = version
+diff --git i/crates/herdr-core/src/cli/update.rs w/crates/herdr-core/src/cli/update.rs
+index 4e21346..a89a3ee 100644
+--- i/crates/herdr-core/src/cli/update.rs
++++ w/crates/herdr-core/src/cli/update.rs
+@@ -54,7 +54,7 @@ pub(super) fn update(paths: &Paths, from: &std::path::Path, force: bool) -> Resu
+     let source = crate::platform::update_source(from);
+     let from = source.as_path();
+     let refused = |why: String, hint: &str| RpcError::new("refused", why, hint);
+-    let dest = std::env::current_exe().and_then(|e| e.canonicalize()).map_err(|e| RpcError::internal(e.to_string()))?;
++    let dest = crate::platform::own_exe().and_then(|e| e.canonicalize()).map_err(|e| RpcError::internal(e.to_string()))?;
+     let shown = dest.display().to_string();
+     if let Some(manager) = client::installed_by() {
+         let how = match manager {
 diff --git i/crates/herdr-core/src/client.rs w/crates/herdr-core/src/client.rs
-index b510dc7..1fe319a 100644
+index b510dc7..50792ca 100644
 --- i/crates/herdr-core/src/client.rs
 +++ w/crates/herdr-core/src/client.rs
-@@ -55,7 +55,7 @@ pub fn build_id() -> String {
+@@ -13,7 +13,7 @@ static EXE: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new()
+ /// Remembers our binary's path at startup. After an update swaps the file,
+ /// asking the OS again would name the deleted old binary.
+ pub fn remember_exe() {
+-    if let Ok(exe) = std::env::current_exe() {
++    if let Ok(exe) = platform::own_exe() {
+         let _ = EXE.set(exe);
+     }
+     build_id();
+@@ -22,7 +22,7 @@ pub fn remember_exe() {
+ /// The package manager this hc came from, or "system package manager" as a
+ /// compatibility marker when its folder isn't writable. None for a replaceable install.
+ pub fn installed_by() -> Option<&'static str> {
+-    let exe = EXE.get().cloned().or_else(|| std::env::current_exe().ok())?;
++    let exe = EXE.get().cloned().or_else(|| platform::own_exe().ok())?;
+     installed_by_path(&exe)
+ }
+ 
+@@ -55,11 +55,11 @@ pub fn build_id() -> String {
      static BUILD: std::sync::OnceLock<String> = std::sync::OnceLock::new();
      BUILD
          .get_or_init(|| {
@@ -56,7 +87,12 @@ index b510dc7..1fe319a 100644
              if let Some(id) = running_build_id() {
                  return format!("elf:{id}");
              }
-@@ -140,7 +140,7 @@ fn listening_elsewhere(paths: &Paths) -> Option<RpcError> {
+-            let exe = EXE.get().cloned().or_else(|| std::env::current_exe().ok());
++            let exe = EXE.get().cloned().or_else(|| platform::own_exe().ok());
+             exe.and_then(|e| std::fs::metadata(e).ok()).map(|m| platform::file_identity(&m)).unwrap_or_default()
+         })
+         .clone()
+@@ -140,16 +140,21 @@ fn listening_elsewhere(paths: &Paths) -> Option<RpcError> {
      ))
  }
  
@@ -65,7 +101,14 @@ index b510dc7..1fe319a 100644
  fn running_build_id() -> Option<String> {
      use std::io::Read;
      let mut head = Vec::new();
-@@ -149,7 +149,7 @@ fn running_build_id() -> Option<String> {
+-    std::fs::File::open("/proc/self/exe").ok()?.take(64 << 10).read_to_end(&mut head).ok()?;
++    // Android: /proc/self/exe is the system linker under termux-exec.
++    #[cfg(target_os = "android")]
++    let own = platform::own_exe().ok()?;
++    #[cfg(not(target_os = "android"))]
++    let own = std::path::PathBuf::from("/proc/self/exe");
++    std::fs::File::open(own).ok()?.take(64 << 10).read_to_end(&mut head).ok()?;
+     elf_build_id(&head)
  }
  
  /// The GNU build-id note of a 64-bit little-endian ELF, from its first bytes.
@@ -74,7 +117,7 @@ index b510dc7..1fe319a 100644
  fn elf_build_id(elf: &[u8]) -> Option<String> {
      let int = |at: usize, len: usize| {
          let bytes = elf.get(at..at.checked_add(len)?)?;
-@@ -179,7 +179,7 @@ fn elf_build_id(elf: &[u8]) -> Option<String> {
+@@ -179,7 +184,7 @@ fn elf_build_id(elf: &[u8]) -> Option<String> {
      })
  }
  
@@ -83,7 +126,16 @@ index b510dc7..1fe319a 100644
  #[test]
  fn the_build_is_named_by_the_linkers_build_id() {
      let elf = std::fs::read("/proc/self/exe").unwrap();
-@@ -209,7 +209,7 @@ pub fn spawn_detached(paths: &Paths, args: &[&str], log: &str) -> std::io::Resul
+@@ -200,7 +205,7 @@ pub fn spawn_core(paths: &Paths) -> Result<(), RpcError> {
+ pub fn spawn_detached(paths: &Paths, args: &[&str], log: &str) -> std::io::Result<()> {
+     paths.create_dirs()?;
+     let log = paths.state.join(log);
+-    let exe = EXE.get().cloned().map_or_else(std::env::current_exe, Ok)?;
++    let exe = EXE.get().cloned().map_or_else(platform::own_exe, Ok)?;
+     let exe = if args.first() == Some(&"serve") { platform::core_executable(&exe) } else { exe };
+     let mut cmd = Command::new(exe);
+     if args.first() == Some(&"serve") {
+@@ -209,7 +214,7 @@ pub fn spawn_detached(paths: &Paths, args: &[&str], log: &str) -> std::io::Resul
      // A core or holder started from inside a terminal is not that terminal's:
      // ending the terminal must not end them.
      cmd.args(args).env_remove(crate::sweep::VAR).env(crate::sweep::RUNTIME, "1");
@@ -105,8 +157,21 @@ index ac6004e..db5e32a 100644
  pub fn about(pid: i32) -> Option<Foreground> {
      let name = std::fs::read_to_string(format!("/proc/{pid}/comm")).ok()?.trim_end().to_string();
      let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
+diff --git i/crates/herdr-core/src/machines.rs w/crates/herdr-core/src/machines.rs
+index c1a5c2a..3575365 100644
+--- i/crates/herdr-core/src/machines.rs
++++ w/crates/herdr-core/src/machines.rs
+@@ -505,7 +505,7 @@ pub fn install(paths: &crate::paths::Paths, to: Reach, session: Option<&str>) ->
+     let scratch = crate::releases::Scratch::new()?;
+     let macos = there.starts_with("macos ");
+     let bundle = !macos || run_there(paths, to, "id -u", b"")? != "0";
+-    let current = std::env::current_exe()
++    let current = crate::platform::own_exe()
+         .and_then(|path| path.canonicalize())
+         .map_err(|e| RpcError::internal(format!("cannot find this hc: {e}")))?;
+     let bin = if there == here && (bundle || !current.ends_with("Herdr Core.app/Contents/MacOS/herdr-core")) {
 diff --git i/crates/herdr-core/src/platform/mod.rs w/crates/herdr-core/src/platform/mod.rs
-index c1a4751..fab4fa6 100644
+index c1a4751..398f13e 100644
 --- i/crates/herdr-core/src/platform/mod.rs
 +++ w/crates/herdr-core/src/platform/mod.rs
 @@ -12,7 +12,7 @@ pub use unix::*;
@@ -118,7 +183,7 @@ index c1a4751..fab4fa6 100644
  pub mod systemd;
  
  /// Only a new SSH-started Linux core imports login settings; holders inherit the core.
-@@ -144,6 +144,13 @@ pub fn prefer_release_bundle() -> bool {
+@@ -144,6 +144,65 @@ pub fn prefer_release_bundle() -> bool {
      true
  }
  
@@ -129,10 +194,62 @@ index c1a4751..fab4fa6 100644
 +    if cfg!(target_os = "android") { Some("this hc was installed by tlstore, which keeps it up to date") } else { None }
 +}
 +
++/// This hc's own executable. On Android, termux-exec starts every program as
++/// `linker64 <path> args`, so `current_exe()` is the linker and
++/// `TERMUX_EXEC__PROC_SELF_EXE` holds the real path.
++pub fn own_exe() -> std::io::Result<std::path::PathBuf> {
++    let exe = std::env::current_exe()?;
++    if cfg!(target_os = "android") {
++        return Ok(own_exe_from(exe, std::env::var_os("TERMUX_EXEC__PROC_SELF_EXE").as_deref()));
++    }
++    Ok(exe)
++}
++
++/// The decision behind `own_exe`: a linker's path is replaced by `real` when
++/// that is an absolute path to an existing file.
++fn own_exe_from(exe: std::path::PathBuf, real: Option<&std::ffi::OsStr>) -> std::path::PathBuf {
++    let is_linker = matches!(exe.file_name().and_then(|n| n.to_str()), Some("linker" | "linker64"));
++    match real.map(std::path::Path::new) {
++        Some(real) if is_linker && real.is_absolute() && real.is_file() => real.to_path_buf(),
++        _ => exe,
++    }
++}
++
++#[cfg(test)]
++mod own_exe_tests {
++    use super::own_exe_from;
++    use std::ffi::OsStr;
++    use std::path::PathBuf;
++
++    const LINKER: &str = "/apex/com.android.runtime/bin/linker64";
++
++    #[test]
++    fn the_linker_is_replaced_by_termux_execs_real_path() {
++        let real = std::env::current_exe().unwrap();
++        assert_eq!(own_exe_from(PathBuf::from(LINKER), Some(real.as_os_str())), real);
++        assert_eq!(own_exe_from(PathBuf::from("/system/bin/linker"), Some(real.as_os_str())), real);
++    }
++
++    #[test]
++    fn the_linker_stays_without_a_usable_real_path() {
++        let linker = PathBuf::from(LINKER);
++        assert_eq!(own_exe_from(linker.clone(), None), linker);
++        assert_eq!(own_exe_from(linker.clone(), Some(OsStr::new("serve"))), linker);
++        assert_eq!(own_exe_from(linker.clone(), Some(OsStr::new("/no/such/hc"))), linker);
++    }
++
++    #[test]
++    fn a_normal_path_is_unchanged() {
++        let real = std::env::current_exe().unwrap();
++        let hc = PathBuf::from("/data/data/com.termux/files/home/.local/lib/herdr-core/libexec/hc");
++        assert_eq!(own_exe_from(hc.clone(), Some(real.as_os_str())), hc);
++    }
++}
++
  pub fn needs_bundle_update() -> bool {
      #[cfg(target_os = "macos")]
      {
-@@ -340,7 +347,7 @@ pub(crate) fn restored_environment(
+@@ -340,7 +399,7 @@ pub(crate) fn restored_environment(
  pub async fn program_env() -> std::collections::BTreeMap<String, String> {
      #[allow(unused_mut)]
      let mut env: std::collections::BTreeMap<String, String> = utf8_vars().collect();
