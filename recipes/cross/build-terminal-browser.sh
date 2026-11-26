@@ -47,9 +47,9 @@
 set -euo pipefail
 
 TB_UPSTREAM=v0.16.1                 # the upstream release the fork's tl branch is built on
-TB_VERSION=$TB_UPSTREAM+16a2089     # ... plus the fork's commit
+TB_VERSION=$TB_UPSTREAM+e17c37a     # ... plus the fork's commit
 TB_URL="https://github.com/PickleHik3/terminal-browser.git"
-TB_COMMIT="16a20899ad1b31b7bd3591c55ac8ebca36952376"   # tl: v0.16.1 (a47886a) + Android, the launcher as a terminal, site mode, touch, daemon stamp fix (CLI and daemon stamp the same binary)
+TB_COMMIT="e17c37a56b03a972a12f3dbf9a2e47b610665715"   # tl: v0.16.1 (a47886a) + Android, the launcher as a terminal, site mode, touch, daemon stamp fix, EPERM is alive (CLI and daemon stamp the same binary)
 TB_PNPM=10.13.1
 AB_VERSION=v0.38.1
 AB_URL="https://github.com/vercel-labs/agent-browser.git"
@@ -240,8 +240,22 @@ mkdir -p "$stage/electron"
 cat > "$stage/electron/pixel" <<'EOF'
 #!/bin/sh
 # Termux's Electron (pkg install electron43, from the x11 repository) in place of upstream's own.
-# Chromium finds its resources through /proc/self/exe, so exec'ing it from here is enough.
-exec "${PREFIX:-/data/data/com.termux/files/usr}/lib/electron43/electron" "$@"
+# Chromium finds its resources (icudtl.dat, the .pak files) and starts its helpers through
+# /proc/self/exe. Where termux-exec runs programs through the system linker (over an sshd that
+# run-as started: no app environment, so no target SDK), /proc/self/exe is the linker and Chromium stops with
+# "Invalid file descriptor to ICU data". If running a program directly works here (a target SDK of
+# 28 or lower), Electron and everything it starts are run directly. termux-exec reads the mode from
+# the environment of the process that execs, so `env` sets it and execs.
+PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
+ELECTRON="$PREFIX/lib/electron43/electron"
+case "$(readlink /proc/$$/exe 2>/dev/null)" in
+  */linker|*/linker64)
+    if env TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE=disable "$PREFIX/bin/true" 2>/dev/null; then
+      exec env TERMUX_EXEC__SYSTEM_LINKER_EXEC__MODE=disable "$ELECTRON" "$@"
+    fi
+    ;;
+esac
+exec "$ELECTRON" "$@"
 EOF
 chmod 755 "$stage/electron/pixel"
 

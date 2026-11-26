@@ -35,7 +35,7 @@ Notes:
   from that README and the CLI's own help (`zenbu-labs/terminal-browser@fd5f1798b128cd71508aa534ddbf67caf05ec0b8`,
   tag `v0.13.4`, MIT), with what was verified on a phone and what this build changes
   (`recipes/cross/build-terminal-browser.sh`), so it has no pinned line either. The store builds
-  from our fork, `PickleHik3/terminal-browser@16a20899ad1b31b7bd3591c55ac8ebca36952376` (branch
+  from our fork, `PickleHik3/terminal-browser@e17c37a56b03a972a12f3dbf9a2e47b610665715` (branch
   `tl`: upstream `v0.16.1` plus the Android pixel build), whose README and help are upstream's unchanged.
 - `termux-api-shims.md` is not fetched from upstream: it is written for this store, so it has no
   `<!-- tlstore: pinned from ... -->` line and no relative images to resolve.
