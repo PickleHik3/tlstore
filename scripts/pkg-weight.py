@@ -3,7 +3,7 @@
 
     python3 -I scripts/pkg-weight.py [--arch aarch64] [--index FILE]... [--have NAMES] PACKAGE...
 
-An item whose packages pull in a lot (terminal-browser: Termux's electron42 and the libraries it
+An item whose packages pull in a lot (terminal-browser: Termux's electron43 and the libraries it
 needs) says so on its store page with `pkg-size=<download MB>,<disk MB>` (docs/SPEC.md,
 Revision 15). This prints those two figures, computed rather than guessed: every package the named
 ones depend on, all the way down, minus what a fresh Termux already has, summed from the Size

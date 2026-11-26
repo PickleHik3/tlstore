@@ -10,7 +10,7 @@
 # Linux tarball has; the rest of that tarball is glibc, and is replaced:
 #
 #   electron/pixel        upstream's patched glibc Electron 44 (285 MB) is dropped; a two-line
-#                         script execs Termux's own `electron42` package (x11 repo) instead
+#                         script execs Termux's own `electron43` package (x11 repo) instead
 #   pixel.node            the pixel engine's napi addon, from the fork for <arch>-linux-android
 #                         (no clipboard images: arboard has no Android backend; no POSIX shm:
 #                         the frame transport probe falls back to file frames)
@@ -25,11 +25,11 @@
 # over the launcher's pane API), so `open --split`, `ls` and `action` see the launcher's panes and
 # windows without a terminal socket.
 #
-# Upstream's JavaScript runs on Electron 42 unchanged: process.platform is "linux" there too, so
+# Upstream's JavaScript runs on Electron unchanged: process.platform is "linux" there too, so
 # the addon keeps its pixel-native-linux-<arm64|x64> path. Device-verified on Pong (A065,
-# Android 16, aarch64), 2026-10-12: v0.13.4 with electron42 42.7.1 and a pixel.node built with
+# Android 16, aarch64), 2026-10-12, on Termux's electron42 (42.7.1) with v0.13.4: a pixel.node built with
 # the fork's Android changes renders pages in the launcher's terminal; taps, typing, scrolling
-# and Ctrl+Q all work.
+# and Ctrl+Q all work. Not yet device-checked on electron43 (43.8.12), which this recipe now targets.
 #
 # Both native pieces need nothing but Bionic: libc++ is linked statically (a phone has no
 # libc++_shared.so), and the only undefined symbols pixel.node may keep are napi_*, which the
@@ -47,9 +47,9 @@
 set -euo pipefail
 
 TB_UPSTREAM=v0.16.1                 # the upstream release the fork's tl branch is built on
-TB_VERSION=$TB_UPSTREAM+92e4f90     # ... plus the fork's commit
+TB_VERSION=$TB_UPSTREAM+16a2089     # ... plus the fork's commit
 TB_URL="https://github.com/PickleHik3/terminal-browser.git"
-TB_COMMIT="92e4f90d90f03ddac33f0ae6eee32bc617724dc3"   # tl: v0.16.1 (a47886a) + Android, the launcher as a terminal, site mode, touch
+TB_COMMIT="16a20899ad1b31b7bd3591c55ac8ebca36952376"   # tl: v0.16.1 (a47886a) + Android, the launcher as a terminal, site mode, touch, daemon stamp fix (CLI and daemon stamp the same binary)
 TB_PNPM=10.13.1
 AB_VERSION=v0.38.1
 AB_URL="https://github.com/vercel-labs/agent-browser.git"
@@ -239,9 +239,9 @@ install -m 644 "$tb_src/LICENSE" "$stage/LICENSE"
 mkdir -p "$stage/electron"
 cat > "$stage/electron/pixel" <<'EOF'
 #!/bin/sh
-# Termux's Electron (pkg install electron42, from the x11 repository) in place of upstream's own.
+# Termux's Electron (pkg install electron43, from the x11 repository) in place of upstream's own.
 # Chromium finds its resources through /proc/self/exe, so exec'ing it from here is enough.
-exec "${PREFIX:-/data/data/com.termux/files/usr}/lib/electron42/electron" "$@"
+exec "${PREFIX:-/data/data/com.termux/files/usr}/lib/electron43/electron" "$@"
 EOF
 chmod 755 "$stage/electron/pixel"
 
@@ -272,7 +272,7 @@ fi
 
 PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
 
-# Chromium plays sound through PulseAudio, which electron42 depends on but nothing starts. Chromium
+# Chromium plays sound through PulseAudio, which electron43 depends on but nothing starts. Chromium
 # holds its connection for as long as it runs, so the daemon outlives every page and exits a minute
 # after the last browser quits. libpulse finds the socket under $XDG_RUNTIME_DIR, which changes
 # below, so the address is resolved here, before that.
@@ -315,7 +315,7 @@ cli/ browser/ skills/ assets/ scripts/
                   built from that source as upstream's scripts/release.sh builds them
 pixel.node        the same source, built for $TL_TRIPLE
 agent-browser     vercel-labs/agent-browser@$AB_COMMIT ($AB_VERSION) + 0002-terminal-browser-agent-browser-android.patch
-electron          Termux's electron42 package, \$PREFIX/lib/electron42/electron
+electron          Termux's electron43 package, \$PREFIX/lib/electron43/electron
 EOF
 
 # --- 5. the archive -----------------------------------------------------------------------------

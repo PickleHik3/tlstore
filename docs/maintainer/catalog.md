@@ -373,10 +373,10 @@ to go ahead. Both happen only above 50 MB of either; below that nothing changes.
 
 1. **Compute the figures** for the packages the item pulls in, its own and its parts':
    ```sh
-   python3 -I scripts/pkg-weight.py x11-repo electron42
-   # 89 packages beyond a stock Termux: 152.5 MB to download, 862.3 MB on disk
-   # largest on disk: electron42 414 MB, libllvm 174 MB, gtk3 32 MB, ...
-   # pkg-size=153,862
+   python3 -I scripts/pkg-weight.py x11-repo electron43
+   # 142 packages beyond a stock Termux: 193.8 MB to download, 1039.6 MB on disk
+   # largest on disk: electron43 426 MB, libllvm 174 MB, ffmpeg 39 MB, ...
+   # pkg-size=194,1040
    ```
    It reads Termux's main and x11 package indexes for aarch64 (`--arch x86_64` for the other
    build), follows every dependency, and leaves out what a fresh Termux has. `--index FILE` reads
@@ -395,9 +395,9 @@ to go ahead. Both happen only above 50 MB of either; below that nothing changes.
 ### terminal-browser
 
 terminal-browser is the archive item that pulls in large packages: its row requires
-`electron42`, which requires `x11-repo`, and carries `pkg-size=153,862` from `pkg-weight.py`. It
+`electron43`, which requires `x11-repo`, and carries `pkg-size=194,1040` from `pkg-weight.py`. It
 first shipped with tlstore 0.17; an engine older than 0.16 cannot install it (0.15 would try
-`x11-repo electron42` in one call and fail cleanly, and 0.13 refuses an archive).
+`x11-repo electron43` in one call and fail cleanly, and 0.13 refuses an archive).
 
 ## Pinning a readme or a hero picture
 

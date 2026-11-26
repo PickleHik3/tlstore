@@ -22,7 +22,7 @@ NDK plus a sysroot assembled with `dpkg-deb -x`.
 | `build-tl-priv.sh` | `tl-priv`, the lane's client (`tl-priv/tl-priv.c`), fully static | NDK |
 | `build-herdr.sh` | herdr, built from source for bionic (Rust, plus Zig 0.16.0 for libghostty-vt, which the script downloads and verifies itself), as a `.tar.gz` app tree behind a launcher script that turns its terminal notifications on in Termux Launcher; `0001-herdr-android.patch` | rustup (`<arch>-linux-android`), NDK, git, curl, xz, GNU tar, gzip |
 | `fetch-launcher-skills.sh` | the launcher's agent skills, one `.tar.gz` each, packed by the launcher's own `scripts/pack-agent-skills.sh` at a pinned commit (not built; the same on every processor) | git, GNU tar, gzip |
-| `build-terminal-browser.sh` | terminal-browser as a `.tar.gz` app tree, from our fork: its JavaScript built as upstream releases it, `pixel.node` and `agent-browser` built for Android, Termux's `electron42` in place of upstream's Electron | rustup `<arch>-linux-android` + NDK, Node 22 + pnpm 10.13.1, GNU tar |
+| `build-terminal-browser.sh` | terminal-browser as a `.tar.gz` app tree, from our fork: its JavaScript built as upstream releases it, `pixel.node` and `agent-browser` built for Android, Termux's `electron43` in place of upstream's Electron | rustup `<arch>-linux-android` + NDK, Node 22 + pnpm 10.13.1, GNU tar |
 
 `btop` and `tl-priv` are edition-agnostic: both are linked `-static` against the NDK's Bionic
 `libc.a`, have no interpreter, no `NEEDED` entries and no prefix baked in. They have to be — the
@@ -250,8 +250,8 @@ Device-verified 2026-08-16 on Pong (A065, Android 16), running inside the launch
   electron or agent-browser. Needs Node 22+ and pnpm 10.13.1. At v0.13.4 the result matches
   upstream's Linux tarball byte for byte, but for the pieces replaced below. `VERSION` stays
   upstream's (`v0.16.1`): the browser compares it with upstream's latest release.
-- Runs on Termux's `electron42` (42.x, x11 repository), not upstream's patched Electron 44, which is
-  glibc. `electron/pixel` is a two-line script that execs `$PREFIX/lib/electron42/electron`.
+- Runs on Termux's `electron43` (43.x, x11 repository), not upstream's patched Electron 44, which is
+  glibc. `electron/pixel` is a two-line script that execs `$PREFIX/lib/electron43/electron`.
 - `pixel.node` is the fork's, built for Android: no clipboard image paste (arboard
   has no Android backend) and no POSIX shared memory (the frame transport probe falls back to file
   frames, which the launcher's terminal supports). libc++ is linked statically; the recipe fails if

@@ -913,9 +913,9 @@ and `tlstore update` offers.
 
 ## Revision 15 — large Termux packages, said first; a package that adds a source (tlstore 0.16)
 
-terminal-browser (an archive, Revision 14) runs on Termux's `electron42` package, which lives in
-Termux's x11 repository. On a stock Termux that repository is off, so `pkg install electron42`
-fails, and once it is on, Electron and what it needs come to about 153 MB to download and 862 MB
+terminal-browser (an archive, Revision 14) runs on Termux's `electron43` package, which lives in
+Termux's x11 repository. On a stock Termux that repository is off, so `pkg install electron43`
+fails, and once it is on, Electron and what it needs come to about 194 MB to download and 1040 MB
 on disk. Both have to be handled before that item can ship honestly: the store says what it pulls
 in, and turns the repository on itself.
 
@@ -934,8 +934,8 @@ item's own size, so the figures ride in options beside the other things the engi
 | `repo=1` | a `pkg` item whose package adds a package source (`x11-repo`). Refused on any other kind |
 
 terminal-browser's parts are two hidden `pkg` rows, both `com.termux` only (Termux's repositories
-build for that prefix): `x11-repo` (`repo=1`) and `electron42`, which requires `x11-repo`. The
-terminal-browser row requires `electron42` and carries `pkg-size=153,862` and `pkg-what=`; it is
+build for that prefix): `x11-repo` (`repo=1`) and `electron43`, which requires `x11-repo`. The
+terminal-browser row requires `electron43` and carries `pkg-size=194,1040` and `pkg-what=`; it is
 added once `build.yml` has published its asset (`docs/maintainer/catalog.md` has it ready).
 
 ### The threshold
@@ -979,7 +979,7 @@ so it says the catalog's `pkg-size=` figures when they are over the threshold.
 |---|---|
 | the two lines | apt's: `The packages this needs from Termux take <n> MB to download and <m> MB more on disk.` |
 | nothing to install, exit 0 | none: everything is here, nothing is said |
-| an error (a package it does not know: electron42 before the x11 source is read), or no apt (pacman) | the sum of the `pkg-size=` figures of the plan's install rows, said as the item page says it |
+| an error (a package it does not know: electron43 before the x11 source is read), or no apt (pacman) | the sum of the `pkg-size=` figures of the plan's install rows, said as the item page says it |
 | an error, and no row has `pkg-size=` | none: the install goes ahead without a figure |
 
 Over the threshold the line is said, then:
@@ -1001,8 +1001,8 @@ the store. A confirm screen built on the plan is still for later (Revision 13).
 ### A package that adds a package source
 
 `plan_packages` makes one package-manager call for the whole plan (Revision 13). With
-`x11-repo` and `electron42` in it, that call fails as a whole: apt resolves every name before it
-installs anything, and electron42 is in a source it has not read. So a `repo=1` row's packages that
+`x11-repo` and `electron43` in it, that call fails as a whole: apt resolves every name before it
+installs anything, and electron43 is in a source it has not read. So a `repo=1` row's packages that
 are not here yet go first, in a call of their own (`pkg install -y x11-repo`), then the lists are
 read again (`apt-get update`; on pacman the next call's `-Sy` does it), then the rest as before.
 `pkg` alone would not do it: it refreshes only when its main list is old, which a source added a
@@ -1010,7 +1010,7 @@ moment ago never is.
 
 The flag is on the row, not found by watching `$PREFIX/etc/apt/sources.list.d` for a new file: the
 split has to be known before the first call, and only the catalog knows that in advance. A file
-appearing afterwards could trigger the refresh, but the electron42 in the same call would already
+appearing afterwards could trigger the refresh, but the electron43 in the same call would already
 have failed. The flag also costs nothing when the package is already there: no separate call, no
 refresh.
 
@@ -1018,14 +1018,14 @@ When the first call or the refresh fails, the rows that need the source cannot b
 of the call leaves out the `repo=1` rows' packages and those of rows that require one of them; the
 others install as usual. Then, as always, a `pkg` row whose packages are not all present fails
 (`the package manager could not install x11-repo`), and what needs it is skipped (`needs
-electron42, which did not install`).
+electron43, which did not install`).
 
 ### Older engines
 
 An engine older than 0.16 skips all three options. It lists the rows as before (`x11-repo` and
-`electron42` are hidden parts), shows no `Packages` line, asks nothing more, and installs items
+`electron43` are hidden parts), shows no `Packages` line, asks nothing more, and installs items
 without large packages exactly as before. Installing terminal-browser makes its one call with
-`x11-repo electron42` together; apt refuses it, nothing is installed, and the rows end failed and
+`x11-repo electron43` together; apt refuses it, nothing is installed, and the rows end failed and
 skipped. 0.13 (what phones run before 0.15) refuses the archive anyway. Nothing is written in
 either case. `scripts/test-weight.sh` checks this against the `dev` branch's `dist/tlstore` and
 `engine/tlstore`. As in Revisions 10, 12 and 14, `TLSTORE_VERSION` moves to 0.16 and the

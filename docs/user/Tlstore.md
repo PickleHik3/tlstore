@@ -146,7 +146,7 @@ ones it added and clear what it downloaded. Say no and they simply stay.
 ## Items that bring large packages with them
 
 A few items need big packages from Termux. terminal-browser, for one, runs on Termux's Electron,
-which with the libraries it needs comes to about 153 MB to download and 862 MB on disk on a fresh
+which with the libraries it needs comes to about 194 MB to download and 1040 MB on disk on a fresh
 Termux. The store tells you before anything is installed, whenever the packages come to more than
 50 MB:
 
@@ -157,8 +157,8 @@ Termux. The store tells you before anything is installed, whenever the packages 
 
   ```
   $ tlstore install terminal-browser
-  Installing: x11-repo, electron42, terminal-browser
-  The packages this needs from Termux take 150 MB to download and 860 MB more on disk.
+  Installing: x11-repo, electron43, terminal-browser
+  The packages this needs from Termux take 190 MB to download and 1040 MB more on disk.
   Go ahead? [Y/n]
   ```
 
