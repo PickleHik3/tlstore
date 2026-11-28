@@ -9,8 +9,8 @@ set -euo pipefail
 
 FASTFETCH_URL="https://github.com/fastfetch-cli/fastfetch.git"
 # scripts/upstream-watch.sh moves the pins below to upstream's latest release; keep their shape.
-FASTFETCH_COMMIT="8c9d9c0449dd515e0088c4a60a38d2dc40c5ccd0"   # v2.71.0
-FASTFETCH_VERSION="2.71.0"
+FASTFETCH_COMMIT="27b8f8bb21f19241b7b68f79af49f35ad61f4edc"   # v2.72.0
+FASTFETCH_VERSION="2.72.0"
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PATCH="$SCRIPT_DIR/../termux/fastfetch/0001-animate-by-default.patch"
 
